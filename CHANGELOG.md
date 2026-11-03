@@ -1,3 +1,9 @@
+## 0.1.0-dev.12 — 2026-11-02
+
+* Added an experimental iPhone SwiftUI reader that uses Vision for square-candidate localization and calls the existing C++ C ABI for pixel decoding.
+* Added an Xcode project, camera permission copy, live result display, and separate Vision/CKey timing readouts; the app compiles `src/ckey.cpp` directly without duplicating encoding or decoding logic.
+* Recorded iPhone build/run instructions and current camera-validation limits. The app has not been compiled or tested on an Apple device in this environment.
+
 ## 0.1.0-dev.11 — 2026-11-03
 
 * Added C ABI grayscale image decoding for a caller-supplied symbol quadrilateral, with projective rectification, calibration-key checks, polarity normalization, data sampling, RS correction, and CRC-32C validation.
