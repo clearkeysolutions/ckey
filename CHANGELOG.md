@@ -1,3 +1,10 @@
+## 0.1.0-dev.8 — 2026-11-03
+
+* Increased the central clear radius and moved the four rings outward into a tighter radial group.
+* Sized each ring dot to 72% of its adjacent-slot chord, so marks are visibly sized and closely spaced at every ring radius.
+* Set the Ring Key arc width to one dot diameter and its centerline length to exactly four slot intervals.
+* Versioned the geometry as CKey Format 0.6.0 / format byte 06; the RS(77,26) code and ABI remain unchanged.
+
 ## 0.1.0-dev.7 — 2026-11-03
 
 * Fixed oversized ring dots: SVG circles inherited the parent group’s default 1-module stroke. Circle marks now explicitly use no stroke, rendering at their specified 0.12-module diameter.

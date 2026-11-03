@@ -197,7 +197,7 @@ std::vector<Node> data_nodes() {
         else {
             const int ring = layer - 1;
             if (ring_key(ring, slot)) continue;
-            const double radius = 2.8 + 1.2 * ring;
+            const double radius = 3.6 + 0.8 * ring;
             const double a = kTau * slot / 72.0;
             polar_layers[layer].push_back({true, false, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), -1, -1, ring, slot});
         }
@@ -224,6 +224,11 @@ void set_status(ckey_diagnostics *d, ckey_status s, const char *m) {
     d->abi_version = CKEY_ABI_VERSION; d->status = s;
     d->corrected_symbols = 0; d->erasures_used = 0;
     std::snprintf(d->message, sizeof(d->message), "%s", m);
+}
+
+double polar_dot_radius(double ring_radius) {
+    // Dot diameter is 72% of the adjacent slot-center chord.
+    return 0.36 * (2.0 * ring_radius * std::sin(kTau / 144.0));
 }
 
 void svg_circle(std::ostringstream &o, double x, double y, double r) {
@@ -317,11 +322,12 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
           << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.22\"/>";
     }
     // Permanent Ring Key on the outermost inner data ring.
-    const double rr = 6.4;
-    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), .06); }
+    const double rr = 6.0;
+    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), polar_dot_radius(rr)); }
     const double a0 = kTau * 21.5 / 72.0, a1 = kTau * 25.5 / 72.0;
+    const double ring_key_dot_diameter = 2.0 * polar_dot_radius(rr);
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
-      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.12\" stroke-linecap=\"butt\"/>";
+      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"butt\"/>";
     for (size_t i = 0; i < kBits; ++i) if (code_bit(s, i)) {
         const Node &n = nodes[i];
         if (n.dial) {
@@ -329,7 +335,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
             o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + 9.5 * std::sin(a) << ' ' << kCenter - 9.5 * std::cos(a)
               << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\"/>";
         }
-        else if (n.polar) svg_circle(o, n.x, n.y, .06);
+        else if (n.polar) svg_circle(o, n.x, n.y, polar_dot_radius(std::hypot(n.x - kCenter, n.y - kCenter)));
         else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
     o << "</g></svg>";
