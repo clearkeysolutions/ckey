@@ -80,6 +80,30 @@ int main() {
     assert(text_svg.find("CKey text symbol profile 2") != std::string::npos);
     assert(text_svg.find("stroke-width=\"0.2000\" stroke-linecap=\"round\"") != std::string::npos);
 
+    std::array<uint8_t, CKEY_EXTENDED_PAYLOAD_MAX_BYTES> extended_payload{};
+    for (size_t i=0;i<extended_payload.size();++i) extended_payload[i]=static_cast<uint8_t>((i*73+19)&0xff);
+    ckey_extended_symbol extended{};
+    assert(ckey_encode_extended(extended_payload.data(),extended_payload.size(),&extended,&d)==CKEY_OK);
+    assert(extended.side==116 && extended.codeword[0]!=0);
+    std::array<uint8_t, CKEY_EXTENDED_PAYLOAD_MAX_BYTES> extended_decoded{}; size_t extended_length=0;
+    assert(ckey_decode_extended(extended.codeword,sizeof(extended.codeword),extended_decoded.data(),extended_decoded.size(),&extended_length,&d)==CKEY_OK);
+    assert(extended_length==extended_payload.size() && extended_decoded==extended_payload);
+    // Every RS(255,223) block corrects 16 unknown byte errors. Because public
+    // codeword bytes are interleaved, this simulates distributed local loss.
+    auto damaged_extended=extended;
+    for (size_t block=0;block<CKEY_EXTENDED_BLOCK_COUNT;++block) for (size_t i=0;i<16;++i)
+        damaged_extended.codeword[(i*13%CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK)*CKEY_EXTENDED_BLOCK_COUNT+block]^=static_cast<uint8_t>(0x31+i+block);
+    extended_decoded.fill(0); extended_length=0;
+    assert(ckey_decode_extended(damaged_extended.codeword,sizeof(damaged_extended.codeword),extended_decoded.data(),extended_decoded.size(),&extended_length,&d)==CKEY_OK);
+    assert(extended_length==extended_payload.size() && extended_decoded==extended_payload && d.corrected_symbols==160);
+    size_t extended_needed=0;
+    assert(ckey_render_extended_svg(&extended,16,nullptr,0,&extended_needed)==CKEY_INSUFFICIENT_BUFFER);
+    std::string extended_svg(extended_needed,'\0');
+    assert(ckey_render_extended_svg(&extended,16,extended_svg.data(),extended_svg.size(),&extended_needed)==CKEY_OK);
+    assert(extended_svg.find("CKey extended symbol profile 3")!=std::string::npos);
+    assert(extended_svg.find("stroke-width=\"0.2800\"")!=std::string::npos);
+    assert(extended_svg.find("viewBox=\"-4 -4 124 124\"")!=std::string::npos);
+
     size_t needed=0;
     assert(ckey_render_svg(&a, 16, nullptr, 0, &needed)==CKEY_INSUFFICIENT_BUFFER);
     assert(needed>1000);
