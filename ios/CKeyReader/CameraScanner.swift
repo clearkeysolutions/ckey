@@ -24,6 +24,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var frameIndex = 0
     private var hasConfigured = false
     private var didDecode = false
+    private var lastDecodeDiagnostic = ""
     private let rectangleRequest: VNDetectRectanglesRequest = {
         let request = VNDetectRectanglesRequest()
         // CKey's rounded border and inset arc finders are less box-like than
@@ -164,14 +165,23 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // This avoids running a calibration search on every candidate and
             // keeps the common locator path responsive at every symbol size.
             for quad in borderQuads.prefix(4) {
-                let decodeStarted = CACurrentMediaTime()
-                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                  locatorQuad: quad, denseQuad: quad) {
-                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                    publishDecoded(decoded.bytes, profile: decoded.profile,
-                                   detectionMilliseconds: borderDetectionMilliseconds,
-                                   decodeMilliseconds: decodeElapsed, candidates: borderQuads.count)
-                    return
+                // The component detector returns the visible outer stroke
+                // bounds. All current profiles place that stroke slightly
+                // inside their canonical sampling field (about 1.2%). Keep
+                // the raw measurement too for legacy artwork whose boundary
+                // is already aligned to the field.
+                let observed = quadPoints(quad)
+                for scale in [1.0, 1.0123, 1.0357] {
+                    let measured = expandedCKeyQuad(observed, expansion: scale, offsetX: 0, offsetY: 0)
+                    let decodeStarted = CACurrentMediaTime()
+                    if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                                      locatorQuad: measured, denseQuad: measured) {
+                        let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
+                        publishDecoded(decoded.bytes, profile: decoded.profile,
+                                       detectionMilliseconds: borderDetectionMilliseconds,
+                                       decodeMilliseconds: decodeElapsed, candidates: borderQuads.count)
+                        return
+                    }
                 }
             }
 
@@ -194,7 +204,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                         return
                     }
                 }
-                publishProgress(borderQuads.isEmpty ? "Searching for CKey geometry…" : "Checking CKey calibration…",
+                publishProgress(borderQuads.isEmpty ? "Searching for CKey geometry…" : "Checking CKey · \(lastDecodeDiagnostic)",
                                 detectionMilliseconds: borderDetectionMilliseconds,
                                 candidates: borderQuads.count)
                 return
@@ -254,7 +264,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 }
             }
             if !observations.isEmpty {
-                publishProgress("Symbol-like shape found; checking CKey keys and error correction…",
+                publishProgress("Symbol-like shape found · \(lastDecodeDiagnostic)",
                                 detectionMilliseconds: detectionElapsed, candidates: observations.count + borderQuads.count,
                                 force: true)
             }
@@ -374,6 +384,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
         }
         if locatorStatus == CKEY_OK { return (locator, "Profile 1 · Locator") }
+        let locatorDiagnostic = diagnosticText(diagnostic)
 
         // Dense profiles share the actual native sampler and only succeed after
         // their independent RS and CRC validation. They are intentionally tried
@@ -387,6 +398,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
         }
         if textStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 2 · Text") }
+        let textDiagnostic = diagnosticText(diagnostic)
 
         length = 0
         let extendedStatus = dense.withUnsafeMutableBufferPointer { output in
@@ -396,7 +408,15 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
         }
         if extendedStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 3 · Extended") }
+        lastDecodeDiagnostic = "P1 \(locatorDiagnostic) · P2 \(textDiagnostic) · P3 \(diagnosticText(diagnostic))"
         return nil
+    }
+
+    private func diagnosticText(_ diagnostic: ckey_diagnostics) -> String {
+        withUnsafeBytes(of: diagnostic.message) { bytes in
+            guard let address = bytes.baseAddress else { return "decoder failed" }
+            return String(cString: address.assumingMemoryBound(to: CChar.self))
+        }
     }
 
     private func publishDecoded(_ payload: [UInt8], profile: String, detectionMilliseconds: Double,

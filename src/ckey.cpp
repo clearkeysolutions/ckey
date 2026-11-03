@@ -29,6 +29,7 @@ constexpr size_t kExtendedBlockBytes = CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK;
 constexpr size_t kExtendedCodewordBytes = CKEY_EXTENDED_CODEWORD_BYTES;
 constexpr size_t kExtendedBits = kExtendedCodewordBytes * 8;
 constexpr int kExtendedSide = 116;
+constexpr std::array<size_t, CKEY_EXTENDED_TIER_COUNT> kExtendedTierCapacities = {256, 384, 512, 768, 1024, 1536, 2048};
 static_assert(kExtendedBlocks * kExtendedBlockBytes == kExtendedCodewordBytes);
 constexpr int kSide = 29;
 constexpr double kCenter = 14.5;
@@ -243,6 +244,39 @@ uint32_t crc32c(const uint8_t *data, size_t len) {
         for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0x82f63b78u & (0u - (crc & 1u)));
     }
     return ~crc;
+}
+
+// Normative SplitMix32 fill for unused frame bytes. This is visual decorrelation,
+// not encryption or error correction; the complete padded frame remains under RS.
+uint8_t padding_byte(uint32_t &state) {
+    state += 0x9e3779b9u;
+    uint32_t value = state;
+    value = (value ^ (value >> 16)) * 0x85ebca6bu;
+    value = (value ^ (value >> 13)) * 0xc2b2ae35u;
+    value ^= value >> 16;
+    return static_cast<uint8_t>(value);
+}
+
+void fill_padding(uint8_t *frame, size_t begin, size_t end, size_t seed_length) {
+    uint32_t state = crc32c(frame, seed_length);
+    for (size_t i = begin; i < end; ++i) frame[i] = padding_byte(state);
+}
+
+bool padding_matches(const uint8_t *frame, size_t begin, size_t end, size_t seed_length) {
+    uint32_t state = crc32c(frame, seed_length);
+    for (size_t i = begin; i < end; ++i) if (frame[i] != padding_byte(state)) return false;
+    return true;
+}
+
+size_t extended_tier_index(ckey_extended_tier tier, size_t payload_length) {
+    if (tier == CKEY_EXTENDED_TIER_AUTO) {
+        for (size_t i = 0; i < kExtendedTierCapacities.size(); ++i)
+            if (payload_length <= kExtendedTierCapacities[i]) return i;
+        return kExtendedTierCapacities.size();
+    }
+    for (size_t i = 0; i < kExtendedTierCapacities.size(); ++i)
+        if (static_cast<size_t>(tier) == kExtendedTierCapacities[i]) return i;
+    return kExtendedTierCapacities.size();
 }
 
 struct Node { bool polar; bool dial; double x, y; int row, col; int ring, slot; };
@@ -622,8 +656,9 @@ ckey_status ckey_encode_text(const uint8_t *payload, size_t payload_len,
     if (payload_len > CKEY_TEXT_PAYLOAD_MAX_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "text profile payload exceeds 200 bytes"); return CKEY_INVALID_ARGUMENT; }
     std::memset(out, 0, sizeof(*out));
     out->abi_version = CKEY_ABI_VERSION; out->side = kSide; out->payload_length = static_cast<uint32_t>(payload_len);
-    // Frame: magic, format 15, profile 2, u16be payload length, payload,
-    // CRC-32C over all preceding frame bytes, then deterministic zero padding.
+    // Frame: magic, format 18, profile 2, u16be payload length, payload,
+    // CRC-32C, then deterministic SplitMix32 visual fill. All 210 data bytes
+    // remain protected by the full RS(255,210) code.
     std::vector<uint8_t> codeword(kTextCodewordBytes, 0);
     codeword[0] = 0xc7; codeword[1] = 0x4b; codeword[2] = CKEY_TEXT_FORMAT_VERSION; codeword[3] = 2;
     codeword[4] = static_cast<uint8_t>(payload_len >> 8); codeword[5] = static_cast<uint8_t>(payload_len);
@@ -632,9 +667,10 @@ ckey_status ckey_encode_text(const uint8_t *payload, size_t payload_len,
     const size_t crc_index = 6 + payload_len;
     codeword[crc_index] = static_cast<uint8_t>(crc >> 24); codeword[crc_index + 1] = static_cast<uint8_t>(crc >> 16);
     codeword[crc_index + 2] = static_cast<uint8_t>(crc >> 8); codeword[crc_index + 3] = static_cast<uint8_t>(crc);
+    fill_padding(codeword.data(), crc_index + 4, kTextDataBytes, crc_index + 4);
     rs_encode_generic(codeword, kTextDataBytes, kTextParityBytes);
     std::memcpy(out->codeword, codeword.data(), codeword.size());
-    set_status(diag, CKEY_OK, "encoded text profile v2");
+    set_status(diag, CKEY_OK, "encoded text profile v3");
     return CKEY_OK;
 }
 
@@ -648,7 +684,7 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     uint32_t corrections = 0;
     if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
     if (corrected[0] != 0xc7 || corrected[1] != 0x4b ||
-        (corrected[2] != 9u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
+        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
     }
     const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
@@ -660,6 +696,10 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
                               (static_cast<uint32_t>(corrected[crc_index + 1]) << 16) |
                               (static_cast<uint32_t>(corrected[crc_index + 2]) << 8) | corrected[crc_index + 3];
     if (crc32c(corrected.data(), crc_index) != expected) { set_status(diag, CKEY_INTEGRITY_FAILURE, "text CRC-32C validation failed"); return CKEY_INTEGRITY_FAILURE; }
+    if (corrected[2] == CKEY_TEXT_FORMAT_VERSION &&
+        !padding_matches(corrected.data(), crc_index + 4, kTextDataBytes, crc_index + 4)) {
+        set_status(diag, CKEY_INTEGRITY_FAILURE, "text visual-fill validation failed"); return CKEY_INTEGRITY_FAILURE;
+    }
     std::memcpy(payload, corrected.data() + 6, length); *out_payload_len = length;
     set_status(diag, CKEY_OK, corrections ? "decoded text profile; Reed-Solomon symbols corrected" : "decoded text profile; no correction needed");
     if (diag) diag->corrected_symbols = corrections;
@@ -668,50 +708,112 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
 
 ckey_status ckey_encode_extended(const uint8_t *payload, size_t payload_len,
                                  ckey_extended_symbol *out, ckey_diagnostics *diag) {
+    return ckey_encode_extended_tiered(payload, payload_len, CKEY_EXTENDED_TIER_AUTO, out, diag);
+}
+
+ckey_status ckey_encode_extended_tiered(const uint8_t *payload, size_t payload_len,
+                                        ckey_extended_tier requested_tier,
+                                        ckey_extended_symbol *out, ckey_diagnostics *diag) {
     if (!payload || !out) { set_status(diag, CKEY_INVALID_ARGUMENT, "extended payload and output are required"); return CKEY_INVALID_ARGUMENT; }
     if (payload_len == 0 || payload_len > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "extended profile payload must contain 1 to 2048 bytes"); return CKEY_INVALID_ARGUMENT; }
-    std::array<uint8_t, kExtendedBlocks * kExtendedDataBytes> framed{};
+    const size_t tier_index = extended_tier_index(requested_tier, payload_len);
+    if (tier_index == kExtendedTierCapacities.size() || payload_len > kExtendedTierCapacities[tier_index]) {
+        set_status(diag, CKEY_INVALID_ARGUMENT, "payload does not fit the selected extended capacity tier"); return CKEY_INVALID_ARGUMENT;
+    }
+    const size_t data_bytes = (11 + kExtendedTierCapacities[tier_index] + kExtendedBlocks - 1) / kExtendedBlocks;
+    const size_t parity_bytes = kExtendedBlockBytes - data_bytes;
+    std::vector<uint8_t> framed(kExtendedBlocks * data_bytes, 0);
     framed[0]=0xc7; framed[1]=0x4b; framed[2]=CKEY_EXTENDED_FORMAT_VERSION; framed[3]=3;
-    framed[4]=static_cast<uint8_t>(payload_len >> 8); framed[5]=static_cast<uint8_t>(payload_len);
-    std::memcpy(framed.data()+6,payload,payload_len);
-    const size_t crc_index=6+payload_len; const uint32_t crc=crc32c(framed.data(),crc_index);
+    framed[4]=static_cast<uint8_t>(tier_index + 1);
+    framed[5]=static_cast<uint8_t>(payload_len >> 8); framed[6]=static_cast<uint8_t>(payload_len);
+    std::memcpy(framed.data()+7,payload,payload_len);
+    const size_t crc_index=7+payload_len; const uint32_t crc=crc32c(framed.data(),crc_index);
     framed[crc_index]=static_cast<uint8_t>(crc>>24); framed[crc_index+1]=static_cast<uint8_t>(crc>>16);
     framed[crc_index+2]=static_cast<uint8_t>(crc>>8); framed[crc_index+3]=static_cast<uint8_t>(crc);
+    fill_padding(framed.data(), crc_index + 4, framed.size(), crc_index + 4);
     std::array<std::array<uint8_t,kExtendedBlockBytes>,kExtendedBlocks> blocks{};
     for (size_t block=0;block<kExtendedBlocks;++block) {
-        std::copy_n(framed.data()+block*kExtendedDataBytes,kExtendedDataBytes,blocks[block].begin());
+        std::copy_n(framed.data()+block*data_bytes,data_bytes,blocks[block].begin());
         std::vector<uint8_t> work(blocks[block].begin(),blocks[block].end());
-        rs_encode_generic(work,kExtendedDataBytes,kExtendedParityBytes);
+        rs_encode_generic(work,data_bytes,parity_bytes);
         std::copy(work.begin(),work.end(),blocks[block].begin());
     }
     std::memset(out,0,sizeof(*out)); out->abi_version=CKEY_ABI_VERSION; out->side=kExtendedSide; out->payload_length=static_cast<uint32_t>(payload_len);
     // Byte interleaving maps local optical damage across all independent blocks.
     for (size_t byte=0;byte<kExtendedBlockBytes;++byte) for (size_t block=0;block<kExtendedBlocks;++block)
         out->codeword[byte*kExtendedBlocks+block]=blocks[block][byte];
-    set_status(diag,CKEY_OK,"encoded extended profile v3; 10 interleaved RS blocks"); return CKEY_OK;
+    char message[96]; std::snprintf(message, sizeof(message), "encoded profile 3 tier %zu; RS(255,%zu) x 10", kExtendedTierCapacities[tier_index], data_bytes);
+    set_status(diag,CKEY_OK,message); return CKEY_OK;
 }
 
 ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
                                  uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len,
                                  ckey_diagnostics *diag) {
     if (!codeword || !out_payload || !out_payload_len || codeword_len != kExtendedCodewordBytes) { set_status(diag,CKEY_INVALID_ARGUMENT,"extended decode requires a 2550-byte codeword and output length"); return CKEY_INVALID_ARGUMENT; }
-    std::array<std::array<uint8_t,kExtendedBlockBytes>,kExtendedBlocks> blocks{};
-    for (size_t byte=0;byte<kExtendedBlockBytes;++byte) for (size_t block=0;block<kExtendedBlocks;++block) blocks[block][byte]=codeword[byte*kExtendedBlocks+block];
-    std::array<uint8_t,kExtendedBlocks*kExtendedDataBytes> framed{}; uint32_t corrections=0;
-    for (size_t block=0;block<kExtendedBlocks;++block) {
-        std::vector<uint8_t> work(blocks[block].begin(),blocks[block].end()); uint32_t fixed=0;
-        if (!rs_correct_generic(work,kExtendedParityBytes,fixed)) { set_status(diag,CKEY_UNCORRECTABLE,"extended Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
-        corrections+=fixed; std::copy_n(work.begin(),kExtendedDataBytes,framed.data()+block*kExtendedDataBytes);
+    const auto attempt = [&](size_t data_bytes, size_t parity_bytes, bool tiered) -> ckey_status {
+        std::vector<uint8_t> framed(kExtendedBlocks * data_bytes, 0);
+        uint32_t corrections = 0;
+        for (size_t block=0; block<kExtendedBlocks; ++block) {
+            std::vector<uint8_t> work(kExtendedBlockBytes);
+            for (size_t byte=0; byte<kExtendedBlockBytes; ++byte)
+                work[byte] = codeword[byte*kExtendedBlocks+block];
+            uint32_t fixed=0;
+            if (!rs_correct_generic(work, parity_bytes, fixed)) return CKEY_UNCORRECTABLE;
+            corrections += fixed;
+            std::copy_n(work.begin(), data_bytes, framed.data()+block*data_bytes);
+        }
+        if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[3]!=3) return CKEY_INTEGRITY_FAILURE;
+        size_t length=0, payload_offset=0, crc_index=0;
+        if (tiered) {
+            if (framed[2] != CKEY_EXTENDED_FORMAT_VERSION || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
+            const size_t selected = framed[4]-1;
+            if (data_bytes != (11+kExtendedTierCapacities[selected]+kExtendedBlocks-1)/kExtendedBlocks) return CKEY_INTEGRITY_FAILURE;
+            length=(static_cast<size_t>(framed[5])<<8)|framed[6]; payload_offset=7; crc_index=payload_offset+length;
+            if (length==0 || length>kExtendedTierCapacities[selected] || crc_index+4>framed.size()) return CKEY_INTEGRITY_FAILURE;
+        } else {
+            if (framed[2]!=10u && framed[2]!=16u) return CKEY_INTEGRITY_FAILURE;
+            length=(static_cast<size_t>(framed[4])<<8)|framed[5]; payload_offset=6; crc_index=payload_offset+length;
+            if (length==0 || length>CKEY_EXTENDED_PAYLOAD_MAX_BYTES || crc_index+4>framed.size()) return CKEY_INTEGRITY_FAILURE;
+        }
+        const uint32_t expected=(static_cast<uint32_t>(framed[crc_index])<<24)|(static_cast<uint32_t>(framed[crc_index+1])<<16)|(static_cast<uint32_t>(framed[crc_index+2])<<8)|framed[crc_index+3];
+        if (crc32c(framed.data(),crc_index)!=expected) return CKEY_INTEGRITY_FAILURE;
+        if (tiered && !padding_matches(framed.data(),crc_index+4,framed.size(),crc_index+4)) return CKEY_INTEGRITY_FAILURE;
+        if (out_capacity<length) {
+            set_status(diag,CKEY_INSUFFICIENT_BUFFER,"extended output buffer is smaller than decoded payload");
+            return CKEY_INSUFFICIENT_BUFFER;
+        }
+        std::memcpy(out_payload,framed.data()+payload_offset,length); *out_payload_len=length;
+        set_status(diag,CKEY_OK,corrections ? "decoded extended profile; Reed-Solomon symbols corrected" : "decoded extended profile; no correction needed");
+        if (diag) diag->corrected_symbols=corrections;
+        return CKEY_OK;
+    };
+
+    // Preserve the original Profile 3 RS(255,223) frame reader. The format and
+    // profile bytes are the third and fourth data bytes in block zero. Checking
+    // them before trying every new parity split avoids doing eight full RS
+    // decodes for an unrelated square candidate in the live camera path.
+    const bool tier_hint_valid = codeword[40] > 0 && codeword[40] <= kExtendedTierCapacities.size();
+    const bool likely_tiered = codeword[20]==CKEY_EXTENDED_FORMAT_VERSION ||
+                               (codeword[30]==3 && tier_hint_valid);
+    if (codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
+        const ckey_status legacy=attempt(kExtendedDataBytes,kExtendedParityBytes,false);
+        if (legacy==CKEY_OK || legacy==CKEY_INSUFFICIENT_BUFFER) return legacy;
     }
-    if (framed[0]!=0xc7 || framed[1]!=0x4b ||
-        (framed[2]!=10u && framed[2]!=CKEY_EXTENDED_FORMAT_VERSION) || framed[3]!=3) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE; }
-    const size_t length=(static_cast<size_t>(framed[4])<<8)|framed[5], crc_index=6+length;
-    if (length==0 || length>CKEY_EXTENDED_PAYLOAD_MAX_BYTES || crc_index+4>framed.size() || out_capacity<length) { set_status(diag,CKEY_INSUFFICIENT_BUFFER,"extended payload length exceeds profile or output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
-    const uint32_t expected=(static_cast<uint32_t>(framed[crc_index])<<24)|(static_cast<uint32_t>(framed[crc_index+1])<<16)|(static_cast<uint32_t>(framed[crc_index+2])<<8)|framed[crc_index+3];
-    if (crc32c(framed.data(),crc_index)!=expected) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended CRC-32C validation failed"); return CKEY_INTEGRITY_FAILURE; }
-    std::memcpy(out_payload,framed.data()+6,length); *out_payload_len=length;
-    set_status(diag,CKEY_OK,corrections ? "decoded extended profile; Reed-Solomon symbols corrected" : "decoded extended profile; no correction needed"); if (diag) diag->corrected_symbols=corrections;
-    return CKEY_OK;
+    if (!likely_tiered) { set_status(diag,CKEY_UNCORRECTABLE,"sampled frame does not identify a supported Profile 3 format"); return CKEY_UNCORRECTABLE; }
+
+    // New tiers share the same 2,550-byte optical codeword. The selected tier
+    // changes data/parity split per block, trading capacity for ECC while
+    // keeping the full visual lattice populated. Try the indicated tier first.
+    std::array<size_t, CKEY_EXTENDED_TIER_COUNT> order{};
+    for(size_t i=0;i<order.size();++i) order[i]=i;
+    const size_t hinted = codeword[40] > 0 && codeword[40] <= order.size() ? codeword[40]-1 : order.size();
+    if(hinted<order.size()) { order[0]=hinted; size_t next=1; for(size_t i=0;i<order.size();++i) if(i!=hinted) order[next++]=i; }
+    for(size_t tier:order) {
+        const size_t data_bytes=(11+kExtendedTierCapacities[tier]+kExtendedBlocks-1)/kExtendedBlocks;
+        const ckey_status result=attempt(data_bytes,kExtendedBlockBytes-data_bytes,true);
+        if(result==CKEY_OK || result==CKEY_INSUFFICIENT_BUFFER) return result;
+    }
+    set_status(diag,CKEY_UNCORRECTABLE,"no Profile 3 capacity tier passed Reed-Solomon, frame, padding, and CRC checks"); return CKEY_UNCORRECTABLE;
 }
 
 double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t height,

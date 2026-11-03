@@ -1,3 +1,12 @@
+## 0.1.0-dev.42 — 2026-11-03
+
+* Added Profile 3 capacity/ECC tiers at 256, 384, 512, 768, 1,024, 1,536, and 2,048 payload bytes. The fixed optical codeword stays fully populated; each tier changes the RS data/parity split, and automatic encoding selects the smallest tier that fits.
+* Added deterministic SplitMix32 visual fill to new Profile 2 and Profile 3 frames, protected by RS and checked by frame/CRC validation. This prevents short payloads from rendering as mostly empty fields; it provides no secrecy.
+* Kept decoders compatible with legacy Profile 2 and 3 frames, and added the 0.17/0.18 format specifications.
+* Fixed the Mac renderer's stale-preview behavior on invalid input, stopped padding Profile 1 text into a different payload, debounced regeneration, updated preview effects without reloading the SVG, and rendered Profile 3 at the same module scale as lower profiles.
+* Expanded live scanner candidates from the visible border bounds to account for the border's inset from the canonical sampling field. This is a geometry correction; renderer-origin camera scans still need physical-device validation.
+* C++ core tests, optical locator fixtures, and version-node validation pass. Xcode builds and physical iPhone scans are not available in this environment.
+
 ## 0.1.0-dev.41 — 2026-11-03
 
 * Reworked the iOS scanner hot path to try measured quadrilaterals directly against Profiles 1, 2, and 3 before any search. Vision now runs on alternating frames as a rotation/perspective fallback; continuous key-based refinement is restricted to one leading candidate instead of every candidate. Camera capture resolution remains adaptive at 1080p/high.
@@ -223,3 +232,11 @@
 * Added C ABI, CLI encoder, independent RS parity reference/vector, unit tests, and CI workflow.
 * Recorded versioning, context, research, license, and milestone rules.
 * Not included: erasure correction, image/camera decoder, perspective recovery, SDKs, browser lab, or measured device benchmarks.
+## 0.1.0-dev.42 — 2026-11-03
+
+* Added Profile 3 capacity/ECC tiers at 256, 384, 512, 768, 1,024, 1,536, and 2,048 payload bytes. The fixed optical codeword stays fully populated; each tier changes the RS data/parity split, and automatic encoding selects the smallest tier that fits.
+* Added deterministic SplitMix32 visual fill to new Profile 2 and Profile 3 frames, protected by RS and checked by frame/CRC validation. This prevents short payloads from rendering as mostly empty fields; it provides no secrecy.
+* Kept decoders compatible with legacy Profile 2 and 3 frames, and added the 0.17/0.18 format specifications.
+* Fixed the Mac renderer's stale-preview behavior on invalid input, stopped padding Profile 1 text into a different payload, debounced regeneration, updated preview effects without reloading the SVG, and rendered Profile 3 at the same module scale as lower profiles.
+* Expanded live scanner candidates from the visible border bounds to account for the border's inset from the canonical sampling field. This is a geometry correction; renderer-origin camera scans still need physical-device validation.
+* C++ core tests, optical locator fixtures, and version-node validation pass. Xcode builds and physical iPhone scans are not available in this environment.

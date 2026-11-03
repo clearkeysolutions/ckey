@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 static size_t occurrences(const std::string &s, const std::string &needle) {
     size_t count=0, pos=0;
@@ -68,6 +69,10 @@ int main() {
     std::array<uint8_t, CKEY_TEXT_PAYLOAD_MAX_BYTES> text_decoded{}; size_t text_length = 0;
     assert(ckey_decode_text(text_symbol.codeword, sizeof(text_symbol.codeword), text_decoded.data(), text_decoded.size(), &text_length, &d) == CKEY_OK);
     assert(text_length == text_payload.size() && text_decoded == text_payload);
+    ckey_text_symbol repeated_text{};
+    assert(ckey_encode_text(text_payload.data(), 31, &repeated_text, &d) == CKEY_OK);
+    assert(ckey_decode_text(repeated_text.codeword, sizeof(repeated_text.codeword), text_decoded.data(), text_decoded.size(), &text_length, &d) == CKEY_OK);
+    assert(text_length == 31 && std::equal(text_payload.begin(), text_payload.begin()+31, text_decoded.begin()));
     auto damaged_text = text_symbol;
     for (size_t i = 0; i < 22; ++i) damaged_text.codeword[(i * 11 + 7) % CKEY_TEXT_CODEWORD_BYTES] ^= static_cast<uint8_t>(0x31 + i);
     text_decoded.fill(0); text_length = 0;
@@ -92,14 +97,47 @@ int main() {
     std::array<uint8_t, CKEY_EXTENDED_PAYLOAD_MAX_BYTES> extended_decoded{}; size_t extended_length=0;
     assert(ckey_decode_extended(extended.codeword,sizeof(extended.codeword),extended_decoded.data(),extended_decoded.size(),&extended_length,&d)==CKEY_OK);
     assert(extended_length==extended_payload.size() && extended_decoded==extended_payload);
-    // Every RS(255,223) block corrects 16 unknown byte errors. Because public
-    // codeword bytes are interleaved, this simulates distributed local loss.
+    const std::string short_extended_text="CKey renderer test";
+    ckey_extended_symbol short_extended{}, short_extended_repeat{};
+    assert(ckey_encode_extended(reinterpret_cast<const uint8_t *>(short_extended_text.data()),short_extended_text.size(),&short_extended,&d)==CKEY_OK);
+    assert(short_extended.codeword[20]==CKEY_EXTENDED_FORMAT_VERSION && short_extended.codeword[30]==3 && short_extended.codeword[40]==1);
+    assert(ckey_encode_extended(reinterpret_cast<const uint8_t *>(short_extended_text.data()),short_extended_text.size(),&short_extended_repeat,&d)==CKEY_OK);
+    assert(std::memcmp(short_extended.codeword,short_extended_repeat.codeword,sizeof(short_extended.codeword))==0);
+    std::array<uint8_t,64> short_extended_decoded{}; size_t short_extended_length=0;
+    assert(ckey_decode_extended(short_extended.codeword,sizeof(short_extended.codeword),short_extended_decoded.data(),short_extended_decoded.size(),&short_extended_length,&d)==CKEY_OK);
+    assert(short_extended_length==short_extended_text.size() && std::equal(short_extended_text.begin(),short_extended_text.end(),short_extended_decoded.begin()));
+    ckey_extended_symbol short_extended_high_ecc{};
+    assert(ckey_encode_extended_tiered(reinterpret_cast<const uint8_t *>(short_extended_text.data()),short_extended_text.size(),CKEY_EXTENDED_TIER_512,&short_extended_high_ecc,&d)==CKEY_OK);
+    assert(short_extended_high_ecc.codeword[40]==3);
+    constexpr std::array<ckey_extended_tier,7> tiers={CKEY_EXTENDED_TIER_256,CKEY_EXTENDED_TIER_384,CKEY_EXTENDED_TIER_512,CKEY_EXTENDED_TIER_768,CKEY_EXTENDED_TIER_1024,CKEY_EXTENDED_TIER_1536,CKEY_EXTENDED_TIER_2048};
+    constexpr std::array<size_t,7> capacities={256,384,512,768,1024,1536,2048};
+    for (size_t tier=0;tier<tiers.size();++tier) {
+        const size_t length=capacities[tier]-3;
+        std::vector<uint8_t> payload(length);
+        for(size_t i=0;i<length;++i) payload[i]=static_cast<uint8_t>((i*41+tier*17+3)&0xff);
+        ckey_extended_symbol symbol{};
+        assert(ckey_encode_extended_tiered(payload.data(),payload.size(),tiers[tier],&symbol,&d)==CKEY_OK);
+        std::vector<uint8_t> recovered(CKEY_EXTENDED_PAYLOAD_MAX_BYTES); size_t recovered_length=0;
+        assert(ckey_decode_extended(symbol.codeword,sizeof(symbol.codeword),recovered.data(),recovered.size(),&recovered_length,&d)==CKEY_OK);
+        assert(recovered_length==length && std::equal(payload.begin(),payload.end(),recovered.begin()));
+        auto damaged=symbol;
+        constexpr size_t errors_per_block=6;
+        for(size_t block=0;block<CKEY_EXTENDED_BLOCK_COUNT;++block) for(size_t error=0;error<errors_per_block;++error)
+            damaged.codeword[(error*19+5)*CKEY_EXTENDED_BLOCK_COUNT+block]^=static_cast<uint8_t>(0x51+error+block);
+        recovered_length=0;
+        assert(ckey_decode_extended(damaged.codeword,sizeof(damaged.codeword),recovered.data(),recovered.size(),&recovered_length,&d)==CKEY_OK);
+        assert(recovered_length==length && std::equal(payload.begin(),payload.end(),recovered.begin()));
+        assert(d.corrected_symbols==errors_per_block*CKEY_EXTENDED_BLOCK_COUNT);
+    }
+    assert(ckey_encode_extended_tiered(extended_payload.data(),300,CKEY_EXTENDED_TIER_256,&extended,&d)==CKEY_INVALID_ARGUMENT);
+    // The automatic 2,048-byte tier is RS(255,206), correcting 24 unknown
+    // byte errors per block. Interleaving distributes local loss across blocks.
     auto damaged_extended=extended;
-    for (size_t block=0;block<CKEY_EXTENDED_BLOCK_COUNT;++block) for (size_t i=0;i<16;++i)
+    for (size_t block=0;block<CKEY_EXTENDED_BLOCK_COUNT;++block) for (size_t i=0;i<24;++i)
         damaged_extended.codeword[(i*13%CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK)*CKEY_EXTENDED_BLOCK_COUNT+block]^=static_cast<uint8_t>(0x31+i+block);
     extended_decoded.fill(0); extended_length=0;
     assert(ckey_decode_extended(damaged_extended.codeword,sizeof(damaged_extended.codeword),extended_decoded.data(),extended_decoded.size(),&extended_length,&d)==CKEY_OK);
-    assert(extended_length==extended_payload.size() && extended_decoded==extended_payload && d.corrected_symbols==160);
+    assert(extended_length==extended_payload.size() && extended_decoded==extended_payload && d.corrected_symbols==240);
     size_t extended_needed=0;
     assert(ckey_render_extended_svg(&extended,16,nullptr,0,&extended_needed)==CKEY_INSUFFICIENT_BUFFER);
     std::string extended_svg(extended_needed,'\0');

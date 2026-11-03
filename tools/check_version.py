@@ -12,8 +12,8 @@ changelog = (root / "CHANGELOG.md").read_text()
 fixture = json.loads((root / "tests/vectors/locator-v14.json").read_text())
 format_doc = root / "spec/CKey-Format-v0.14.0.md"
 format_text = format_doc.read_text()
-text_format_text = (root / "spec/CKey-Format-v0.15.0.md").read_text()
-extended_format_text = (root / "spec/CKey-Format-v0.16.0.md").read_text()
+text_format_text = (root / "spec/CKey-Format-v0.18.0.md").read_text()
+extended_format_text = (root / "spec/CKey-Format-v0.17.0.md").read_text()
 
 software_checks = {
     "public C ABI header": re.search(r'#define CKEY_SOFTWARE_VERSION "([^"]+)"', header).group(1),
@@ -25,16 +25,16 @@ stale = {name: value for name, value in software_checks.items() if value != vers
 format_checks = {
     "format specification": "format=14" in format_text and "profile=1" in format_text,
     "public format byte": re.search(r"#define CKEY_FORMAT_VERSION (\d+)u", header).group(1) == "14",
-    "living context formats": "CKey Format 0.14.0" in context and "0.15.0" in context and "0.16.0" in context and "byte `0E`" in context,
+    "living context formats": "CKey Format 0.14.0" in context and "0.18.0" in context and "0.17.0" in context and "byte `0E`" in context,
     "fixture format": fixture["format_version"] == "0.14.0",
     "current README link": "spec/CKey-Format-v0.14.0.md" in (root / "README.md").read_text(),
-    "text format specification": "format=15" in text_format_text and "profile=2" in text_format_text,
-    "extended format specification": "format=16" in extended_format_text and "profile=3" in extended_format_text,
-    "public text format byte": re.search(r"#define CKEY_TEXT_FORMAT_VERSION (\d+)u", header).group(1) == "15",
-    "public extended format byte": re.search(r"#define CKEY_EXTENDED_FORMAT_VERSION (\d+)u", header).group(1) == "16",
+    "text format specification": "format=18" in text_format_text and "profile=2" in text_format_text,
+    "extended format specification": "format=17" in extended_format_text and "profile=3" in extended_format_text,
+    "public text format byte": re.search(r"#define CKEY_TEXT_FORMAT_VERSION (\d+)u", header).group(1) == "18",
+    "public extended format byte": re.search(r"#define CKEY_EXTENDED_FORMAT_VERSION (\d+)u", header).group(1) == "17",
 }
 if not all(format_checks.values()):
     raise SystemExit(f"Current format nodes are inconsistent: {format_checks}")
 if stale:
     raise SystemExit(f"VERSION is {version}; stale version references: {stale}")
-print(f"Software and format version nodes are synchronized: {version} / 0.14.0, 0.15.0, 0.16.0")
+print(f"Software and format version nodes are synchronized: {version} / 0.14.0, 0.18.0, 0.17.0")
