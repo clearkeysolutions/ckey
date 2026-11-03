@@ -1,3 +1,10 @@
+## 0.1.0-dev.16 — 2026-11-03
+
+* Fixed the iPhone reader's corner-expansion helper: it previously ignored each requested scale, causing every candidate to use the same quadrilateral.
+* Increased camera sampling from 8 to 20 frames per second and exposed CKey check latency while scanning, alongside Vision detection latency.
+* Added a grayscale camera-preview regression crop from the user's laptop-screen capture; the shared C++ decoder recovers its locator payload with the captured perspective and rasterization.
+* Kept wire format 0.8.0 unchanged. Camera live performance is not yet independently measured on the user's iPhone; QR-parity performance is not claimed.
+
 ## 0.1.0-dev.15 — 2026-11-02
 
 * Fixed a throttled UI status update that left the reader stuck on “Testing square candidates…” after each frame.
