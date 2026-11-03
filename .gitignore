@@ -5,3 +5,7 @@
 *.so
 *.dylib
 *.dll
+/ios/DerivedData/
+/ios/build/
+*.xcuserstate
+xcuserdata/

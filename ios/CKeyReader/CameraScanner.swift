@@ -1,0 +1,192 @@
+import AVFoundation
+import AudioToolbox
+import Foundation
+import QuartzCore
+import SwiftUI
+import Vision
+
+final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    let session = AVCaptureSession()
+    @Published private(set) var status = "Starting camera…"
+    @Published private(set) var decodedHex: String?
+    @Published private(set) var decodeMilliseconds = 0.0
+    @Published private(set) var detectionMilliseconds = 0.0
+    @Published private(set) var isRunning = false
+
+    private let sessionQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.session")
+    private let frameQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.frames", qos: .userInitiated)
+    private let output = AVCaptureVideoDataOutput()
+    private var lastFrameTime = 0.0
+    private var hasConfigured = false
+    private var didDecode = false
+    private let rectangleRequest: VNDetectRectanglesRequest = {
+        let request = VNDetectRectanglesRequest()
+        request.maximumObservations = 6
+        request.minimumConfidence = 0.55
+        request.minimumSize = 0.16
+        request.minimumAspectRatio = 0.78
+        request.maximumAspectRatio = 1.22
+        request.quadratureTolerance = 35
+        return request
+    }()
+
+    func start() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: configureAndRun()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
+                guard let self else { return }
+                if allowed { self.configureAndRun() }
+                else { DispatchQueue.main.async { self.status = "Camera access is required to scan." } }
+            }
+        default:
+            DispatchQueue.main.async { self.status = "Enable camera access for CKey Reader in Settings." }
+        }
+    }
+
+    func stop() {
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
+            DispatchQueue.main.async { self.isRunning = false }
+        }
+    }
+
+    func scanAgain() {
+        frameQueue.async { self.didDecode = false }
+        DispatchQueue.main.async {
+            self.decodedHex = nil
+            self.status = "Looking for a CKey…"
+        }
+    }
+
+    private func configureAndRun() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if !self.hasConfigured {
+                self.session.beginConfiguration()
+                self.session.sessionPreset = .high
+                guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                      let input = try? AVCaptureDeviceInput(device: camera),
+                      self.session.canAddInput(input) else {
+                    self.session.commitConfiguration()
+                    DispatchQueue.main.async { self.status = "Could not configure the back camera." }
+                    return
+                }
+                self.session.addInput(input)
+                self.output.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+                ]
+                self.output.alwaysDiscardsLateVideoFrames = true
+                self.output.setSampleBufferDelegate(self, queue: self.frameQueue)
+                guard self.session.canAddOutput(self.output) else {
+                    self.session.commitConfiguration()
+                    DispatchQueue.main.async { self.status = "Could not configure camera frames." }
+                    return
+                }
+                self.session.addOutput(self.output)
+                if let connection = self.output.connection(with: .video), connection.isVideoOrientationSupported {
+                    connection.videoOrientation = .portrait
+                }
+                self.session.commitConfiguration()
+                self.hasConfigured = true
+            }
+            if !self.session.isRunning { self.session.startRunning() }
+            DispatchQueue.main.async {
+                self.isRunning = true
+                self.status = "Looking for a CKey…"
+            }
+        }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        if didDecode { return }
+        let now = CACurrentMediaTime()
+        if now - lastFrameTime < 0.12 { return } // Limit Vision work to about 8 frames/s.
+        lastFrameTime = now
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return }
+
+        let started = CACurrentMediaTime()
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let gray = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0)?.assumingMemoryBound(to: UInt8.self) else { return }
+        let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+
+        do {
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
+            try handler.perform([rectangleRequest])
+            let observations = (rectangleRequest.results ?? []).sorted {
+                $0.boundingBox.width * $0.boundingBox.height > $1.boundingBox.width * $1.boundingBox.height
+            }
+            let detectionElapsed = (CACurrentMediaTime() - started) * 1000
+            for observation in observations {
+                // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
+                let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
+                    .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
+                let quad = expandedCKeyQuad(points)
+                var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
+                var diagnostic = ckey_diagnostics()
+                let decodeStarted = CACurrentMediaTime()
+                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                    quad.withUnsafeBufferPointer { quadBuffer in
+                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                    }
+                }
+                if result == CKEY_OK {
+                    didDecode = true
+                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
+                    let hex = payload.map { String(format: "%02x", $0) }.joined()
+                    DispatchQueue.main.async {
+                        self.decodedHex = hex
+                        self.detectionMilliseconds = detectionElapsed
+                        self.decodeMilliseconds = decodeElapsed
+                        self.status = "CKey decoded"
+                        AudioServicesPlaySystemSound(SystemSoundID(1520))
+                    }
+                    return
+                }
+            }
+        } catch {
+            DispatchQueue.main.async { self.status = "Reading camera frame…" }
+        }
+    }
+
+    private func expandedCKeyQuad(_ observed: [CGPoint]) -> [Double] {
+        // Vision follows the visible rounded-square border at roughly ±0.5 module.
+        // Expand its projective quadrilateral to the decoder's canonical 29×29 field.
+        let center = CGPoint(x: observed.map(\.x).reduce(0, +) / 4,
+                             y: observed.map(\.y).reduce(0, +) / 4)
+        let scale = 29.0 / 28.0
+        return observed.flatMap { point in
+            [Double(center.x + (point.x - center.x) * scale),
+             Double(center.y + (point.y - center.y) * scale)]
+        }
+    }
+}
+
+struct CameraPreview: UIViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeUIView(context: Context) -> PreviewView {
+        let view = PreviewView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
+        if let connection = view.previewLayer.connection, connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        if uiView.previewLayer.session !== session { uiView.previewLayer.session = session }
+    }
+}
+
+final class PreviewView: UIView {
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+}
