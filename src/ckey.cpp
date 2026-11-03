@@ -379,12 +379,13 @@ std::vector<ExtendedNode> extended_nodes() {
         const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
             const double vx=x-cx, vy=y-cy, distance=std::sqrt(vx*vx+vy*vy);
             const bool inward_x=right ? vx<=0 : vx>=0, inward_y=bottom ? vy<=0 : vy>=0;
-            // The inside of a finder remains blank; only the exterior around
-            // its true quarter-circle may carry Cartesian payload.
-            return inward_x && inward_y && distance<=21.3;
+            // Inside of the border-matched finder arc stays blank; exterior
+            // around the true quarter-circle may carry Cartesian payload.
+            // Centers match the outer border corner centers (rx=14).
+            return inward_x && inward_y && distance<=16.8;
         };
-        const bool finder = finder_clearance(3.2,3.2,false,false) || finder_clearance(112.8,3.2,true,false) ||
-                            finder_clearance(3.2,112.8,false,true) || finder_clearance(112.8,112.8,true,true);
+        const bool finder = finder_clearance(16.0,16.0,false,false) || finder_clearance(100.0,16.0,true,false) ||
+                            finder_clearance(16.0,100.0,false,true) || finder_clearance(100.0,100.0,true,true);
         // The Grid Key occupies the identical module lattice as payload:
         // 0.34-unit marks on a 0.5-unit pitch, with one clear module around it.
         const bool grid_reference = x > 7.5 && x < 9.5 && y > 44.5 && y < 46.5;
@@ -793,12 +794,15 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
-    // One thick quarter-arc marks each corner. The top-left arc is split
-    // into two fragments to encode orientation with a one-module clear gap.
+    // Finder arcs share the outer border's corner radius centers so they
+    // follow the rounded-square frame (same curvature as the boundary).
+    // Top-left remains split for orientation.
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx = .8, cy = .8, radius = 4.5, thickness = 1.0, visible_gap = 1.0;
+        // Border is rx=3.5 on the 0.5..28.5 rect → corner center at (4.0, 4.0).
+        // Finder radius sits just inside the border stroke so both remain visible.
+        constexpr double cx = 4.0, cy = 4.0, radius = 3.15, thickness = 1.05, visible_gap = 1.0;
         if (corner == 0) {
             const double half_gap = (visible_gap + thickness) / (2.0 * radius);
             const double middle = kTau * 45.0 / 360.0;
@@ -864,15 +868,16 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey text symbol profile 2\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
+    // Finder arcs share the outer border corner centers (rx=3.5 → (4,4)).
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx=.8, cy=.8, radius=4.5, thickness=1.0;
+        constexpr double cx=4.0, cy=4.0, radius=3.15, thickness=1.05;
         if (corner == 0) {
             const double gap = (1.0 + thickness) / (2.0 * radius), middle = kTau / 8.0;
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A 4.5000 4.5000 0 0 0 " << cx + radius * std::cos(middle + gap) << ' ' << cy + radius * std::sin(middle + gap)
-              << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap) << " A 4.5000 4.5000 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0000\"/>";
-        } else o << "<path d=\"M " << cx << ' ' << cy + radius << " A 4.5000 4.5000 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0000\"/>";
+            o << "<path d=\"M " << cx << ' ' << cy + radius << " A 3.1500 3.1500 0 0 0 " << cx + radius * std::cos(middle + gap) << ' ' << cy + radius * std::sin(middle + gap)
+              << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap) << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";
+        } else o << "<path d=\"M " << cx << ' ' << cy + radius << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";
         o << "</g>";
     }
     for (int r : {11,12}) for (int c : {2,3}) o << "<rect x=\"" << c+.13 << "\" y=\"" << r+.13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
@@ -920,15 +925,17 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
       << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"2\" y=\"2\" width=\"112\" height=\"112\" rx=\"14\" fill=\"none\" stroke-width=\"2.6\"/>";
+    // Finder arcs share the outer border corner centers (rx=14 on the 2..114
+    // rect → center at (16,16)). Radius sits just inside the border stroke.
     for (int corner=0;corner<4;++corner) {
         const char *t=corner==0?"":corner==1?"translate(116 0) scale(-1 1)":corner==2?"translate(116 116) scale(-1 -1)":"translate(0 116) scale(1 -1)";
         o << "<g transform=\"" << t << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx=3.2,cy=3.2,r=18.0,thickness=4.0;
+        constexpr double cx=16.0,cy=16.0,r=12.6,thickness=4.2;
         if (corner==0) {
             const double gap=(4.0+thickness)/(2.0*r), middle=kTau/8.0;
-            o << "<path d=\"M " << cx << ' ' << cy+r << " A 18 18 0 0 0 " << cx+r*std::cos(middle+gap) << ' ' << cy+r*std::sin(middle+gap)
-              << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap) << " A 18 18 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4\"/>";
-        } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 18 18 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4\"/>";
+            o << "<path d=\"M " << cx << ' ' << cy+r << " A 12.6000 12.6000 0 0 0 " << cx+r*std::cos(middle+gap) << ' ' << cy+r*std::sin(middle+gap)
+              << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap) << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";
+        } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";
         o << "</g>";
     }
     // Fixed Grid Key: four ordinary 0.34-unit Cartesian modules on the same
