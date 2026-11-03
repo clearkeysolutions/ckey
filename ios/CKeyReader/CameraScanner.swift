@@ -25,7 +25,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let request = VNDetectRectanglesRequest()
         // CKey's rounded-square outline is less box-like than a QR finder.
         // Keep localization permissive; the key/ECC/CRC checks reject false quads.
-        request.maximumObservations = 20
+        request.maximumObservations = 16
         request.minimumConfidence = 0.2
         request.minimumSize = 0.06
         request.minimumAspectRatio = 0.62
@@ -106,7 +106,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         if didDecode { return }
         let now = CACurrentMediaTime()
-        if now - lastFrameTime < 0.12 { return } // Limit Vision work to about 8 frames/s.
+        if now - lastFrameTime < 0.05 { return } // Sample up to 20 frames/s while discarding stale frames.
         lastFrameTime = now
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return }
@@ -148,9 +148,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     }
                     if result == CKEY_OK { break }
                 }
+                let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
+                DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
                 if result == CKEY_OK {
                     didDecode = true
-                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
                     let hex = payload.map { String(format: "%02x", $0) }.joined()
                     DispatchQueue.main.async {
                         self.decodedHex = hex
@@ -186,10 +187,11 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double) -> [Double] {
-        // Map Vision's candidate bounds onto the canonical 29×29 sampling field.
+        // Vision can fit the inner border, outer border, or the SVG canvas.
+        // Keep the hypotheses distinct so each candidate can reach the same
+        // canonical 29×29 sampling field at a different detected boundary.
         let center = CGPoint(x: observed.map(\.x).reduce(0, +) / 4,
                              y: observed.map(\.y).reduce(0, +) / 4)
-        let scale = 29.0 / 28.0
         return observed.flatMap { point in
             [Double(center.x + (point.x - center.x) * scale),
              Double(center.y + (point.y - center.y) * scale)]

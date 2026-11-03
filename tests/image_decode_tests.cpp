@@ -51,6 +51,16 @@ int main() {
                              target_quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
     assert(decoded==expected);
 
+    // Regression fixture cropped from the user's iPhone camera preview while
+    // viewing the CKey on a laptop display. It includes screen rasterization,
+    // camera blur, and slight projective skew instead of a generated bitmap.
+    auto camera=load_pgm(base+"locator-v8-phone-camera.pgm",500);
+    const double camera_quad[8]={24,24,462,24,462,450,24,450};
+    decoded.fill(0);
+    assert(ckey_decode_gray8(camera.pixels.data(),camera.width,camera.height,camera.width,
+                             camera_quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
+    assert(decoded==expected);
+
     // A rotated corner order and inverted monochrome polarity are both valid.
     const double rotated[8]={x1,x0,x1,x1,x0,x1,x0,x0};
     for (uint8_t &pixel : image) pixel=static_cast<uint8_t>(255-pixel);
