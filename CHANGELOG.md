@@ -1,3 +1,9 @@
+## 0.1.0-dev.24 — 2026-11-03
+
+* Reverted the dev.23 localization throttle and candidate caps after physical testing reported slower, less reliable reads. Restored the dev.22 farther-reading search behavior rather than retaining a regression.
+* Configured the rear capture stream for 1920×1080 where supported (falling back to `.high`) and enables continuous autofocus plus continuous autoexposure. This addresses the acquisition limit directly: a distant CKey needs sufficient pixels per module before any decoder can recover blur, noise, or damage.
+* Kept format 0.8.0 unchanged. This is a recovery and acquisition-quality change; benchmark results remain unclaimed pending device measurements.
+
 ## 0.1.0-dev.23 — 2026-11-03
 
 * Made the border-first CKey locator the bounded hot path: up to six square-border candidates and three framing hypotheses are tested per sampled frame. The earlier broad Vision scale/offset sweep could attempt up to 1,800 core decodes per frame, producing the slow, intermittent far-distance reads reported from dev.22.
