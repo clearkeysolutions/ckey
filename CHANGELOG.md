@@ -1,3 +1,7 @@
+## 0.1.0-dev.38 — 2026-11-03
+
+* Added the shared C ABI contracts required for projective grayscale sampling of the Profile 2 and Profile 3 encodings. The Mac rendering laboratory and camera reader use the same versioned native core.
+
 ## 0.1.0-dev.37 — 2026-11-03
 
 * Removed the stale Grok-era nested-finder rewrite script so no repository tool can reapply rejected protruding or nested finder geometry.

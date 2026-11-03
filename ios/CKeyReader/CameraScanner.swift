@@ -9,6 +9,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     let session = AVCaptureSession()
     @Published private(set) var status = "Starting camera…"
     @Published private(set) var decodedHex: String?
+    @Published private(set) var decodedProfile = ""
     @Published private(set) var decodeMilliseconds = 0.0
     @Published private(set) var detectionMilliseconds = 0.0
     @Published private(set) var candidateCount = 0
@@ -74,6 +75,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         frameQueue.async { self.didDecode = false }
         DispatchQueue.main.async {
             self.decodedHex = nil
+            self.decodedProfile = ""
             self.status = "Looking for a CKey…"
         }
     }
@@ -155,21 +157,14 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // a document-shaped rectangle.
             let borderQuads = brightBorderQuads(gray, width: width, height: height, stride: stride)
             for quad in borderQuads.prefix(12) {
-                var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
-                var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
                 let adjusted = refinedCKeyQuad(quadPoints(quad), gray: gray, width: width,
                                                 height: height, stride: stride)
-                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                    adjusted.withUnsafeBufferPointer { quadBuffer in
-                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
-                    }
-                }
-                let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
-                if result == CKEY_OK {
-                    publishDecoded(payload, detectionMilliseconds: (CACurrentMediaTime() - started) * 1000,
+                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                                  locatorQuad: adjusted, denseQuad: quad) {
+                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
+                    DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
+                    publishDecoded(decoded.bytes, profile: decoded.profile, detectionMilliseconds: (CACurrentMediaTime() - started) * 1000,
                                    candidates: borderQuads.count)
                     return
                 }
@@ -197,23 +192,16 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
-                var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
-                var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
                 let refined = refinedCKeyQuad(points, gray: gray, width: width, height: height, stride: stride)
-                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                    refined.withUnsafeBufferPointer { quadBuffer in
-                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
-                    }
-                }
-                let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
-                if result == CKEY_OK {
+                let denseQuad = expandedCKeyQuad(points, expansion: 1.0, offsetX: 0, offsetY: 0)
+                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                                  locatorQuad: refined, denseQuad: denseQuad) {
+                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
                     didDecode = true
-                    let hex = payload.map { String(format: "%02x", $0) }.joined()
                     DispatchQueue.main.async {
-                        self.decodedHex = hex
+                        self.decodedHex = decoded.bytes.map { String(format: "%02x", $0) }.joined()
+                        self.decodedProfile = decoded.profile
                         self.detectionMilliseconds = detectionElapsed
                         self.candidateCount = observations.count + borderQuads.count
                         self.decodeMilliseconds = decodeElapsed
@@ -333,11 +321,48 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         return aspectError * 10.0 + oversizedPenalty
     }
 
-    private func publishDecoded(_ payload: [UInt8], detectionMilliseconds: Double, candidates: Int) {
+    private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
+                                  locatorQuad: [Double], denseQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
+        guard locatorQuad.count == 8, denseQuad.count == 8 else { return nil }
+        var locator = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
+        var diagnostic = ckey_diagnostics()
+        let locatorStatus = locator.withUnsafeMutableBufferPointer { output in
+            locatorQuad.withUnsafeBufferPointer { q in
+                ckey_decode_gray8(gray, width, height, stride, q.baseAddress, output.baseAddress, output.count, &diagnostic)
+            }
+        }
+        if locatorStatus == CKEY_OK { return (locator, "Profile 1 · Locator") }
+
+        // Dense profiles share the actual native sampler and only succeed after
+        // their independent RS and CRC validation. They are intentionally tried
+        // after the compact profile so ordinary locator reads retain their fast path.
+        var dense = [UInt8](repeating: 0, count: Int(CKEY_EXTENDED_PAYLOAD_MAX_BYTES))
+        var length = 0
+        let textStatus = dense.withUnsafeMutableBufferPointer { output in
+            denseQuad.withUnsafeBufferPointer { q in
+                ckey_decode_text_gray8(gray, width, height, stride, q.baseAddress,
+                                       output.baseAddress, output.count, &length, &diagnostic)
+            }
+        }
+        if textStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 2 · Text") }
+
+        length = 0
+        let extendedStatus = dense.withUnsafeMutableBufferPointer { output in
+            denseQuad.withUnsafeBufferPointer { q in
+                ckey_decode_extended_gray8(gray, width, height, stride, q.baseAddress,
+                                           output.baseAddress, output.count, &length, &diagnostic)
+            }
+        }
+        if extendedStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 3 · Extended") }
+        return nil
+    }
+
+    private func publishDecoded(_ payload: [UInt8], profile: String, detectionMilliseconds: Double, candidates: Int) {
         didDecode = true
         let hex = payload.map { String(format: "%02x", $0) }.joined()
         DispatchQueue.main.async {
             self.decodedHex = hex
+            self.decodedProfile = profile
             self.detectionMilliseconds = detectionMilliseconds
             self.candidateCount = candidates
             self.status = "CKey decoded"

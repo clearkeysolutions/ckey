@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.37"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.38"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 15u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -119,6 +119,24 @@ CKEY_API ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width,
                                         uint8_t *out_payload,
                                         size_t out_capacity,
                                         ckey_diagnostics *out_diagnostics);
+/* Projective grayscale decoders for the two dense profiles. These use the
+ * same caller-supplied quadrilateral contract as ckey_decode_gray8. They are
+ * intended for high-resolution captures where the documented feature floor is
+ * met; payload acceptance is still gated by RS correction and CRC-32C. */
+CKEY_API ckey_status ckey_decode_text_gray8(const uint8_t *gray, size_t width,
+                                             size_t height, size_t stride,
+                                             const double quad_xy[8],
+                                             uint8_t *out_payload,
+                                             size_t out_capacity,
+                                             size_t *out_payload_len,
+                                             ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t width,
+                                                 size_t height, size_t stride,
+                                                 const double quad_xy[8],
+                                                 uint8_t *out_payload,
+                                                 size_t out_capacity,
+                                                 size_t *out_payload_len,
+                                                 ckey_diagnostics *out_diagnostics);
 /*
  * Returns a continuous positive fit score for the Grid, Ring, and Ray Keys
  * under a proposed quadrilateral. Zero means no usable calibration evidence;
