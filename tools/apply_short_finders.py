@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
-"""Rewrite finder arcs to short corner accents (~36 on border radius)."""
+"""Nested corner finders: r=border radius, center near tip, opens toward tip."""
 from pathlib import Path
 import sys
 
 path = Path("src/ckey.cpp")
 if not path.exists():
-    sys.exit("Run from the ckey repo root (folder that contains src/ckey.cpp)")
+    sys.exit("Run from the ckey repo root")
 
 src = path.read_text()
-if "half_span" in src and "only the corner bend" in src and "18.0" in src:
-    print("Already applied (36 deg).")
-    sys.exit(0)
-
-# If already has 28.0 half_span, just shorten it
-if "half_span" in src and "28.0" in src:
-    src = src.replace("kTau * 28.0 / 360.0", "kTau * 18.0 / 360.0")
-    src = src.replace("kTau*28.0/360.0", "kTau*18.0/360.0")
-    path.write_text(src)
-    print("Shortened existing half_span 28 -> 18")
-    print("Wrote", path)
+if "Nested corner finders: same radius as the outer border" in src:
+    print("Already applied.")
     sys.exit(0)
 
 old1 = """    // Finder arcs share the outer border's corner radius centers so they
@@ -45,17 +36,15 @@ old1 = """    // Finder arcs share the outer border's corner radius centers so t
         o << "</g>";
     }"""
 
-new1 = """    // Short corner accents on the outer border curve (same center + radius as
-    // the rounded-rect rx). Not full quarter-circles - only the corner bend.
-    // Top-left is split for orientation.
+new1 = """    // Nested corner finders: same radius as the outer border (rx=3.5), center
+    // near the outer tip so the arc nests into the corner and opens toward the
+    // tip (rotated 180 vs a border-parallel stroke). Top-left is split.
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        // Border rx=3.5 on the 0.5..28.5 rect - corner center (4.0, 4.0).
-        constexpr double cx = 4.0, cy = 4.0, radius = 3.5, thickness = 0.85, visible_gap = 0.9;
-        // +/-18 deg from the 45 deg diagonal - ~36 deg arc (corner accent, not a full C).
+        constexpr double cx = 0.8, cy = 0.8, radius = 3.5, thickness = 1.0, visible_gap = 1.1;
         const double middle = kTau * 45.0 / 360.0;
-        const double half_span = kTau * 18.0 / 360.0;
+        const double half_span = kTau * 42.0 / 360.0;
         if (corner == 0) {
             const double half_gap = (visible_gap + thickness) / (2.0 * radius);
             const double outer1 = middle + half_span;
@@ -84,18 +73,18 @@ old2 = """        constexpr double cx=4.0, cy=4.0, radius=3.15, thickness=1.05;
               << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap) << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";
         } else o << "<path d=\"M " << cx << ' ' << cy + radius << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";"""
 
-new2 = """        constexpr double cx=4.0, cy=4.0, radius=3.5, thickness=0.85;
-        const double middle = kTau / 8.0, half_span = kTau * 18.0 / 360.0;
+new2 = """        constexpr double cx=0.8, cy=0.8, radius=3.5, thickness=1.0;
+        const double middle = kTau / 8.0, half_span = kTau * 42.0 / 360.0;
         if (corner == 0) {
-            const double gap = (0.9 + thickness) / (2.0 * radius);
+            const double gap = (1.1 + thickness) / (2.0 * radius);
             o << "<path d=\"M " << cx + radius * std::cos(middle + half_span) << ' ' << cy + radius * std::sin(middle + half_span)
               << " A 3.5000 3.5000 0 0 0 " << cx + radius * std::cos(middle + gap) << ' ' << cy + radius * std::sin(middle + gap)
               << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap)
               << " A 3.5000 3.5000 0 0 0 " << cx + radius * std::cos(middle - half_span) << ' ' << cy + radius * std::sin(middle - half_span)
-              << "\" stroke-width=\"0.8500\"/>";
+              << "\" stroke-width=\"1.0000\"/>";
         } else o << "<path d=\"M " << cx + radius * std::cos(middle + half_span) << ' ' << cy + radius * std::sin(middle + half_span)
               << " A 3.5000 3.5000 0 0 0 " << cx + radius * std::cos(middle - half_span) << ' ' << cy + radius * std::sin(middle - half_span)
-              << "\" stroke-width=\"0.8500\"/>";"""
+              << "\" stroke-width=\"1.0000\"/>";"""
 
 old3 = """        constexpr double cx=16.0,cy=16.0,r=12.6,thickness=4.2;
         if (corner==0) {
@@ -104,22 +93,22 @@ old3 = """        constexpr double cx=16.0,cy=16.0,r=12.6,thickness=4.2;
               << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap) << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";
         } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";"""
 
-new3 = """        constexpr double cx=16.0,cy=16.0,r=14.0,thickness=3.4;
-        const double middle=kTau/8.0, half_span=kTau*18.0/360.0;
+new3 = """        constexpr double cx=3.2,cy=3.2,r=14.0,thickness=4.0;
+        const double middle=kTau/8.0, half_span=kTau*42.0/360.0;
         if (corner==0) {
-            const double gap=(3.6+thickness)/(2.0*r);
+            const double gap=(4.4+thickness)/(2.0*r);
             o << "<path d=\"M " << cx+r*std::cos(middle+half_span) << ' ' << cy+r*std::sin(middle+half_span)
               << " A 14.0000 14.0000 0 0 0 " << cx+r*std::cos(middle+gap) << ' ' << cy+r*std::sin(middle+gap)
               << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap)
               << " A 14.0000 14.0000 0 0 0 " << cx+r*std::cos(middle-half_span) << ' ' << cy+r*std::sin(middle-half_span)
-              << "\" stroke-width=\"3.4000\"/>";
+              << "\" stroke-width=\"4.0000\"/>";
         } else o << "<path d=\"M " << cx+r*std::cos(middle+half_span) << ' ' << cy+r*std::sin(middle+half_span)
               << " A 14.0000 14.0000 0 0 0 " << cx+r*std::cos(middle-half_span) << ' ' << cy+r*std::sin(middle-half_span)
-              << "\" stroke-width=\"3.4000\"/>";"""
+              << "\" stroke-width=\"4.0000\"/>";"""
 
 ok = True
 if old1 not in src:
-    print("ERROR: profile 1 block not found")
+    print("ERROR: profile 1 block not found - run: git checkout -- src/ckey.cpp")
     ok = False
 else:
     src = src.replace(old1, new1, 1)
@@ -144,4 +133,4 @@ if not ok:
 
 path.write_text(src)
 print("Wrote", path)
-print("half_span:", "half_span" in path.read_text())
+print("nested:", "cx = 0.8, cy = 0.8, radius = 3.5" in path.read_text())
