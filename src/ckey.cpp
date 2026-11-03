@@ -379,10 +379,9 @@ std::vector<ExtendedNode> extended_nodes() {
         const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
             const double vx=x-cx, vy=y-cy, distance=std::sqrt(vx*vx+vy*vy);
             const bool inward_x=right ? vx<=0 : vx>=0, inward_y=bottom ? vy<=0 : vy>=0;
-            // Inside of the border-matched finder arc stays blank; exterior
-            // around the true quarter-circle may carry Cartesian payload.
-            // Centers match the outer border corner centers (rx=14).
-            return inward_x && inward_y && distance<=16.8;
+            // The inside of a finder remains blank; only the exterior around
+            // its true quarter-circle may carry Cartesian payload.
+            return inward_x && inward_y && distance<=11.30;
         };
         const bool finder = finder_clearance(16.0,16.0,false,false) || finder_clearance(100.0,16.0,true,false) ||
                             finder_clearance(16.0,100.0,false,true) || finder_clearance(100.0,100.0,true,true);
@@ -445,6 +444,48 @@ double polar_dot_radius() {
 
 void svg_circle(std::ostringstream &o, double x, double y, double r) {
     o << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"" << r << "\" stroke=\"none\"/>";
+}
+
+// CKey's finder follows the rounded corner itself. It is deliberately a
+// single broad inset arc rather than a nested set of marks that projects into
+// the payload field. Only the top-left arc is interrupted; that clear gap is
+// the structural orientation signature.
+void svg_corner_finders(std::ostringstream &o, double side, double inset,
+                        const std::array<double, 3> &radii, double thickness,
+                        double visible_split_gap) {
+    for (int corner = 0; corner < 4; ++corner) {
+        const std::string transform =
+            corner == 0 ? "" :
+            corner == 1 ? "translate(" + std::to_string(side) + " 0) scale(-1 1)" :
+            corner == 2 ? "translate(" + std::to_string(side) + " " + std::to_string(side) + ") scale(-1 -1)" :
+                          "translate(0 " + std::to_string(side) + ") scale(1 -1)";
+        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
+        for (double radius : radii) {
+            if (radius <= 0.0) continue;
+            if (corner == 0) {
+                // Include cap diameter in the angular calculation: the clear
+                // visual gap is exactly visible_split_gap, not merely the
+                // shorter centerline gap.
+                const double half_gap = (visible_split_gap + thickness) / (2.0 * radius);
+                // The outer (top-left) quadrant uses angles 180°..270°.
+                // Its concave/open side points down-right, toward the polar
+                // field, and the outermost path meets the frame tangents.
+                const double middle = 5.0 * kTau / 8.0;
+                const double a1 = middle - half_gap, a2 = middle + half_gap;
+                o << "<path d=\"M " << inset - radius << ' ' << inset
+                  << " A " << radius << ' ' << radius << " 0 0 1 "
+                  << inset + radius * std::cos(a1) << ' ' << inset + radius * std::sin(a1)
+                  << " M " << inset + radius * std::cos(a2) << ' ' << inset + radius * std::sin(a2)
+                  << " A " << radius << ' ' << radius << " 0 0 1 " << inset << ' ' << inset - radius
+                  << "\" stroke-width=\"" << thickness << "\"/>";
+            } else {
+                o << "<path d=\"M " << inset - radius << ' ' << inset
+                  << " A " << radius << ' ' << radius << " 0 0 1 " << inset << ' ' << inset - radius
+                  << "\" stroke-width=\"" << thickness << "\"/>";
+            }
+        }
+        o << "</g>";
+    }
 }
 
 struct ImagePoint { double x, y; };
@@ -554,7 +595,10 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
     std::array<uint8_t,kCodewordBytes> cw{}; std::memcpy(cw.data(), codeword, cw.size());
     uint32_t corrected = 0;
     if (!rs_correct(cw, corrected)) { set_status(diag, CKEY_UNCORRECTABLE, "Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
-    if (cw[0] != 0xc7 || cw[1] != 0x4b || cw[2] != CKEY_FORMAT_VERSION || cw[3] != 1 || cw[4] != 0 || cw[5] != 16) {
+    // Formats 8 and 11--13 remain readable for historic camera fixtures.
+    // Encoder output is the current format; the newer inset-finder geometry
+    // is unambiguously declared by format 11.
+    if (cw[0] != 0xc7 || cw[1] != 0x4b || (cw[2] != 8u && cw[2] != 11u && cw[2] != 12u && cw[2] != 13u && cw[2] != CKEY_FORMAT_VERSION) || cw[3] != 1 || cw[4] != 0 || cw[5] != 16) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "corrected frame has invalid magic, version, profile, or length"); return CKEY_INTEGRITY_FAILURE;
     }
     const uint32_t expected = (static_cast<uint32_t>(cw[22]) << 24) | (static_cast<uint32_t>(cw[23]) << 16) | (static_cast<uint32_t>(cw[24]) << 8) | cw[25];
@@ -571,7 +615,7 @@ ckey_status ckey_encode_text(const uint8_t *payload, size_t payload_len,
     if (payload_len > CKEY_TEXT_PAYLOAD_MAX_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "text profile payload exceeds 200 bytes"); return CKEY_INVALID_ARGUMENT; }
     std::memset(out, 0, sizeof(*out));
     out->abi_version = CKEY_ABI_VERSION; out->side = kSide; out->payload_length = static_cast<uint32_t>(payload_len);
-    // Frame: magic, format 9, profile 2, u16be payload length, payload,
+    // Frame: magic, format 15, profile 2, u16be payload length, payload,
     // CRC-32C over all preceding frame bytes, then deterministic zero padding.
     std::vector<uint8_t> codeword(kTextCodewordBytes, 0);
     codeword[0] = 0xc7; codeword[1] = 0x4b; codeword[2] = CKEY_TEXT_FORMAT_VERSION; codeword[3] = 2;
@@ -596,7 +640,8 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     std::vector<uint8_t> corrected(codeword, codeword + codeword_len);
     uint32_t corrections = 0;
     if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
-    if (corrected[0] != 0xc7 || corrected[1] != 0x4b || corrected[2] != CKEY_TEXT_FORMAT_VERSION || corrected[3] != 2) {
+    if (corrected[0] != 0xc7 || corrected[1] != 0x4b ||
+        (corrected[2] != 9u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
     }
     const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
@@ -651,7 +696,8 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
         if (!rs_correct_generic(work,kExtendedParityBytes,fixed)) { set_status(diag,CKEY_UNCORRECTABLE,"extended Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
         corrections+=fixed; std::copy_n(work.begin(),kExtendedDataBytes,framed.data()+block*kExtendedDataBytes);
     }
-    if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[2]!=CKEY_EXTENDED_FORMAT_VERSION || framed[3]!=3) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE; }
+    if (framed[0]!=0xc7 || framed[1]!=0x4b ||
+        (framed[2]!=10u && framed[2]!=CKEY_EXTENDED_FORMAT_VERSION) || framed[3]!=3) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE; }
     const size_t length=(static_cast<size_t>(framed[4])<<8)|framed[5], crc_index=6+length;
     if (length==0 || length>CKEY_EXTENDED_PAYLOAD_MAX_BYTES || crc_index+4>framed.size() || out_capacity<length) { set_status(diag,CKEY_INSUFFICIENT_BUFFER,"extended payload length exceeds profile or output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
     const uint32_t expected=(static_cast<uint32_t>(framed[crc_index])<<24)|(static_cast<uint32_t>(framed[crc_index+1])<<16)|(static_cast<uint32_t>(framed[crc_index+2])<<8)|framed[crc_index+3];
@@ -680,19 +726,33 @@ double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t he
             dst[2 * i] = quad_xy[2 * qi]; dst[2 * i + 1] = quad_xy[2 * qi + 1];
         }
         double h[8]; if (!solve_homography(canonical, dst, h)) continue;
-        std::vector<double> grid, ring, ray, empty;
+        std::vector<double> grid, ring, ray, finder, empty;
         for (int r : {11,12}) for (int c : {2,3}) grid.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
         for (int slot : {18,19,21}) ring.push_back(polar_sample(gray,width,height,stride,h,6.0,slot));
         ring.push_back(polar_sample(gray,width,height,stride,h,6.0,23.5));
         ray.push_back(polar_sample(gray,width,height,stride,h,8.8,0));
         ray.push_back(polar_sample(gray,width,height,stride,h,8.4,54));
         ray.push_back(polar_sample(gray,width,height,stride,h,8.8,55));
+        // The one-arc rounded-corner finder is localization evidence. It is
+        // not an acceptance shortcut: keys, RS, and CRC remain authoritative.
+        constexpr double finder_inset=4.00;
+        const double diagonal=kTau/8.0;
+        for (double finder_radius : {2.30}) {
+            finder.push_back(gray_sample(gray,width,height,stride,h,29.0-(finder_inset+finder_radius*std::cos(diagonal)),finder_inset+finder_radius*std::sin(diagonal)));
+            finder.push_back(gray_sample(gray,width,height,stride,h,29.0-(finder_inset+finder_radius*std::cos(diagonal)),29.0-(finder_inset+finder_radius*std::sin(diagonal))));
+            finder.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(diagonal),29.0-(finder_inset+finder_radius*std::sin(diagonal))));
+            const double first=kTau*18.0/360.0, second=kTau*72.0/360.0;
+            finder.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(first),finder_inset+finder_radius*std::sin(first)));
+            finder.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(second),finder_inset+finder_radius*std::sin(second)));
+            empty.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(diagonal),finder_inset+finder_radius*std::sin(diagonal)));
+        }
         empty.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
         empty.push_back(polar_sample(gray,width,height,stride,h,6.0,20));
         empty.push_back(polar_sample(gray,width,height,stride,h,8.8,54));
         std::vector<double> marks = grid;
         marks.insert(marks.end(), ring.begin(), ring.end());
         marks.insert(marks.end(), ray.begin(), ray.end());
+        marks.insert(marks.end(), finder.begin(), finder.end());
         if (std::any_of(marks.begin(),marks.end(),[](double v){ return v < 0; }) ||
             std::any_of(empty.begin(),empty.end(),[](double v){ return v < 0; })) continue;
         const double mark_mean = std::accumulate(marks.begin(),marks.end(),0.0) / marks.size();
@@ -705,7 +765,7 @@ double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t he
                                 std::count_if(empty.begin(),empty.end(),[&](double v){ return !marked(v); });
         // Contrast supplies a continuous hill for sub-pixel geometry search;
         // expected key evidence prevents a bright non-CKey rectangle winning.
-        best = std::max(best, contrast * static_cast<double>(evidence) / 13.0);
+        best = std::max(best, contrast * static_cast<double>(evidence) / static_cast<double>(marks.size() + empty.size()));
     }
     return best;
 }
@@ -794,29 +854,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
-    // Finder arcs share the outer border's corner radius centers so they
-    // follow the rounded-square frame (same curvature as the boundary).
-    // Top-left remains split for orientation.
-    for (int corner = 0; corner < 4; ++corner) {
-        const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
-        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        // Border is rx=3.5 on the 0.5..28.5 rect → corner center at (4.0, 4.0).
-        // Finder radius sits just inside the border stroke so both remain visible.
-        constexpr double cx = 4.0, cy = 4.0, radius = 3.15, thickness = 1.05, visible_gap = 1.0;
-        if (corner == 0) {
-            const double half_gap = (visible_gap + thickness) / (2.0 * radius);
-            const double middle = kTau * 45.0 / 360.0;
-            const double a1 = middle + half_gap;
-            const double a2 = middle - half_gap;
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius * std::cos(a1) << ' ' << cy + radius * std::sin(a1)
-              << " M " << cx + radius * std::cos(a2) << ' ' << cy + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-              << "\" stroke-width=\"" << thickness << "\"/>";
-        } else {
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-              << "\" stroke-width=\"" << thickness << "\"/>";
-        }
-        o << "</g>";
-    }
+    svg_corner_finders(o, 29.0, 4.0, {2.30, 0.0, 0.0}, .80, .95);
     // Grid Key: fixed 2x2 Cartesian reference block at the left matrix edge.
     for (int r : {11, 12}) for (int c : {2, 3}) o << "<rect x=\"" << c + .13 << "\" y=\"" << r + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     // Permanent Ray Key is contained in the outer dial band (r=7.6..9.5).
@@ -868,18 +906,7 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey text symbol profile 2\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
-    // Finder arcs share the outer border corner centers (rx=3.5 → (4,4)).
-    for (int corner = 0; corner < 4; ++corner) {
-        const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
-        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx=4.0, cy=4.0, radius=3.15, thickness=1.05;
-        if (corner == 0) {
-            const double gap = (1.0 + thickness) / (2.0 * radius), middle = kTau / 8.0;
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A 3.1500 3.1500 0 0 0 " << cx + radius * std::cos(middle + gap) << ' ' << cy + radius * std::sin(middle + gap)
-              << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap) << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";
-        } else o << "<path d=\"M " << cx << ' ' << cy + radius << " A 3.1500 3.1500 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0500\"/>";
-        o << "</g>";
-    }
+    svg_corner_finders(o, 29.0, 4.0, {2.30, 0.0, 0.0}, .80, .95);
     for (int r : {11,12}) for (int c : {2,3}) o << "<rect x=\"" << c+.13 << "\" y=\"" << r+.13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     for (const auto &[slot, fraction] : {std::pair{0,1.0}, std::pair{108,.5}, std::pair{110,.75}}) {
         const double a=kTau*slot/144.0, r0=7.6, r1=r0+1.9*fraction;
@@ -925,19 +952,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
       << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"2\" y=\"2\" width=\"112\" height=\"112\" rx=\"14\" fill=\"none\" stroke-width=\"2.6\"/>";
-    // Finder arcs share the outer border corner centers (rx=14 on the 2..114
-    // rect → center at (16,16)). Radius sits just inside the border stroke.
-    for (int corner=0;corner<4;++corner) {
-        const char *t=corner==0?"":corner==1?"translate(116 0) scale(-1 1)":corner==2?"translate(116 116) scale(-1 -1)":"translate(0 116) scale(1 -1)";
-        o << "<g transform=\"" << t << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx=16.0,cy=16.0,r=12.6,thickness=4.2;
-        if (corner==0) {
-            const double gap=(4.0+thickness)/(2.0*r), middle=kTau/8.0;
-            o << "<path d=\"M " << cx << ' ' << cy+r << " A 12.6000 12.6000 0 0 0 " << cx+r*std::cos(middle+gap) << ' ' << cy+r*std::sin(middle+gap)
-              << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap) << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";
-        } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 12.6000 12.6000 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4.2000\"/>";
-        o << "</g>";
-    }
+    svg_corner_finders(o, 116.0, 16.0, {9.20, 0.0, 0.0}, 3.2, 3.8);
     // Fixed Grid Key: four ordinary 0.34-unit Cartesian modules on the same
     // 0.5-unit pitch as payload. It calibrates payload pitch and dead space;
     // it is deliberately not a larger visual marker.

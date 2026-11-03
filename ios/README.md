@@ -1,6 +1,6 @@
 # CKey Reader for iPhone
 
-This is an early native camera test app for CKey locator format 0.8. It uses Apple's Vision rectangle detector for candidate localization and calls the existing C ABI for calibration, sampling, Reed–Solomon correction, and CRC validation. `src/ckey.cpp` is compiled directly into the app so there is no second encoder/decoder implementation.
+This is an early native camera test app for CKey locator format 0.14. It uses Apple's Vision rectangle detector for candidate localization and calls the existing C ABI for calibration, sampling, Reed–Solomon correction, and CRC validation. `src/ckey.cpp` is compiled directly into the app so there is no second encoder/decoder implementation.
 
 ## Run on a phone
 

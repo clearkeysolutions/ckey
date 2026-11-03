@@ -22,9 +22,9 @@ int main() {
     assert(a.codeword[0]==0xc7 && a.codeword[1]==0x4b && a.codeword[2]==CKEY_FORMAT_VERSION && a.codeword[3]==1);
     assert(a.codeword[4]==0 && a.codeword[5]==16);
     for (size_t i=0;i<16;++i) assert(a.codeword[6+i]==i);
-    // CRC-32C("C7 4B 0B 01 00 10 00..0F") is a fixed interoperability check.
-    assert(a.codeword[22]==0x7e && a.codeword[23]==0xfc && a.codeword[24]==0xe2 && a.codeword[25]==0x60);
-    constexpr uint8_t expected_parity[51]={0xff,0x1e,0x07,0xfd,0x22,0x1f,0x06,0x7c,0xf1,0x91,0xf9,0x07,0xc1,0xbd,0x22,0xfd,0x21,0xee,0x06,0x32,0xd4,0xaa,0x7c,0xb3,0xf5,0x8d,0x79,0xab,0xae,0x55,0xf7,0x8c,0x4b,0x5c,0x07,0x5c,0x97,0x2d,0x85,0x9f,0x35,0x27,0x94,0xe5,0xcc,0xe3,0xef,0x76,0xb3,0xd7,0xca};
+    // CRC-32C("C7 4B 0E 01 00 10 00..0F") is a fixed interoperability check.
+    assert(a.codeword[22]==0x94 && a.codeword[23]==0xb0 && a.codeword[24]==0xcb && a.codeword[25]==0x29);
+    constexpr uint8_t expected_parity[51]={0x45,0xa4,0xf1,0x66,0x5e,0x75,0x71,0x9e,0x8f,0xc5,0xed,0xfb,0xe2,0x4f,0xc1,0x88,0x93,0x17,0x08,0x46,0x9a,0x90,0x2f,0x84,0xb1,0x67,0xcc,0x40,0x4c,0x2f,0xce,0x04,0xdd,0xf4,0xc4,0xb7,0xda,0x58,0xd2,0xa8,0x56,0x37,0x2d,0x2a,0x28,0x67,0x2b,0x08,0x48,0x2c,0x0b};
     for (size_t i=0;i<51;++i) assert(a.codeword[26+i]==expected_parity[i]);
     assert(std::strcmp(ckey_get_software_version(), CKEY_SOFTWARE_VERSION)==0);
     std::array<uint8_t,16> decoded{};
@@ -79,12 +79,16 @@ int main() {
     assert(ckey_render_text_svg(&text_symbol, 16, text_svg.data(), text_svg.size(), &text_needed) == CKEY_OK);
     assert(text_svg.find("CKey text symbol profile 2") != std::string::npos);
     assert(text_svg.find("stroke-width=\"0.2000\" stroke-linecap=\"round\"") != std::string::npos);
+    assert(occurrences(text_svg,"stroke-width=\"0.8000\"/>")==4);
+    assert(text_svg.find("M 1.7000 4.0000 A 2.3000 2.3000") != std::string::npos);
 
     std::array<uint8_t, CKEY_EXTENDED_PAYLOAD_MAX_BYTES> extended_payload{};
     for (size_t i=0;i<extended_payload.size();++i) extended_payload[i]=static_cast<uint8_t>((i*73+19)&0xff);
     ckey_extended_symbol extended{};
     assert(ckey_encode_extended(extended_payload.data(),extended_payload.size(),&extended,&d)==CKEY_OK);
-    assert(extended.side==116 && extended.codeword[0]!=0);
+    // Profile 3's public stream is byte-interleaved: the header's bytes 0, 1,
+    // and 2 from block zero therefore occur at offsets 0, 10, and 20.
+    assert(extended.side==116 && extended.codeword[0]==0xc7 && extended.codeword[10]==0x4b && extended.codeword[20]==CKEY_EXTENDED_FORMAT_VERSION);
     std::array<uint8_t, CKEY_EXTENDED_PAYLOAD_MAX_BYTES> extended_decoded{}; size_t extended_length=0;
     assert(ckey_decode_extended(extended.codeword,sizeof(extended.codeword),extended_decoded.data(),extended_decoded.size(),&extended_length,&d)==CKEY_OK);
     assert(extended_length==extended_payload.size() && extended_decoded==extended_payload);
@@ -103,6 +107,8 @@ int main() {
     assert(extended_svg.find("CKey extended symbol profile 3")!=std::string::npos);
     assert(extended_svg.find("stroke-width=\"0.2800\"")!=std::string::npos);
     assert(extended_svg.find("viewBox=\"-4 -4 124 124\"")!=std::string::npos);
+    assert(occurrences(extended_svg,"stroke-width=\"3.2000\"/>")==4);
+    assert(extended_svg.find("M 6.8000 16.0000 A 9.2000 9.2000")!=std::string::npos);
 
     size_t needed=0;
     assert(ckey_render_svg(&a, 16, nullptr, 0, &needed)==CKEY_INSUFFICIENT_BUFFER);
@@ -114,13 +120,12 @@ int main() {
     assert(ckey_render_svg(&a, CKEY_MAX_RENDER_SCALE + 1, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     assert(svg.find("viewBox=\"-1 -1 31 31\"")!=std::string::npos);
     assert(svg.find("fill=\"#050505\"")!=std::string::npos);
-    assert(svg.find("A 3.1500 3.1500")!=std::string::npos);
+    assert(svg.find("A 2.3000 2.3000")!=std::string::npos);
     assert(occurrences(svg,"r=\"0.1500\"")==occurrences(svg,"<circle "));
     assert(occurrences(svg,"<circle ")>3);
     assert(svg.find("stroke-width=\"0.3000\" stroke-linecap=\"round\"/>")!=std::string::npos);
-    assert(occurrences(svg,"stroke-width=\"1.0500\"/>")==4);
-    assert(svg.find("M 4.0000 7.1500 A 3.1500 3.1500")!=std::string::npos);
-    assert(occurrences(svg," M ")==1);
+    assert(occurrences(svg,"stroke-width=\"0.8000\"/>")==4);
+    assert(svg.find("M 1.7000 4.0000 A 2.3000 2.3000")!=std::string::npos);
     assert(occurrences(svg,"stroke-width=\"0.15\" stroke-linecap=\"round\"/>")==69);
     assert(svg.find("x=\"2.1300\" y=\"11.1300\"")!=std::string::npos);
     assert(svg.find("CKey locator symbol")!=std::string::npos);
