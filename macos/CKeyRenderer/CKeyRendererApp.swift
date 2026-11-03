@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 @main
@@ -59,14 +60,15 @@ private final class RendererModel: ObservableObject {
         next = next.replacingOccurrences(of: "#050505", with: background.hex)
         next = next.replacingOccurrences(of: "#f4f1e8", with: foreground.hex)
         svg = next
-        status = "(profile.rawValue) · (input.count) payload byte(s) · (ckey_get_software_version().map(String.init(cString:)) ?? "development")"
+        let version = ckey_get_software_version().map { String(cString: $0) } ?? "development"
+        status = "\(profile.rawValue) · \(input.count) payload byte(s) · \(version)"
     }
 
     func saveSVG() {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "ckey-symbol.svg"; panel.allowedContentTypes = [.svg]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try svg.write(to: url, atomically: true, encoding: .utf8); status = "Saved (url.lastPathComponent)" }
-        catch { status = "Could not save SVG: (error.localizedDescription)" }
+        do { try svg.write(to: url, atomically: true, encoding: .utf8); status = "Saved \(url.lastPathComponent)" }
+        catch { status = "Could not save SVG: \(error.localizedDescription)" }
     }
 
     private func fail(_ diag: ckey_diagnostics) { status = String(cString: diag.message) }
