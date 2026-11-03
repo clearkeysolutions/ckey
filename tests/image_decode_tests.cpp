@@ -61,6 +61,15 @@ int main() {
                              camera_quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
     assert(decoded==expected);
 
+    // Far-distance phone preview: the target is only about 135 px across
+    // (~4.7 px/module), but still decodes when localization supplies its field.
+    auto far_camera=load_pgm(base+"locator-v8-far-camera.pgm",180);
+    const double far_quad[8]={14,14,149,14,149,149,14,149};
+    decoded.fill(0);
+    assert(ckey_decode_gray8(far_camera.pixels.data(),far_camera.width,far_camera.height,
+                             far_camera.width,far_quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
+    assert(decoded==expected);
+
     // A rotated corner order and inverted monochrome polarity are both valid.
     const double rotated[8]={x1,x0,x1,x1,x0,x1,x0,x0};
     for (uint8_t &pixel : image) pixel=static_cast<uint8_t>(255-pixel);
