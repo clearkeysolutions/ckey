@@ -34,6 +34,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         request.quadratureTolerance = 45
         return request
     }()
+    private let symbolSquareRequest: VNDetectRectanglesRequest = {
+        let request = VNDetectRectanglesRequest()
+        // A distant CKey is often smaller than the surrounding monitor or
+        // laptop. Ask Vision for small, nearly square candidates separately.
+        request.maximumObservations = 64
+        request.minimumConfidence = 0.05
+        request.minimumSize = 0.01
+        request.minimumAspectRatio = 0.82
+        request.maximumAspectRatio = 1.22
+        request.quadratureTolerance = 35
+        return request
+    }()
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -123,9 +135,12 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
         do {
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-            try handler.perform([rectangleRequest])
-            let observations = (rectangleRequest.results ?? []).sorted {
-                $0.boundingBox.width * $0.boundingBox.height > $1.boundingBox.width * $1.boundingBox.height
+            try handler.perform([symbolSquareRequest, rectangleRequest])
+            let squareObservations = symbolSquareRequest.results ?? []
+            let generalObservations = rectangleRequest.results ?? []
+            let observations = (squareObservations + generalObservations).sorted {
+                candidatePriority($0, frameWidth: width, frameHeight: height) <
+                candidatePriority($1, frameWidth: width, frameHeight: height)
             }
             let sizeSummary = observations.prefix(3).map { observation in
                 let box = observation.boundingBox
@@ -135,7 +150,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            for (candidateIndex, observation) in observations.prefix(8).enumerated() {
+            for (candidateIndex, observation) in observations.prefix(24).enumerated() {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
@@ -159,7 +174,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 // At distance, Vision may select the surrounding preview or
                 // editor frame instead of the code. Search a broad set of
                 // symbol-sized quads around leading candidates only.
-                if result != CKEY_OK && candidateIndex < 6 {
+                if result != CKEY_OK && candidateIndex < 4 {
                     let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
                                 hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
                     let shifts = [-0.20, -0.10, 0.0, 0.10, 0.20]
@@ -235,6 +250,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             quad.append(centerY + (y - centerY) * scale + offsetY)
         }
         return quad
+    }
+
+    private func candidatePriority(_ observation: VNRectangleObservation,
+                                   frameWidth: Int, frameHeight: Int) -> Double {
+        let box = observation.boundingBox
+        let aspectError = abs(log(Double(box.width / box.height)))
+        let side = sqrt(Double(box.width * box.height * CGFloat(frameWidth * frameHeight)))
+        // The square pass finds small codes; the general pass remains useful
+        // for close or oblique scans. Prefer geometric squareness first, then
+        // avoid taking the full camera frame ahead of a contained symbol.
+        let oversizedPenalty = side > Double(min(frameWidth, frameHeight)) * 0.72 ? 2.0 : 0.0
+        return aspectError * 10.0 + oversizedPenalty
     }
 }
 
