@@ -541,6 +541,13 @@ double polar_sample(const uint8_t *gray, size_t width, size_t height, size_t str
     return gray_sample(gray,width,height,stride,h,kCenter+radius*std::sin(a),kCenter-radius*std::cos(a));
 }
 
+double polar_sample_slots(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                         const double h[8], double center, double radius,
+                         double slot, double slot_count) {
+    const double a=kTau*slot/slot_count;
+    return gray_sample(gray,width,height,stride,h,center+radius*std::sin(a),center-radius*std::cos(a));
+}
+
 bool valid_quad(const double q[8]) {
     double area=0; int sign=0;
     for (int i=0;i<4;++i) {
@@ -843,6 +850,99 @@ ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width, size_t height, 
     set_status(diag,CKEY_OK,"decoded rectified locator image; caller supplied symbol quadrilateral");
     if(diag) diag->corrected_symbols=accepted_corrections;
     return CKEY_OK;
+}
+
+// The dense profiles deliberately keep the same projective contract as the
+// locator: callers locate a plausible outer boundary, while this core owns
+// orientation, sampling, ECC, and integrity.  Their calibration samples use
+// actual payload-sized Grid Key marks, not a second oversized marker.
+ckey_status ckey_decode_text_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                   const double quad_xy[8], uint8_t *payload, size_t out_capacity,
+                                   size_t *out_payload_len, ckey_diagnostics *diag) {
+    if (!gray || !quad_xy || !payload || !out_payload_len || width < 2 || height < 2 || stride < width ||
+        !valid_quad(quad_xy)) { set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 2 image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT; }
+    constexpr double canonical[8]={0,0,29,0,29,29,0,29};
+    const auto nodes=text_nodes();
+    if (nodes.size() < kTextCodewordBytes*8) { set_status(diag,CKEY_INTERNAL_ERROR,"Profile 2 sampling layout unavailable"); return CKEY_INTERNAL_ERROR; }
+    bool found=false, ambiguous=false; std::vector<uint8_t> accepted; uint32_t accepted_corrections=0;
+    for (int reverse=0;reverse<2;++reverse) for (int start=0;start<4;++start) {
+        double dst[8],h[8];
+        for (int i=0;i<4;++i) { const int q=(start+(reverse?-i:i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
+        if (!solve_homography(canonical,dst,h)) continue;
+        std::vector<double> marks, empties;
+        for (int r:{11,12}) for(int c:{2,3}) marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
+        empties.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
+        empties.push_back(gray_sample(gray,width,height,stride,h,5.5,14.5));
+        if (std::any_of(marks.begin(),marks.end(),[](double x){return x<0;}) || std::any_of(empties.begin(),empties.end(),[](double x){return x<0;})) continue;
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size(), empty_mean=std::accumulate(empties.begin(),empties.end(),0.0)/empties.size();
+        if (std::abs(mark_mean-empty_mean)<18.0) continue;
+        const bool dark=mark_mean<empty_mean; const double threshold=(mark_mean+empty_mean)*.5;
+        const auto marked=[&](double x){return dark?x<threshold:x>threshold;};
+        if (std::count_if(marks.begin(),marks.end(),marked)<3 || std::count_if(empties.begin(),empties.end(),[&](double x){return !marked(x);})<1) continue;
+        std::array<uint8_t,kTextCodewordBytes> cw{}; bool usable=true;
+        for(size_t bit=0;bit<kTextCodewordBytes*8;++bit) {
+            const auto &n=nodes[bit];
+            const double v=n.dial ? polar_sample_slots(gray,width,height,stride,h,kCenter,8.55,n.slot,144.0)
+                                  : gray_sample(gray,width,height,stride,h,n.x,n.y);
+            if(v<0) { usable=false; break; }
+            if(marked(v)) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8)));
+        }
+        if(!usable) continue;
+        std::array<uint8_t,CKEY_TEXT_PAYLOAD_MAX_BYTES> candidate{}; size_t candidate_len=0; ckey_diagnostics local{};
+        if(ckey_decode_text(cw.data(),cw.size(),candidate.data(),candidate.size(),&candidate_len,&local)!=CKEY_OK) continue;
+        const std::vector<uint8_t> result(candidate.begin(),candidate.begin()+static_cast<std::ptrdiff_t>(candidate_len));
+        if(!found) { accepted=result; accepted_corrections=local.corrected_symbols; found=true; }
+        else if(result!=accepted) ambiguous=true;
+    }
+    if(!found || ambiguous) { set_status(diag,ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE,ambiguous?"multiple Profile 2 orientations passed integrity":"no Profile 2 orientation passed calibration, Reed-Solomon, and CRC"); return ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE; }
+    if(out_capacity<accepted.size()) { set_status(diag,CKEY_INSUFFICIENT_BUFFER,"Profile 2 output buffer is too small"); return CKEY_INSUFFICIENT_BUFFER; }
+    std::memcpy(payload,accepted.data(),accepted.size()); *out_payload_len=accepted.size(); set_status(diag,CKEY_OK,"decoded rectified Profile 2 image"); if(diag) diag->corrected_symbols=accepted_corrections; return CKEY_OK;
+}
+
+ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                       const double quad_xy[8], uint8_t *payload, size_t out_capacity,
+                                       size_t *out_payload_len, ckey_diagnostics *diag) {
+    if (!gray || !quad_xy || !payload || !out_payload_len || width < 2 || height < 2 || stride < width ||
+        !valid_quad(quad_xy)) { set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 3 image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT; }
+    constexpr double canonical[8]={0,0,116,0,116,116,0,116};
+    const auto nodes=extended_nodes();
+    if(nodes.size()<kExtendedBits) { set_status(diag,CKEY_INTERNAL_ERROR,"Profile 3 sampling layout unavailable"); return CKEY_INTERNAL_ERROR; }
+    bool found=false, ambiguous=false; std::vector<uint8_t> accepted; uint32_t accepted_corrections=0;
+    for(int reverse=0;reverse<2;++reverse) for(int start=0;start<4;++start) {
+        double dst[8],h[8]; for(int i=0;i<4;++i) { const int q=(start+(reverse?-i:i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
+        if(!solve_homography(canonical,dst,h)) continue;
+        std::vector<double> marks,empties;
+        for(int r=0;r<2;++r) for(int c=0;c<2;++c) marks.push_back(gray_sample(gray,width,height,stride,h,8.25+c*.5,45.25+r*.5));
+        empties.push_back(gray_sample(gray,width,height,stride,h,6.5,45.25)); empties.push_back(gray_sample(gray,width,height,stride,h,58.0,4.5));
+        if(std::any_of(marks.begin(),marks.end(),[](double x){return x<0;}) || std::any_of(empties.begin(),empties.end(),[](double x){return x<0;})) continue;
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size(),empty_mean=std::accumulate(empties.begin(),empties.end(),0.0)/empties.size();
+        if(std::abs(mark_mean-empty_mean)<14.0) continue;
+        const bool dark=mark_mean<empty_mean; const double threshold=(mark_mean+empty_mean)*.5; const auto marked=[&](double x){return dark?x<threshold:x>threshold;};
+        if(std::count_if(marks.begin(),marks.end(),marked)<3) continue;
+        std::array<uint8_t,kExtendedCodewordBytes> cw{}; std::array<std::array<uint8_t,3>,576> ray_values{}; std::array<bool,576> ray_ready{}; bool usable=true;
+        const auto put=[&](size_t bit,bool value){ if(value) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8))); };
+        for(size_t bit=0;bit<kExtendedBits;++bit) {
+            const auto &n=nodes[bit];
+            if(n.kind==ExtendedKind::cart || n.kind==ExtendedKind::ring) { const double v=gray_sample(gray,width,height,stride,h,n.x,n.y); if(v<0){usable=false;break;} put(bit,marked(v)); continue; }
+            if(!ray_ready[n.slot]) {
+                int level=0;
+                for(int l=0;l<4;++l) { const double v=polar_sample_slots(gray,width,height,stride,h,58.0,26.30+.80+.85*l-.16,n.slot,576.0); if(v>=0 && marked(v)) level=l; }
+                const int gray_code=level^(level>>1); ray_values[n.slot][0]=static_cast<uint8_t>((gray_code>>1)&1); ray_values[n.slot][1]=static_cast<uint8_t>(gray_code&1);
+                const double a=kTau*n.slot/576.0, r=26.75; const double tx=std::cos(a)*.13, ty=std::sin(a)*.13;
+                const double side=gray_sample(gray,width,height,stride,h,58.0+r*std::sin(a)+tx,58.0-r*std::cos(a)+ty);
+                ray_values[n.slot][2]=(side>=0 && marked(side))?1:0; ray_ready[n.slot]=true;
+            }
+            put(bit,ray_values[n.slot][n.component]!=0);
+        }
+        if(!usable) continue;
+        std::array<uint8_t,CKEY_EXTENDED_PAYLOAD_MAX_BYTES> candidate{}; size_t candidate_len=0; ckey_diagnostics local{};
+        if(ckey_decode_extended(cw.data(),cw.size(),candidate.data(),candidate.size(),&candidate_len,&local)!=CKEY_OK) continue;
+        const std::vector<uint8_t> result(candidate.begin(),candidate.begin()+static_cast<std::ptrdiff_t>(candidate_len));
+        if(!found){accepted=result;accepted_corrections=local.corrected_symbols;found=true;} else if(result!=accepted) ambiguous=true;
+    }
+    if(!found || ambiguous) { set_status(diag,ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE,ambiguous?"multiple Profile 3 orientations passed integrity":"no Profile 3 orientation passed calibration, Reed-Solomon, and CRC"); return ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE; }
+    if(out_capacity<accepted.size()){set_status(diag,CKEY_INSUFFICIENT_BUFFER,"Profile 3 output buffer is too small");return CKEY_INSUFFICIENT_BUFFER;}
+    std::memcpy(payload,accepted.data(),accepted.size()); *out_payload_len=accepted.size(); set_status(diag,CKEY_OK,"decoded rectified Profile 3 image"); if(diag)diag->corrected_symbols=accepted_corrections; return CKEY_OK;
 }
 
 ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,

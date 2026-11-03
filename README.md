@@ -26,7 +26,7 @@ The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes a
 ./build/ckey encode-text --hex 001122334455 --out binary.svg
 ```
 
-It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.15.0](spec/CKey-Format-v0.15.0.md). Its camera image decoder is not implemented yet; do not expect CKeyReader to scan Profile 2 until that work is completed and physically tested.
+It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.15.0](spec/CKey-Format-v0.15.0.md). The shared core now exposes a projective grayscale sampler for Profile 2; it needs real-camera validation before any robustness claim.
 
 The experimental extended profile accepts 1–2,048 bytes. It uses ten byte-interleaved RS(255,223) blocks, 24 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
 
@@ -35,11 +35,13 @@ The experimental extended profile accepts 1–2,048 bytes. It uses ten byte-inte
 ./build/ckey encode-extended --hex <up-to-4096-hex-chars> --out extended.svg
 ```
 
-See [Format 0.16.0](spec/CKey-Format-v0.16.0.md). The core validates Profile 3 codewords and renders its exact geometry, but the mobile/image decoder does not yet sample Profile 3 and must not be expected to scan it.
+See [Format 0.16.0](spec/CKey-Format-v0.16.0.md). The core now exposes Profile 3 projective sampling as well; it is a new, high-resolution experimental path and must not be advertised as robust until it passes a physical-capture corpus.
 
 ## iPhone reader
 
 An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, uses Vision to locate a square candidate, and passes grayscale camera frames and candidate corners to the C ABI. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. The app reports Vision localization time separately from CKey decode time. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.
+
+The companion Mac laboratory is [`macos/CKeyRenderer.xcodeproj`](macos/CKeyRenderer.xcodeproj). It invokes the same C++ encoders and SVG renderer, then applies explicitly non-normative color, blur, damage, noise, and rotation layers to make repeatable visual test cases. It must not be used to infer wire-format semantics from decoration.
 
 ## Milestones
 

@@ -22,7 +22,7 @@ struct ReaderView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("CKey Reader").font(.largeTitle.bold())
-                    Text("Format 0.14 · \(softwareVersion)")
+                    Text("Profiles 1–3 · \(softwareVersion)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -53,6 +53,7 @@ struct ReaderView: View {
                     .font(.headline)
                     .foregroundColor(scanner.decodedHex == nil ? Color.primary : Color.green)
                 if let hex = scanner.decodedHex {
+                    Text(scanner.decodedProfile).font(.caption.weight(.semibold)).foregroundStyle(.green)
                     Text(hex).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))

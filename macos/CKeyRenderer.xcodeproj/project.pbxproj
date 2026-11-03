@@ -1,0 +1,28 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		B10000000000000000000001 /* CKeyRendererApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* CKeyRendererApp.swift */; };
+		B10000000000000000000002 /* ckey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* ckey.cpp */; };
+		B20000000000000000000001 /* CKeyRendererApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CKeyRenderer/CKeyRendererApp.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* ckey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../src/ckey.cpp; sourceTree = "<group>"; };
+		B20000000000000000000003 /* CKeyRenderer-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CKeyRenderer/CKeyRenderer-Bridging-Header.h; sourceTree = "<group>"; };
+		B20000000000000000000004 /* CKeyRenderer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CKeyRenderer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000001 = {isa = PBXGroup; children = (B20000000000000000000001, B20000000000000000000002, B20000000000000000000003, B40000000000000000000002); sourceTree = "<group>"; };
+		B40000000000000000000002 = {isa = PBXGroup; children = (B20000000000000000000004); name = Products; sourceTree = "<group>"; };
+		B50000000000000000000001 /* CKeyRenderer */ = {isa = PBXNativeTarget; buildConfigurationList = B90000000000000000000002; buildPhases = (B60000000000000000000001, B30000000000000000000001, B60000000000000000000002); buildRules = (); dependencies = (); name = CKeyRenderer; productName = CKeyRenderer; productReference = B20000000000000000000004; productType = "com.apple.product-type.application"; };
+		B60000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000001, B10000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
+		B60000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B70000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {B50000000000000000000001 = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = B90000000000000000000001; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = B40000000000000000000001; productRefGroup = B40000000000000000000002; projectDirPath = ""; projectRoot = ""; targets = (B50000000000000000000001); };
+		B80000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; name = Debug; };
+		B80000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; name = Release; };
+		B80000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_BUNDLE_IDENTIFIER = solutions.clearkey.CKeyRenderer; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/CKeyRenderer/CKeyRenderer-Bridging-Header.h"; SWIFT_VERSION = 5.0; HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";}; name = Debug; };
+		B80000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_BUNDLE_IDENTIFIER = solutions.clearkey.CKeyRenderer; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/CKeyRenderer/CKeyRenderer-Bridging-Header.h"; SWIFT_VERSION = 5.0; HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";}; name = Release; };
+		B90000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (B80000000000000000000001, B80000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B90000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (B80000000000000000000003, B80000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+	};
+	rootObject = B70000000000000000000001;
+}
