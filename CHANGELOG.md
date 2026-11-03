@@ -1,3 +1,8 @@
+## 0.1.0-dev.15 — 2026-11-02
+
+* Fixed a throttled UI status update that left the reader stuck on “Testing square candidates…” after each frame.
+* Candidate frames now publish their final CKey validation result immediately; empty-frame progress remains throttled.
+
 ## 0.1.0-dev.14 — 2026-11-02
 
 * Loosened Vision square-candidate thresholds and added nearby quadrilateral scale hypotheses for the rounded CKey frame.
