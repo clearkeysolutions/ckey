@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -25,16 +26,37 @@ static bool write_svg(const std::string &path, const std::string &svg) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 6 || (std::string(argv[2]) != "--hex" && std::string(argv[2]) != "--utf8") || std::string(argv[4]) != "--out") {
+    const bool tierOption = argc == 8 && std::string(argv[2]) == "--tier";
+    const int modeIndex = tierOption ? 4 : 2;
+    const int outIndex = tierOption ? 6 : 4;
+    if ((argc != 6 && !tierOption) || (std::string(argv[modeIndex]) != "--hex" && std::string(argv[modeIndex]) != "--utf8") || std::string(argv[outIndex]) != "--out") {
         std::cerr << "usage:\n"
                   << "  ckey encode --hex <32-hex-chars> --out <locator.svg>\n"
                   << "  ckey encode-text --utf8 <up-to-200-byte-text> --out <text.svg>\n"
                   << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n"
                   << "  ckey encode-extended --utf8 <up-to-2048-byte-text> --out <extended.svg>\n"
+                  << "  ckey encode-extended --tier <256|384|512|768|1024|1536|2048> --utf8 <text> --out <extended.svg>\n"
                   << "  ckey encode-extended --hex <up-to-4096-hex-chars> --out <extended.svg>\n";
         return 2;
     }
-    const std::string command = argv[1], mode = argv[2], value = argv[3], output = argv[5];
+    const std::string command = argv[1], mode = argv[modeIndex], value = argv[modeIndex+1], output = argv[outIndex+1];
+    if (tierOption && command != "encode-extended") { std::cerr << "--tier applies only to encode-extended\n"; return 2; }
+    ckey_extended_tier requestedTier = CKEY_EXTENDED_TIER_AUTO;
+    if (tierOption) {
+        char *end = nullptr;
+        const long parsed = std::strtol(argv[3], &end, 10);
+        if (!end || *end != '\0') { std::cerr << "invalid capacity tier\n"; return 2; }
+        switch (parsed) {
+        case 256: requestedTier=CKEY_EXTENDED_TIER_256; break;
+        case 384: requestedTier=CKEY_EXTENDED_TIER_384; break;
+        case 512: requestedTier=CKEY_EXTENDED_TIER_512; break;
+        case 768: requestedTier=CKEY_EXTENDED_TIER_768; break;
+        case 1024: requestedTier=CKEY_EXTENDED_TIER_1024; break;
+        case 1536: requestedTier=CKEY_EXTENDED_TIER_1536; break;
+        case 2048: requestedTier=CKEY_EXTENDED_TIER_2048; break;
+        default: std::cerr << "unsupported capacity tier\n"; return 2;
+        }
+    }
     ckey_diagnostics diag{};
     std::vector<uint8_t> payload;
     if (mode == "--hex") {
@@ -57,17 +79,18 @@ int main(int argc, char **argv) {
         size_t needed = 0; ckey_render_text_svg(&symbol, 16, nullptr, 0, &needed);
         std::string svg(needed, '\0');
         if (ckey_render_text_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
-        std::cout << diag.message << "; profile=text-v2; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
+        std::cout << diag.message << "; profile=text-v3; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
         return 0;
     }
     if (command == "encode-extended") {
         if (payload.empty() || payload.size() > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) { std::cerr << "extended input must contain 1 to 2048 bytes\n"; return 2; }
         ckey_extended_symbol symbol{};
-        if (ckey_encode_extended(payload.data(), payload.size(), &symbol, &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+        const ckey_status encoded = ckey_encode_extended_tiered(payload.data(), payload.size(), requestedTier, &symbol, &diag);
+        if (encoded != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
         size_t needed = 0; ckey_render_extended_svg(&symbol, 16, nullptr, 0, &needed);
         std::string svg(needed, '\0');
         if (ckey_render_extended_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "extended SVG rendering failed\n"; return 1; }
-        std::cout << diag.message << "; profile=extended-v3; payload-bytes=" << payload.size() << "; codeword-bytes=" << CKEY_EXTENDED_CODEWORD_BYTES << "; svg=" << output << '\n';
+        std::cout << diag.message << "; profile=extended-v4; payload-bytes=" << payload.size() << "; codeword-bytes=" << CKEY_EXTENDED_CODEWORD_BYTES << "; svg=" << output << '\n';
         return 0;
     }
     std::cerr << "unknown command\n"; return 2;
