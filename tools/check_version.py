@@ -9,7 +9,7 @@ version = (root / "VERSION").read_text().strip()
 header = (root / "include/ckey/ckey.h").read_text()
 context = (root / "CONTEXT.md").read_text()
 changelog = (root / "CHANGELOG.md").read_text()
-fixture = json.loads((root / "tests/vectors/locator-v1.json").read_text())
+fixture = json.loads((root / "tests/vectors/locator-v2.json").read_text())
 
 checks = {
     "public C ABI header": re.search(r'#define CKEY_SOFTWARE_VERSION "([^"]+)"', header).group(1),

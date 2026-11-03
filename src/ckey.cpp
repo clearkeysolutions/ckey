@@ -211,9 +211,9 @@ ckey_status ckey_encode_locator(const uint8_t *payload, size_t payload_len,
     if (payload_len != CKEY_LOCATOR_PAYLOAD_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "locator payload must be exactly 16 bytes"); return CKEY_INVALID_ARGUMENT; }
 
     std::array<uint8_t, 42> cw{};
-    // Frame: magic C7 4B, format 01, profile 01, length u16be, 16 payload
+    // Frame: magic C7 4B, current format, profile 01, length u16be, 16 payload
     // bytes, CRC-32C over the first 22 bytes, followed by 16 RS parity bytes.
-    cw[0] = 0xc7; cw[1] = 0x4b; cw[2] = 1; cw[3] = 1; cw[4] = 0; cw[5] = 16;
+    cw[0] = 0xc7; cw[1] = 0x4b; cw[2] = CKEY_FORMAT_VERSION; cw[3] = 1; cw[4] = 0; cw[5] = 16;
     std::memcpy(cw.data() + 6, payload, 16);
     const uint32_t crc = crc32c(cw.data(), 22);
     cw[22] = static_cast<uint8_t>(crc >> 24); cw[23] = static_cast<uint8_t>(crc >> 16);
@@ -239,7 +239,7 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
     std::array<uint8_t,42> cw{}; std::memcpy(cw.data(), codeword, cw.size());
     uint32_t corrected = 0;
     if (!rs_correct(cw, corrected)) { set_status(diag, CKEY_UNCORRECTABLE, "Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
-    if (cw[0] != 0xc7 || cw[1] != 0x4b || cw[2] != 1 || cw[3] != 1 || cw[4] != 0 || cw[5] != 16) {
+    if (cw[0] != 0xc7 || cw[1] != 0x4b || cw[2] != CKEY_FORMAT_VERSION || cw[3] != 1 || cw[4] != 0 || cw[5] != 16) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "corrected frame has invalid magic, version, profile, or length"); return CKEY_INTEGRITY_FAILURE;
     }
     const uint32_t expected = (static_cast<uint32_t>(cw[22]) << 24) | (static_cast<uint32_t>(cw[23]) << 16) | (static_cast<uint32_t>(cw[24]) << 8) | cw[25];
@@ -257,15 +257,16 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     if (nodes.size() < kBits) return CKEY_INTERNAL_ERROR;
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
-      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"white\"/><g fill=\"black\">"
-      << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke=\"black\" stroke-width=\"0.65\"/>";
-    // Asymmetric 5x5 corner finders, invariant in size at this profile.
-    for (int fr : {0, 24}) for (int fc : {0, 24}) {
-        for (int y = 0; y < 5; ++y) for (int x = 0; x < 5; ++x) {
-            const int ax = fc + x, ay = fr + y;
-            const bool dark = (x == 0 || y == 0 || x == 4 || y == 4) || (x == 2 && y == 2) || (fc == 0 ? x < 2 : x > 2);
-            if (dark) o << "<rect x=\"" << ax << "\" y=\"" << ay << "\" width=\"1\" height=\"1\"/>";
-        }
+      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
+    // Four open, nested corner arcs replace QR-like solid finder blocks.
+    // The handed asymmetry is carried by the short inner tick at upper-left.
+    for (int corner = 0; corner < 4; ++corner) {
+        const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
+        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">"
+          << "<path d=\"M 0.8 5.2 A 4.4 4.4 0 0 1 5.2 0.8\" stroke-width=\"0.85\"/>"
+          << "<path d=\"M 1.6 4.4 A 2.8 2.8 0 0 1 4.4 1.6\" stroke-width=\"0.48\"/>"
+          << "<circle cx=\"3\" cy=\"3\" r=\"0.38\" fill=\"#f4f1e8\" stroke=\"none\"/></g>";
     }
     // Grid Key: fixed 8-bit Barker-like calibration word at the left interior.
     constexpr char grid[] = "10110100";
@@ -274,18 +275,18 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     for (const auto &[slot, fraction] : {std::pair{0, 1.0}, {54, .5}, {55, .75}}) {
         const double a = kTau * slot / 72.0, r = 9.5 * fraction;
         o << "<path d=\"M " << kCenter << ' ' << kCenter << " L " << kCenter + r * std::sin(a) << ' ' << kCenter - r * std::cos(a)
-          << "\" fill=\"none\" stroke=\"black\" stroke-width=\"0.22\"/>";
+          << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.22\"/>";
     }
     // Permanent Ring Key: two dots, one blank slot, one dot, then one connected four-slot arc.
     const double rr = 9.5;
     for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), .16); }
     const double a0 = kTau * 22.0 / 72.0, a1 = kTau * 26.0 / 72.0;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
-      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"black\" stroke-width=\"0.32\" stroke-linecap=\"butt\"/>";
+      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.32\" stroke-linecap=\"butt\"/>";
     for (size_t i = 0; i < kBits; ++i) if (code_bit(s, i)) {
         const Node &n = nodes[i];
-        if (n.polar) svg_circle(o, n.x, n.y, .16);
-        else o << "<rect x=\"" << n.col << "\" y=\"" << n.row << "\" width=\"1\" height=\"1\"/>";
+        if (n.polar) o << "<rect x=\"" << n.x - .17 << "\" y=\"" << n.y - .17 << "\" width=\"0.34\" height=\"0.34\" rx=\"0.11\" stroke=\"none\"/>";
+        else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
     o << "</g></svg>";
     const std::string text = o.str(); *required = text.size() + 1;

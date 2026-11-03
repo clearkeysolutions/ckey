@@ -13,12 +13,12 @@ int main() {
     ckey_symbol a{}, b{}; ckey_diagnostics d{};
     assert(ckey_encode_locator(payload.data(), payload.size(), &a, &d) == CKEY_OK);
     assert(d.status == CKEY_OK && a.side == 29 && a.abi_version == 1);
-    assert(a.codeword[0]==0xc7 && a.codeword[1]==0x4b && a.codeword[2]==1 && a.codeword[3]==1);
+    assert(a.codeword[0]==0xc7 && a.codeword[1]==0x4b && a.codeword[2]==CKEY_FORMAT_VERSION && a.codeword[3]==1);
     assert(a.codeword[4]==0 && a.codeword[5]==16);
     for (size_t i=0;i<16;++i) assert(a.codeword[6+i]==i);
-    // CRC-32C("C7 4B 01 01 00 10 00..0F") is a fixed interoperability check.
-    assert(a.codeword[22]==0xaf && a.codeword[23]==0x88 && a.codeword[24]==0xc6 && a.codeword[25]==0x03);
-    constexpr uint8_t expected_parity[16]={0x85,0x0f,0x0d,0x71,0xe9,0xdd,0xf1,0x43,0x28,0xee,0x45,0xc2,0x9d,0x7a,0x02,0xaa};
+    // CRC-32C("C7 4B 02 01 00 10 00..0F") is a fixed interoperability check.
+    assert(a.codeword[22]==0xf6 && a.codeword[23]==0x4c && a.codeword[24]==0xde && a.codeword[25]==0xc4);
+    constexpr uint8_t expected_parity[16]={0x2b,0x54,0x54,0x79,0xa2,0x87,0x3f,0xbf,0x57,0xf7,0x9e,0x3b,0x72,0x6b,0xbe,0x6a};
     for (size_t i=0;i<16;++i) assert(a.codeword[26+i]==expected_parity[i]);
     assert(std::strcmp(ckey_get_software_version(), CKEY_SOFTWARE_VERSION)==0);
     std::array<uint8_t,16> decoded{};
@@ -50,6 +50,8 @@ int main() {
     assert(ckey_render_svg(&a, CKEY_MAX_RENDER_SCALE + 1, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     assert(svg.find("viewBox=\"-1 -1 31 31\"")!=std::string::npos);
     assert(svg.find("stroke-linecap=\"butt\"")!=std::string::npos);
+    assert(svg.find("fill=\"#050505\"")!=std::string::npos);
+    assert(svg.find("A 4.4 4.4")!=std::string::npos);
     assert(svg.find("CKey locator symbol")!=std::string::npos);
     std::cout << "CKey core tests passed\n";
 }

@@ -4,7 +4,7 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The first implementation milestone defines a fixed 29 × 29 locator profile, a byte framing format, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and a command-line encoder. Read [the draft format](spec/CKey-Format-v0.1.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The first implementation milestone defines a fixed 29 × 29 locator profile, a byte framing format, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and a command-line encoder. Read [the current draft format](spec/CKey-Format-v0.2.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
 
@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 ./build/ckey encode --hex 00112233445566778899aabbccddeeff --out locator.svg
 ```
 
-`ckey encode` accepts exactly 16 bytes for the locator profile. SVG is monochrome; style and color do not carry data. The C ABI provides byte-codeword decode with up to 8 unknown erroneous byte corrections, CRC-32C verification, and structured status. RS(42,26) is genuine Reed–Solomon error correction over GF(256); it is not masking. Erasure correction, image detection, perspective correction, native platform packages, and browser scanning are later milestones and are not yet claimed as implemented.
+`ckey encode` accepts exactly 16 bytes for the locator profile. The reference SVG now follows the supplied dark-field, light-mark, rounded-corner target direction. SVG styling does not alter payload bits. The C ABI provides byte-codeword decode with up to 8 unknown erroneous byte corrections, CRC-32C verification, and structured status. RS(42,26) is genuine Reed–Solomon error correction over GF(256); it is not masking. Erasure correction, image detection, perspective correction, native platform packages, and browser scanning are later milestones and are not yet claimed as implemented.
 
 ## Milestones
 

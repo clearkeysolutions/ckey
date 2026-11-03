@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.3 — 2026-11-02
+
+* Replaced solid QR-like block finders with nested open corner arcs and switched the reference SVG to dark-field/light-mark styling with rounded data modules to follow the supplied target geometry.
+* Advanced the wire geometry version to CKey Format 0.2.0; preserved the 0.1.0 draft and fixture as historical versions.
+* Kept RS(42,26) and CRC-32C framing mathematical encoding unchanged apart from the updated format byte.
+
 ## 0.1.0-dev.2 — 2026-11-02
 
 * Corrected the format note to reflect the implemented byte-codeword RS decoder and its tested eight-error correction bound.
