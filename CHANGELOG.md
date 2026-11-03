@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.4 — 2026-11-02
+
+* Reworked the polar field into four inner concentric rings plus a separate 1.9-unit annular dial band; all 12:00/9:00/9:05 calibration rays now stay within that band rather than extending to the center.
+* Added a round-robin angular traversal, retained the outer Cartesian matrix, and replaced corner dots with three nested arcs; split the top-left finder into two arc segments for orientation.
+* Advanced the wire format to 0.3.0 and preserved earlier version specs and fixtures.
+
 ## 0.1.0-dev.3 — 2026-11-02
 
 * Replaced solid QR-like block finders with nested open corner arcs and switched the reference SVG to dark-field/light-mark styling with rounded data modules to follow the supplied target geometry.

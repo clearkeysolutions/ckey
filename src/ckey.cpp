@@ -146,7 +146,7 @@ uint32_t crc32c(const uint8_t *data, size_t len) {
     return ~crc;
 }
 
-struct Node { bool polar; double x, y; int row, col; int ring, slot; };
+struct Node { bool polar; bool dial; double x, y; int row, col; int ring, slot; };
 
 bool in_finder(int r, int c) {
     const bool tl = r < 5 && c < 5, tr = r < 5 && c >= kSide - 5;
@@ -155,7 +155,7 @@ bool in_finder(int r, int c) {
 }
 bool grid_key(int r, int c) { return c == 2 && r >= 10 && r <= 17; }
 bool ray_key(int slot) { return slot == 0 || slot == 54 || slot == 55; }
-bool ring_key(int ring, int slot) { return ring == 5 && slot >= 18 && slot <= 25; }
+bool ring_key(int ring, int slot) { return ring == 3 && slot >= 18 && slot <= 25; }
 
 std::vector<Node> data_nodes() {
     std::vector<Node> cart, polar, out;
@@ -165,16 +165,20 @@ std::vector<Node> data_nodes() {
         const double x = c + .5, y = r + .5;
         const double dx = x - kCenter, dy = y - kCenter;
         if (in_finder(r, c) || grid_key(r, c) || dx * dx + dy * dy <= 10.4 * 10.4) continue;
-        cart.push_back({false, x, y, r, c, -1, -1});
+        cart.push_back({false, false, x, y, r, c, -1, -1});
     }
-    // Six 72-slot rings use fixed 5-degree angular cells. The three Ray Key
-    // bearings and eight-slot Ring Key are structural, never payload.
-    for (int ring = 0; ring < 6; ++ring) {
-        const double radius = 4.5 + ring;
-        for (int slot = 0; slot < 72; ++slot) {
+    // Four concentric payload rings occupy the inner field. A fifth layer of
+    // radial data cells is a narrow annular dial band, never spokes to center.
+    for (int step = 0; step < 72; ++step) {
+        const int slot = (step * 37) % 72; // coprime stride spreads the traversal around the whole dial
+        if (!ray_key(slot)) {
+            polar.push_back({true, true, 0, 0, -1, -1, -2, slot});
+        }
+        for (int ring = 0; ring < 4; ++ring) {
             if (ray_key(slot) || ring_key(ring, slot)) continue;
+            const double radius = 2.8 + 1.2 * ring;
             const double a = kTau * slot / 72.0;
-            polar.push_back({true, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), -1, -1, ring, slot});
+            polar.push_back({true, false, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), -1, -1, ring, slot});
         }
     }
     // Interleave coordinate systems in the placement sequence.  Local image
@@ -263,29 +267,42 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     // The handed asymmetry is carried by the short inner tick at upper-left.
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
-        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">"
-          << "<path d=\"M 0.8 5.2 A 4.4 4.4 0 0 1 5.2 0.8\" stroke-width=\"0.85\"/>"
-          << "<path d=\"M 1.6 4.4 A 2.8 2.8 0 0 1 4.4 1.6\" stroke-width=\"0.48\"/>"
-          << "<circle cx=\"3\" cy=\"3\" r=\"0.38\" fill=\"#f4f1e8\" stroke=\"none\"/></g>";
+        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
+        for (double radius : {5.0, 4.0, 3.0}) {
+            if (corner == 0) {
+                const double a1 = 50.0 * kTau / 360.0;
+                const double a2 = 40.0 * kTau / 360.0;
+                o << "<path d=\"M 0.8 " << .8 + radius << " A " << radius << ' ' << radius << " 0 0 0 " << .8 + radius * std::cos(a1) << ' ' << .8 + radius * std::sin(a1)
+                  << " M " << .8 + radius * std::cos(a2) << ' ' << .8 + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << .8 + radius << " 0.8\" stroke-width=\"0.55\"/>";
+            } else {
+                o << "<path d=\"M 0.8 " << .8 + radius << " A " << radius << ' ' << radius << " 0 0 0 " << .8 + radius << " 0.8\" stroke-width=\"0.55\"/>";
+            }
+        }
+        o << "</g>";
     }
     // Grid Key: fixed 8-bit Barker-like calibration word at the left interior.
     constexpr char grid[] = "10110100";
     for (int i = 0; i < 8; ++i) if (grid[i] == '1') svg_circle(o, 2.5, 10.5 + i, .29);
-    // Permanent Ray Key. Angle 0 is 12:00, clockwise; 5-degree slots.
+    // Permanent Ray Key is contained in the outer dial band (r=7.6..9.5).
     for (const auto &[slot, fraction] : {std::pair{0, 1.0}, {54, .5}, {55, .75}}) {
-        const double a = kTau * slot / 72.0, r = 9.5 * fraction;
-        o << "<path d=\"M " << kCenter << ' ' << kCenter << " L " << kCenter + r * std::sin(a) << ' ' << kCenter - r * std::cos(a)
+        const double a = kTau * slot / 72.0, r0 = 7.6, r1 = r0 + 1.9 * fraction;
+        o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
           << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.22\"/>";
     }
-    // Permanent Ring Key: two dots, one blank slot, one dot, then one connected four-slot arc.
-    const double rr = 9.5;
+    // Permanent Ring Key on the outermost inner data ring.
+    const double rr = 6.4;
     for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), .16); }
     const double a0 = kTau * 22.0 / 72.0, a1 = kTau * 26.0 / 72.0;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
       << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.32\" stroke-linecap=\"butt\"/>";
     for (size_t i = 0; i < kBits; ++i) if (code_bit(s, i)) {
         const Node &n = nodes[i];
-        if (n.polar) o << "<rect x=\"" << n.x - .17 << "\" y=\"" << n.y - .17 << "\" width=\"0.34\" height=\"0.34\" rx=\"0.11\" stroke=\"none\"/>";
+        if (n.dial) {
+            const double a = kTau * n.slot / 72.0;
+            o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + 9.5 * std::sin(a) << ' ' << kCenter - 9.5 * std::cos(a)
+              << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\"/>";
+        }
+        else if (n.polar) svg_circle(o, n.x, n.y, .14);
         else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
     o << "</g></svg>";
