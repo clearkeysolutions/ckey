@@ -12,6 +12,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published private(set) var decodeMilliseconds = 0.0
     @Published private(set) var detectionMilliseconds = 0.0
     @Published private(set) var candidateCount = 0
+    @Published private(set) var candidateSizes = ""
     @Published private(set) var isRunning = false
 
     private let sessionQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.session")
@@ -126,6 +127,11 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             let observations = (rectangleRequest.results ?? []).sorted {
                 $0.boundingBox.width * $0.boundingBox.height > $1.boundingBox.width * $1.boundingBox.height
             }
+            let sizeSummary = observations.prefix(3).map { observation in
+                let box = observation.boundingBox
+                return "\(Int(box.width * CGFloat(width)))×\(Int(box.height * CGFloat(height)))"
+            }.joined(separator: ", ")
+            DispatchQueue.main.async { self.candidateSizes = sizeSummary }
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
@@ -156,9 +162,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 if result != CKEY_OK && candidateIndex < 6 {
                     let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
                                 hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
-                    let shifts = [-0.08, 0.0, 0.08]
-                    refinement: for scale in [0.40, 0.50, 0.60, 0.70, 0.78, 0.86,
-                                              0.94, 1.02, 1.10, 1.20, 1.30, 1.40] {
+                    let shifts = [-0.20, -0.10, 0.0, 0.10, 0.20]
+                    refinement: for scale in [0.25, 0.33, 0.40, 0.48, 0.56, 0.64,
+                                              0.72, 0.78, 0.86, 0.94, 1.02, 1.10,
+                                              1.20, 1.30, 1.40, 1.50, 1.60, 1.80] {
                         for ox in shifts {
                             for oy in shifts {
                             let quad = expandedCKeyQuad(points, expansion: scale,

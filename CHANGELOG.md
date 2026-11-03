@@ -1,3 +1,9 @@
+## 0.1.0-dev.20 — 2026-11-03
+
+* Expanded the far-distance fallback from 12 to 18 scale hypotheses (0.25×–1.80×) and from nine to 25 center shifts per scale for each of the six leading candidates.
+* Added on-screen Vision candidate-size diagnostics to reveal whether the square detector is selecting the symbol, its surrounding canvas, or a larger object.
+* Kept CKey Format 0.8.0 unchanged. The wider fallback is not yet compiled or benchmarked on-device; the UI reports the candidate bounds for the next field test.
+
 ## 0.1.0-dev.19 — 2026-11-03
 
 * Broadened the distant-symbol localization fallback to test 12 candidate scales from 0.40× to 1.40× and a 3×3 center-shift grid for each of the six leading Vision squares. The existing small set of fast hypotheses still runs first.

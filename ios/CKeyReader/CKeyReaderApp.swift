@@ -63,6 +63,10 @@ struct ReaderView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                     Text("Vision: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms · squares: \(scanner.candidateCount)")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    if !scanner.candidateSizes.isEmpty {
+                        Text("Largest square candidates: \(scanner.candidateSizes) px")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
