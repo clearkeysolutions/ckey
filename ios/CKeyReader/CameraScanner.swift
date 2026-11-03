@@ -165,16 +165,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
             if !observations.isEmpty {
                 publishProgress("Square found; CKey checks did not match. Hold steady and fill more of the frame.",
-                                detectionMilliseconds: detectionElapsed, candidates: observations.count)
+                                detectionMilliseconds: detectionElapsed, candidates: observations.count,
+                                force: true)
             }
         } catch {
             publishProgress("Camera analysis failed: \(error.localizedDescription)", detectionMilliseconds: 0, candidates: 0)
         }
     }
 
-    private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int) {
+    private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int,
+                                 force: Bool = false) {
         let now = CACurrentMediaTime()
-        guard now - lastProgressTime >= 0.5 else { return }
+        guard force || now - lastProgressTime >= 0.5 else { return }
         lastProgressTime = now
         DispatchQueue.main.async {
             self.status = text
