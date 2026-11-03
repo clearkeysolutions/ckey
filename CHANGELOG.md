@@ -1,3 +1,9 @@
+## 0.1.0-dev.10 — 2026-11-03
+
+* Corrected the finder interpretation to match the supplied geometry blueprint: one thick quarter-arc at bottom-left, top-right, and bottom-right, with the top-left arc split into two pieces for orientation.
+* Kept the corner centerline radius at 4.5 modules and made each arc a 1.0-module band with round caps; the split has a one-module visible gap.
+* Versioned the geometry as CKey Format 0.8.0 / format byte 08 and regenerated the CRC-32C/Reed–Solomon fixture. The payload, RS code, and C ABI remain unchanged.
+
 ## 0.1.0-dev.9 — 2026-11-03
 
 * Restored three nested quarter-arc finders at all corners, with the three top-left arcs split by a one-module orientation gap.

@@ -22,9 +22,9 @@ int main() {
     assert(a.codeword[0]==0xc7 && a.codeword[1]==0x4b && a.codeword[2]==CKEY_FORMAT_VERSION && a.codeword[3]==1);
     assert(a.codeword[4]==0 && a.codeword[5]==16);
     for (size_t i=0;i<16;++i) assert(a.codeword[6+i]==i);
-    // CRC-32C("C7 4B 07 01 00 10 00..0F") is a fixed interoperability check.
-    assert(a.codeword[22]==0x1c && a.codeword[23]==0x00 && a.codeword[24]==0xf7 && a.codeword[25]==0x8d);
-    constexpr uint8_t expected_parity[51]={0x29,0x9b,0x51,0x2d,0x0b,0xf6,0x66,0x26,0xe2,0x14,0x7f,0x85,0x4c,0x9d,0xd4,0xe4,0x38,0xab,0xbd,0x63,0x8c,0x7e,0x65,0x9f,0xec,0xe8,0x56,0xa7,0x2e,0xd9,0x67,0x20,0xd9,0x68,0xed,0x6b,0xf7,0xa4,0x5d,0xd1,0x30,0xe2,0x42,0x2f,0x17,0xbe,0xac,0x5e,0xf0,0xdd,0x43};
+    // CRC-32C("C7 4B 08 01 00 10 00..0F") is a fixed interoperability check.
+    assert(a.codeword[22]==0x27 && a.codeword[23]==0x38 && a.codeword[24]==0xfa && a.codeword[25]==0xa7);
+    constexpr uint8_t expected_parity[51]={0xca,0x2e,0xe3,0x2f,0x21,0x9e,0xc8,0x75,0x07,0x84,0xfd,0x1a,0xf4,0xa4,0x37,0x54,0x2e,0x6b,0xa7,0x19,0xa9,0x81,0x7a,0x77,0xed,0x5f,0x1b,0x61,0x97,0xc9,0xa2,0x50,0x8b,0xc2,0xfc,0x36,0xa8,0xa3,0xfb,0x80,0xfa,0x08,0x5f,0x37,0x14,0x95,0x8e,0xe9,0x1d,0x2f,0xad};
     for (size_t i=0;i<51;++i) assert(a.codeword[26+i]==expected_parity[i]);
     assert(std::strcmp(ckey_get_software_version(), CKEY_SOFTWARE_VERSION)==0);
     std::array<uint8_t,16> decoded{};
@@ -70,12 +70,13 @@ int main() {
     assert(ckey_render_svg(&a, CKEY_MAX_RENDER_SCALE + 1, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     assert(svg.find("viewBox=\"-1 -1 31 31\"")!=std::string::npos);
     assert(svg.find("fill=\"#050505\"")!=std::string::npos);
-    assert(svg.find("A 3.0000 3.0000")!=std::string::npos);
     assert(svg.find("A 4.5000 4.5000")!=std::string::npos);
     assert(occurrences(svg,"r=\"0.1500\"")==occurrences(svg,"<circle "));
     assert(occurrences(svg,"<circle ")>3);
     assert(svg.find("stroke-width=\"0.3000\" stroke-linecap=\"round\"/>")!=std::string::npos);
-    assert(occurrences(svg,"stroke-width=\"0.4200\"/>")==12);
+    assert(occurrences(svg,"stroke-width=\"1.0000\"/>")==4);
+    assert(svg.find("M 0.8000 5.3000 A 4.5000 4.5000")!=std::string::npos);
+    assert(occurrences(svg," M ")==1);
     assert(occurrences(svg,"stroke-width=\"0.15\" stroke-linecap=\"round\"/>")==69);
     assert(svg.find("x=\"2.1300\" y=\"11.1300\"")!=std::string::npos);
     assert(svg.find("CKey locator symbol")!=std::string::npos);

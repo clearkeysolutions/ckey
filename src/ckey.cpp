@@ -298,25 +298,23 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
-    // Three nested quarter arcs mark each corner. The top-left set is split
+    // One thick quarter-arc marks each corner. The top-left arc is split
     // into two fragments to encode orientation with a one-module clear gap.
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double cx = .8, cy = .8, thickness = .42, visible_gap = 1.0;
-        for (double radius : {3.0, 3.75, 4.5}) {
-            if (corner == 0) {
-                const double half_gap = (visible_gap + thickness) / (2.0 * radius);
-                const double middle = kTau * 45.0 / 360.0;
-                const double a1 = middle + half_gap;
-                const double a2 = middle - half_gap;
-                o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius * std::cos(a1) << ' ' << cy + radius * std::sin(a1)
-                  << " M " << cx + radius * std::cos(a2) << ' ' << cy + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-                  << "\" stroke-width=\"" << thickness << "\"/>";
-            } else {
-                o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-                  << "\" stroke-width=\"" << thickness << "\"/>";
-            }
+        constexpr double cx = .8, cy = .8, radius = 4.5, thickness = 1.0, visible_gap = 1.0;
+        if (corner == 0) {
+            const double half_gap = (visible_gap + thickness) / (2.0 * radius);
+            const double middle = kTau * 45.0 / 360.0;
+            const double a1 = middle + half_gap;
+            const double a2 = middle - half_gap;
+            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius * std::cos(a1) << ' ' << cy + radius * std::sin(a1)
+              << " M " << cx + radius * std::cos(a2) << ' ' << cy + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
+              << "\" stroke-width=\"" << thickness << "\"/>";
+        } else {
+            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
+              << "\" stroke-width=\"" << thickness << "\"/>";
         }
         o << "</g>";
     }

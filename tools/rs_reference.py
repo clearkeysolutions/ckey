@@ -50,7 +50,7 @@ def encode(data: bytes, parity_bytes: int) -> bytes:
 
 
 if __name__ == "__main__":
-    fixture = json.loads(Path("tests/vectors/locator-v7.json").read_text())
+    fixture = json.loads(Path("tests/vectors/locator-v8.json").read_text())
     actual = encode(bytes.fromhex(fixture["frame_hex"]), fixture["rs_parameters"]["n"] - fixture["rs_parameters"]["k"]).hex()
     expected = fixture["rs_parameters"]["parity_hex"]
     if actual != expected:
