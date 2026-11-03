@@ -150,16 +150,17 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     }
                     if result == CKEY_OK { break }
                 }
-                // The display border is often selected instead of the CKey
-                // itself when the symbol is small. Refine only the leading
-                // candidates with a wider scale range and small center shifts.
+                // At distance, Vision may select the surrounding preview or
+                // editor frame instead of the code. Search a broad set of
+                // symbol-sized quads around leading candidates only.
                 if result != CKEY_OK && candidateIndex < 6 {
                     let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
                                 hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
-                    let offsets: [(Double, Double)] = [(0, 0), (0.025, 0), (-0.025, 0),
-                                                       (0, 0.025), (0, -0.025)]
-                    refinement: for scale in [0.78, 0.84, 0.90, 0.94, 1.10, 1.14] {
-                        for (ox, oy) in offsets {
+                    let shifts = [-0.08, 0.0, 0.08]
+                    refinement: for scale in [0.40, 0.50, 0.60, 0.70, 0.78, 0.86,
+                                              0.94, 1.02, 1.10, 1.20, 1.30, 1.40] {
+                        for ox in shifts {
+                            for oy in shifts {
                             let quad = expandedCKeyQuad(points, expansion: scale,
                                                         offsetX: ox * side, offsetY: oy * side)
                             result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
@@ -169,6 +170,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                 }
                             }
                             if result == CKEY_OK { break refinement }
+                            }
                         }
                     }
                 }
