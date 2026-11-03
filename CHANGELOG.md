@@ -1,3 +1,8 @@
+## 0.1.0-dev.40 — 2026-11-03
+
+* Fixed Swift/C interop in the macOS renderer: C diagnostic message storage is converted from its imported fixed-size tuple safely, and SVG output buffers are passed through scoped mutable buffer pointers. This resolves the renderer's Xcode compile error without changing C ABI or wire-format behavior.
+* Bumped all current software-version nodes. The CKeyReader and renderer still require Xcode validation on macOS; this Linux workspace cannot run Xcode.
+
 ## 0.1.0-dev.39 — 2026-11-03
 
 * Corrected the macOS renderer project's current-SDK import and runtime status interpolation, keeping its UI build path explicit and versioned.

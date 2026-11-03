@@ -71,21 +71,52 @@ private final class RendererModel: ObservableObject {
         catch { status = "Could not save SVG: \(error.localizedDescription)" }
     }
 
-    private func fail(_ diag: ckey_diagnostics) { status = String(cString: diag.message) }
+    private func fail(_ diag: ckey_diagnostics) {
+        // C fixed-size arrays import to Swift as tuples, not C string pointers.
+        // Reinterpret only the message field's storage when constructing String.
+        status = withUnsafeBytes(of: diag.message) { bytes in
+            guard let baseAddress = bytes.baseAddress else { return "CKey operation failed." }
+            return String(cString: baseAddress.assumingMemoryBound(to: CChar.self))
+        }
+    }
     private func renderLocator(_ symbol: inout ckey_symbol) -> String? {
-        var needed = 0; guard ckey_render_svg(&symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
+        var needed = 0
+        guard ckey_render_svg(&symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
         var chars = [CChar](repeating: 0, count: needed)
-        return ckey_render_svg(&symbol, 24, &chars, chars.count, &needed) == CKEY_OK ? String(cString: chars) : nil
+        let result = chars.withUnsafeMutableBufferPointer { buffer in
+            ckey_render_svg(&symbol, 24, buffer.baseAddress, buffer.count, &needed)
+        }
+        guard result == CKEY_OK else { return nil }
+        return chars.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            return String(cString: baseAddress)
+        }
     }
     private func renderText(_ symbol: inout ckey_text_symbol) -> String? {
-        var needed = 0; guard ckey_render_text_svg(&symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
+        var needed = 0
+        guard ckey_render_text_svg(&symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
         var chars = [CChar](repeating: 0, count: needed)
-        return ckey_render_text_svg(&symbol, 24, &chars, chars.count, &needed) == CKEY_OK ? String(cString: chars) : nil
+        let result = chars.withUnsafeMutableBufferPointer { buffer in
+            ckey_render_text_svg(&symbol, 24, buffer.baseAddress, buffer.count, &needed)
+        }
+        guard result == CKEY_OK else { return nil }
+        return chars.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            return String(cString: baseAddress)
+        }
     }
     private func renderExtended(_ symbol: inout ckey_extended_symbol) -> String? {
-        var needed = 0; guard ckey_render_extended_svg(&symbol, 10, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
+        var needed = 0
+        guard ckey_render_extended_svg(&symbol, 10, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
         var chars = [CChar](repeating: 0, count: needed)
-        return ckey_render_extended_svg(&symbol, 10, &chars, chars.count, &needed) == CKEY_OK ? String(cString: chars) : nil
+        let result = chars.withUnsafeMutableBufferPointer { buffer in
+            ckey_render_extended_svg(&symbol, 10, buffer.baseAddress, buffer.count, &needed)
+        }
+        guard result == CKEY_OK else { return nil }
+        return chars.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            return String(cString: baseAddress)
+        }
     }
 }
 
