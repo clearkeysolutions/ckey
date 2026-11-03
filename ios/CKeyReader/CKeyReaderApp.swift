@@ -61,6 +61,8 @@ struct ReaderView: View {
                 } else {
                     Text("The phone finds the symbol, then the C++ core checks its keys, error correction, and checksum.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Vision: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · candidates: \(scanner.candidateCount)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
