@@ -24,7 +24,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var didDecode = false
     private let rectangleRequest: VNDetectRectanglesRequest = {
         let request = VNDetectRectanglesRequest()
-        // CKey's rounded-square outline is less box-like than a QR finder.
+        // CKey's rounded border and inset arc finders are less box-like than
+        // a QR finder. Structural calibration below resolves candidates.
         // Keep localization permissive; the key/ECC/CRC checks reject false quads.
         request.maximumObservations = 16
         request.minimumConfidence = 0.2

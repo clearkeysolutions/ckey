@@ -4,7 +4,7 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read [the current draft format](spec/CKey-Format-v0.8.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read [the current draft format](spec/CKey-Format-v0.14.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
 
@@ -26,7 +26,7 @@ The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes a
 ./build/ckey encode-text --hex 001122334455 --out binary.svg
 ```
 
-It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, and connected multi-unit ring arcs. See [Format 0.9.0](spec/CKey-Format-v0.9.0.md). Its camera image decoder is not implemented yet; do not expect CKeyReader to scan Profile 2 until that work is completed and physically tested.
+It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.15.0](spec/CKey-Format-v0.15.0.md). Its camera image decoder is not implemented yet; do not expect CKeyReader to scan Profile 2 until that work is completed and physically tested.
 
 The experimental extended profile accepts 1–2,048 bytes. It uses ten byte-interleaved RS(255,223) blocks, 24 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
 
@@ -35,7 +35,7 @@ The experimental extended profile accepts 1–2,048 bytes. It uses ten byte-inte
 ./build/ckey encode-extended --hex <up-to-4096-hex-chars> --out extended.svg
 ```
 
-See [Format 0.10.0](spec/CKey-Format-v0.10.0.md). The core validates Profile 3 codewords and renders its exact geometry, but the mobile/image decoder does not yet sample Profile 3 and must not be expected to scan it.
+See [Format 0.16.0](spec/CKey-Format-v0.16.0.md). The core validates Profile 3 codewords and renders its exact geometry, but the mobile/image decoder does not yet sample Profile 3 and must not be expected to scan it.
 
 ## iPhone reader
 
