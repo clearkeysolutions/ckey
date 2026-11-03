@@ -19,7 +19,6 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let frameQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.frames", qos: .userInitiated)
     private let output = AVCaptureVideoDataOutput()
     private var lastFrameTime = 0.0
-    private var lastVisionTime = 0.0
     private var lastProgressTime = 0.0
     private var hasConfigured = false
     private var didDecode = false
@@ -83,7 +82,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             guard let self else { return }
             if !self.hasConfigured {
                 self.session.beginConfiguration()
-                self.session.sessionPreset = .high
+                // A distant CKey must retain several camera pixels per module.
+                // `.high` may negotiate a smaller stream on some devices.
+                self.session.sessionPreset = self.session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high
                 guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
                       let input = try? AVCaptureDeviceInput(device: camera),
                       self.session.canAddInput(input) else {
@@ -92,6 +93,17 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     return
                 }
                 self.session.addInput(input)
+                do {
+                    try camera.lockForConfiguration()
+                    if camera.isFocusModeSupported(.continuousAutoFocus) {
+                        camera.focusMode = .continuousAutoFocus
+                    }
+                    if camera.isExposureModeSupported(.continuousAutoExposure) {
+                        camera.exposureMode = .continuousAutoExposure
+                    }
+                    camera.isSubjectAreaChangeMonitoringEnabled = true
+                    camera.unlockForConfiguration()
+                } catch { }
                 self.output.videoSettings = [
                     kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
                 ]
@@ -121,9 +133,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         if didDecode { return }
         let now = CACurrentMediaTime()
-        // The CKey locator is cheap enough for prompt feedback; do not let
-        // queued camera frames create latency when the phone is moving.
-        if now - lastFrameTime < 0.08 { return }
+        if now - lastFrameTime < 0.05 { return } // Sample up to 20 frames/s while discarding stale frames.
         lastFrameTime = now
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return }
@@ -143,14 +153,14 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // does not depend on Vision deciding that a rounded code border is
             // a document-shaped rectangle.
             let borderQuads = brightBorderQuads(gray, width: width, height: height, stride: stride)
-            for quad in borderQuads.prefix(6) {
+            for quad in borderQuads.prefix(12) {
                 var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
                 var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
                 var result = CKEY_UNCORRECTABLE
                 // A component bounds the illuminated edge; tolerate raster
                 // bloom and the one-pixel sampling uncertainty on either side.
-                for expansion in [0.96, 1.0, 1.04] {
+                for expansion in [0.94, 0.97, 1.0, 1.03, 1.06] {
                     let adjusted = expandedCKeyQuad(quadPoints(quad), expansion: expansion,
                                                     offsetX: 0, offsetY: 0)
                     result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
@@ -170,16 +180,6 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 }
             }
 
-            // Vision is retained for rotated and projective views, but it is
-            // not allowed to make every frame wait for generic document
-            // localization. The border path above runs on every sampled frame.
-            guard now - lastVisionTime >= 0.30 else {
-                publishProgress(borderQuads.isEmpty ? "Searching for a CKey border…" : "CKey border found; checking data…",
-                                detectionMilliseconds: (CACurrentMediaTime() - started) * 1000,
-                                candidates: borderQuads.count)
-                return
-            }
-            lastVisionTime = now
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
             try handler.perform([symbolSquareRequest, rectangleRequest])
             let squareObservations = symbolSquareRequest.results ?? []
@@ -198,7 +198,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            for observation in observations.prefix(8) {
+            for (candidateIndex, observation) in observations.prefix(24).enumerated() {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
@@ -208,7 +208,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 var result = CKEY_UNCORRECTABLE
                 // Vision's rectangle corners may follow the border's inner edge,
                 // outer edge, or line intersection. Try nearby canonical bounds.
-                let fastScales = [1.0, 29.0 / 28.0, 1.04]
+                let fastScales = [1.0, 29.0 / 28.0, 1.06, 0.96]
                 for expansion in fastScales {
                     let quad = expandedCKeyQuad(points, expansion: expansion, offsetX: 0, offsetY: 0)
                     result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
@@ -218,6 +218,31 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                         }
                     }
                     if result == CKEY_OK { break }
+                }
+                // This broad recovery pass is intentionally retained from the
+                // last known farther-reading build while 1080p acquisition
+                // gives it materially better image data to work with.
+                if result != CKEY_OK && candidateIndex < 4 {
+                    let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
+                                hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
+                    let shifts = [-0.20, -0.10, 0.0, 0.10, 0.20]
+                    refinement: for scale in [0.25, 0.33, 0.40, 0.48, 0.56, 0.64,
+                                              0.72, 0.78, 0.86, 0.94, 1.02, 1.10,
+                                              1.20, 1.30, 1.40, 1.50, 1.60, 1.80] {
+                        for ox in shifts {
+                            for oy in shifts {
+                                let quad = expandedCKeyQuad(points, expansion: scale,
+                                                            offsetX: ox * side, offsetY: oy * side)
+                                result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                                    quad.withUnsafeBufferPointer { quadBuffer in
+                                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                                    }
+                                }
+                                if result == CKEY_OK { break refinement }
+                            }
+                        }
+                    }
                 }
                 let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
                 DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
