@@ -22,6 +22,14 @@ constexpr size_t kTextDataBytes = 210;
 constexpr size_t kTextParityBytes = 45;
 constexpr size_t kTextCodewordBytes = kTextDataBytes + kTextParityBytes;
 static_assert(kTextCodewordBytes == CKEY_TEXT_CODEWORD_BYTES);
+constexpr size_t kExtendedBlocks = CKEY_EXTENDED_BLOCK_COUNT;
+constexpr size_t kExtendedDataBytes = CKEY_EXTENDED_DATA_BYTES_PER_BLOCK;
+constexpr size_t kExtendedParityBytes = CKEY_EXTENDED_PARITY_BYTES_PER_BLOCK;
+constexpr size_t kExtendedBlockBytes = CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK;
+constexpr size_t kExtendedCodewordBytes = CKEY_EXTENDED_CODEWORD_BYTES;
+constexpr size_t kExtendedBits = kExtendedCodewordBytes * 8;
+constexpr int kExtendedSide = 116;
+static_assert(kExtendedBlocks * kExtendedBlockBytes == kExtendedCodewordBytes);
 constexpr int kSide = 29;
 constexpr double kCenter = 14.5;
 constexpr double kTau = 6.283185307179586476925286766559;
@@ -351,6 +359,63 @@ std::vector<TextNode> text_nodes() {
 
 bool text_code_bit(const ckey_text_symbol *s, size_t i) { return ((s->codeword[i / 8] >> (7 - (i % 8))) & 1u) != 0; }
 
+enum class ExtendedKind : uint8_t { cart, ring, ray };
+struct ExtendedNode { ExtendedKind kind; double x, y; int ring, slot, component; };
+
+std::vector<ExtendedNode> extended_nodes() {
+    constexpr int grid = 232, slots = 288, rings = 24;
+    constexpr double pitch = .5, center = 58.0;
+    std::vector<ExtendedNode> cart, polar, out;
+    // Profile 3 keeps the same visual finder proportion as Profile 1/2 but
+    // grows the field.  Grid density, rather than finder shrinkage, supplies
+    // its large Cartesian capacity.
+    for (int row = 1; row < grid - 1; ++row) for (int col = 1; col < grid - 1; ++col) {
+        const double x = (col + .5) * pitch, y = (row + .5) * pitch;
+        const bool finder = (x < 24.2 && y < 24.2) || (x > 91.8 && y < 24.2) ||
+                            (x < 24.2 && y > 91.8) || (x > 91.8 && y > 91.8);
+        const bool grid_reference = x > 7.2 && x < 16.8 && y > 43.2 && y < 52.8;
+        const double dx = x - center, dy = y - center;
+        if (finder || grid_reference || dx * dx + dy * dy <= 31.3 * 31.3) continue;
+        cart.push_back({ExtendedKind::cart, x, y, -1, -1, -1});
+    }
+    // Twenty-four rings are laterally denser than Profile 2, but their 0.65-unit
+    // centre spacing remains more than four dot diameters. The dot is not
+    // made smaller to fabricate capacity.
+    // A deterministic two-dimensional permutation distributes the finite
+    // codeword through the full Cartesian annulus. Row-major and pure radial
+    // traversals both leave large, misleading empty regions at this profile.
+    const auto spatial_key=[](const ExtendedNode &n) {
+        uint32_t x=static_cast<uint32_t>(std::lround(n.x*2.0)), y=static_cast<uint32_t>(std::lround(n.y*2.0));
+        uint32_t h=x*0x9e3779b9u ^ y*0x85ebca6bu; h^=h>>16; h*=0x7feb352du; h^=h>>15; h*=0x846ca68bu; return h^(h>>16);
+    };
+    std::sort(cart.begin(),cart.end(),[&](const ExtendedNode &a,const ExtendedNode &b){ return spatial_key(a)<spatial_key(b); });
+    for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
+        if (slot == 0 || slot == 216 || slot == 224 ||
+            (ring == rings - 1 && slot >= 72 && slot <= 79)) continue;
+        const double radius = 9.50 + .65 * ring;
+        const double a = kTau * slot / slots;
+        polar.push_back({ExtendedKind::ring, center + radius * std::sin(a), center - radius * std::cos(a), ring, slot, -1});
+    }
+    // Every ray is always visible. Its Gray-coded two-bit length plus one
+    // width bit gives an eight-state calibrated ray alphabet; no data state
+    // relies on an absent ray.
+    for (int slot = 0; slot < 576; ++slot) {
+        if (slot == 0 || slot == 432 || slot == 440) continue;
+        for (int component = 0; component < 3; ++component)
+            polar.push_back({ExtendedKind::ray, 0, 0, -1, slot, component});
+    }
+    size_t ci = 0, pi = 0;
+    while (ci < cart.size() || pi < polar.size()) {
+        if (ci < cart.size()) out.push_back(cart[ci++]);
+        if (pi < polar.size()) out.push_back(polar[pi++]);
+    }
+    return out;
+}
+
+bool extended_code_bit(const ckey_extended_symbol *s, size_t i) {
+    return ((s->codeword[i / 8] >> (7 - (i % 8))) & 1u) != 0;
+}
+
 void set_status(ckey_diagnostics *d, ckey_status s, const char *m) {
     if (!d) return;
     d->abi_version = CKEY_ABI_VERSION; d->status = s;
@@ -531,6 +596,53 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     std::memcpy(payload, corrected.data() + 6, length); *out_payload_len = length;
     set_status(diag, CKEY_OK, corrections ? "decoded text profile; Reed-Solomon symbols corrected" : "decoded text profile; no correction needed");
     if (diag) diag->corrected_symbols = corrections;
+    return CKEY_OK;
+}
+
+ckey_status ckey_encode_extended(const uint8_t *payload, size_t payload_len,
+                                 ckey_extended_symbol *out, ckey_diagnostics *diag) {
+    if (!payload || !out) { set_status(diag, CKEY_INVALID_ARGUMENT, "extended payload and output are required"); return CKEY_INVALID_ARGUMENT; }
+    if (payload_len == 0 || payload_len > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "extended profile payload must contain 1 to 2048 bytes"); return CKEY_INVALID_ARGUMENT; }
+    std::array<uint8_t, kExtendedBlocks * kExtendedDataBytes> framed{};
+    framed[0]=0xc7; framed[1]=0x4b; framed[2]=CKEY_EXTENDED_FORMAT_VERSION; framed[3]=3;
+    framed[4]=static_cast<uint8_t>(payload_len >> 8); framed[5]=static_cast<uint8_t>(payload_len);
+    std::memcpy(framed.data()+6,payload,payload_len);
+    const size_t crc_index=6+payload_len; const uint32_t crc=crc32c(framed.data(),crc_index);
+    framed[crc_index]=static_cast<uint8_t>(crc>>24); framed[crc_index+1]=static_cast<uint8_t>(crc>>16);
+    framed[crc_index+2]=static_cast<uint8_t>(crc>>8); framed[crc_index+3]=static_cast<uint8_t>(crc);
+    std::array<std::array<uint8_t,kExtendedBlockBytes>,kExtendedBlocks> blocks{};
+    for (size_t block=0;block<kExtendedBlocks;++block) {
+        std::copy_n(framed.data()+block*kExtendedDataBytes,kExtendedDataBytes,blocks[block].begin());
+        std::vector<uint8_t> work(blocks[block].begin(),blocks[block].end());
+        rs_encode_generic(work,kExtendedDataBytes,kExtendedParityBytes);
+        std::copy(work.begin(),work.end(),blocks[block].begin());
+    }
+    std::memset(out,0,sizeof(*out)); out->abi_version=CKEY_ABI_VERSION; out->side=kExtendedSide; out->payload_length=static_cast<uint32_t>(payload_len);
+    // Byte interleaving maps local optical damage across all independent blocks.
+    for (size_t byte=0;byte<kExtendedBlockBytes;++byte) for (size_t block=0;block<kExtendedBlocks;++block)
+        out->codeword[byte*kExtendedBlocks+block]=blocks[block][byte];
+    set_status(diag,CKEY_OK,"encoded extended profile v3; 10 interleaved RS blocks"); return CKEY_OK;
+}
+
+ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
+                                 uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len,
+                                 ckey_diagnostics *diag) {
+    if (!codeword || !out_payload || !out_payload_len || codeword_len != kExtendedCodewordBytes) { set_status(diag,CKEY_INVALID_ARGUMENT,"extended decode requires a 2550-byte codeword and output length"); return CKEY_INVALID_ARGUMENT; }
+    std::array<std::array<uint8_t,kExtendedBlockBytes>,kExtendedBlocks> blocks{};
+    for (size_t byte=0;byte<kExtendedBlockBytes;++byte) for (size_t block=0;block<kExtendedBlocks;++block) blocks[block][byte]=codeword[byte*kExtendedBlocks+block];
+    std::array<uint8_t,kExtendedBlocks*kExtendedDataBytes> framed{}; uint32_t corrections=0;
+    for (size_t block=0;block<kExtendedBlocks;++block) {
+        std::vector<uint8_t> work(blocks[block].begin(),blocks[block].end()); uint32_t fixed=0;
+        if (!rs_correct_generic(work,kExtendedParityBytes,fixed)) { set_status(diag,CKEY_UNCORRECTABLE,"extended Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
+        corrections+=fixed; std::copy_n(work.begin(),kExtendedDataBytes,framed.data()+block*kExtendedDataBytes);
+    }
+    if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[2]!=CKEY_EXTENDED_FORMAT_VERSION || framed[3]!=3) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE; }
+    const size_t length=(static_cast<size_t>(framed[4])<<8)|framed[5], crc_index=6+length;
+    if (length==0 || length>CKEY_EXTENDED_PAYLOAD_MAX_BYTES || crc_index+4>framed.size() || out_capacity<length) { set_status(diag,CKEY_INSUFFICIENT_BUFFER,"extended payload length exceeds profile or output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
+    const uint32_t expected=(static_cast<uint32_t>(framed[crc_index])<<24)|(static_cast<uint32_t>(framed[crc_index+1])<<16)|(static_cast<uint32_t>(framed[crc_index+2])<<8)|framed[crc_index+3];
+    if (crc32c(framed.data(),crc_index)!=expected) { set_status(diag,CKEY_INTEGRITY_FAILURE,"extended CRC-32C validation failed"); return CKEY_INTEGRITY_FAILURE; }
+    std::memcpy(out_payload,framed.data()+6,length); *out_payload_len=length;
+    set_status(diag,CKEY_OK,corrections ? "decoded extended profile; Reed-Solomon symbols corrected" : "decoded extended profile; no correction needed"); if (diag) diag->corrected_symbols=corrections;
     return CKEY_OK;
 }
 
@@ -783,5 +895,72 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     const std::string text=o.str(); *required=text.size()+1;
     if (!out || cap<*required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out,text.c_str(),*required); return CKEY_OK;
+}
+
+ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t scale, char *out,
+                                      size_t cap, size_t *required) {
+    if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION || s->side != kExtendedSide || s->payload_length == 0 || s->payload_length > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) return CKEY_INVALID_ARGUMENT;
+    const auto nodes=extended_nodes(); if (nodes.size()<kExtendedBits) return CKEY_INTERNAL_ERROR;
+    constexpr int slots=288, rings=24; constexpr double center=58.0, dot_radius=.075;
+    std::ostringstream o; o << std::fixed << std::setprecision(4);
+    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
+      << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"2\" y=\"2\" width=\"112\" height=\"112\" rx=\"14\" fill=\"none\" stroke-width=\"2.6\"/>";
+    for (int corner=0;corner<4;++corner) {
+        const char *t=corner==0?"":corner==1?"translate(116 0) scale(-1 1)":corner==2?"translate(116 116) scale(-1 -1)":"translate(0 116) scale(1 -1)";
+        o << "<g transform=\"" << t << "\" fill=\"none\" stroke-linecap=\"round\">";
+        constexpr double cx=3.2,cy=3.2,r=18.0,thickness=4.0;
+        if (corner==0) {
+            const double gap=(4.0+thickness)/(2.0*r), middle=kTau/8.0;
+            o << "<path d=\"M " << cx << ' ' << cy+r << " A 18 18 0 0 0 " << cx+r*std::cos(middle+gap) << ' ' << cy+r*std::sin(middle+gap)
+              << " M " << cx+r*std::cos(middle-gap) << ' ' << cy+r*std::sin(middle-gap) << " A 18 18 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4\"/>";
+        } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 18 18 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4\"/>";
+        o << "</g>";
+    }
+    // Fixed Grid Key: a 4x4 array of 2-unit modules. Its known pitch and
+    // gaps establish local module scale before dense data are sampled.
+    for (int r=0;r<4;++r) for (int c=0;c<4;++c) o << "<rect x=\"" << 8+c*2.1 << "\" y=\"" << 44+r*2.1 << "\" width=\"1.45\" height=\"1.45\" rx=\".30\" stroke=\"none\"/>";
+    // Fixed Ray Key: 12:00 full; 9:00 half; 9:05 three-quarter length.
+    for (const auto &[slot,fraction] : {std::pair{0,1.0},std::pair{432,.5},std::pair{440,.75}}) {
+        const double a=kTau*slot/576.0,r0=26.30,r1=r0+3.6*fraction;
+        o << "<path d=\"M " << center+r0*std::sin(a) << ' ' << center-r0*std::cos(a) << " L " << center+r1*std::sin(a) << ' ' << center-r1*std::cos(a) << "\" fill=\"none\" stroke-width=\".28\" stroke-linecap=\"round\"/>";
+    }
+    // Fixed Ring Key: two adjacent dots, one empty slot, one dot, then a
+    // continuous four-slot arc of precisely equal angular occupancy.
+    constexpr double key_r=24.45;
+    for (int slot : {72,73,75}) { const double a=kTau*slot/slots; svg_circle(o,center+key_r*std::sin(a),center-key_r*std::cos(a),dot_radius); }
+    const double key_cap=dot_radius/key_r,ka0=kTau*(75.5)/slots+key_cap,ka1=kTau*(79.5)/slots-key_cap;
+    o << "<path d=\"M " << center+key_r*std::sin(ka0) << ' ' << center-key_r*std::cos(ka0) << " A " << key_r << ' ' << key_r << " 0 0 1 " << center+key_r*std::sin(ka1) << ' ' << center-key_r*std::cos(ka1) << "\" fill=\"none\" stroke-width=\".1500\" stroke-linecap=\"round\"/>";
+    std::array<std::array<bool,slots>,rings> ring_bits{}; std::array<std::array<bool,3>,576> ray_bits{};
+    for (size_t i=0;i<kExtendedBits;++i) {
+        const auto &n=nodes[i]; const bool bit=extended_code_bit(s,i);
+        if (n.kind==ExtendedKind::cart) { if (bit) o << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\".34\" height=\".34\" rx=\".08\" stroke=\"none\"/>"; }
+        else if (n.kind==ExtendedKind::ring) ring_bits[n.ring][n.slot]=bit;
+        else ray_bits[n.slot][n.component]=bit;
+    }
+    // The ray alphabet is (Gray length, width): 4 calibrated lengths x 2
+    // calibrated weights.  It contributes three payload bits/ray while every
+    // orientation remains visible under blur and never aliases to absence.
+    for (int slot=0;slot<576;++slot) {
+        if (slot==0 || slot==432 || slot==440) continue;
+        const int gray=(ray_bits[slot][0]?2:0)|(ray_bits[slot][1]?1:0), level=gray^(gray>>1);
+        const double a=kTau*slot/576.0,r0=26.30,length=.80+.85*level,width=ray_bits[slot][2]?.28:.16;
+        o << "<path d=\"M " << center+r0*std::sin(a) << ' ' << center-r0*std::cos(a) << " L " << center+(r0+length)*std::sin(a) << ' ' << center-(r0+length)*std::cos(a) << "\" fill=\"none\" stroke-width=\"" << width << "\" stroke-linecap=\"round\"/>";
+    }
+    for (int ring=0;ring<rings;++ring) {
+        const double radius=9.50+.65*ring;
+        for (int slot=0;slot<slots;) {
+            if (!ring_bits[ring][slot]) { ++slot; continue; }
+            int end=slot+1; while(end<slots && ring_bits[ring][end]) ++end;
+            if (end-slot==1) { const double a=kTau*slot/slots; svg_circle(o,center+radius*std::sin(a),center-radius*std::cos(a),dot_radius); }
+            else { const double cap_angle=dot_radius/radius,a0=kTau*(slot-.5)/slots+cap_angle,a1=kTau*(end-.5)/slots-cap_angle;
+                o << "<path d=\"M " << center+radius*std::sin(a0) << ' ' << center-radius*std::cos(a0) << " A " << radius << ' ' << radius << " 0 0 1 " << center+radius*std::sin(a1) << ' ' << center-radius*std::cos(a1) << "\" fill=\"none\" stroke-width=\".1500\" stroke-linecap=\"round\"/>"; }
+            slot=end;
+        }
+    }
+    o << "</g></svg>"; const std::string text=o.str(); *required=text.size()+1;
+    if (!out || cap<*required) return CKEY_INSUFFICIENT_BUFFER;
+    std::memcpy(out,text.c_str(),*required);
+    return CKEY_OK;
 }
 }

@@ -21,12 +21,19 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.26"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.28"
 #define CKEY_FORMAT_VERSION 8u
 #define CKEY_TEXT_FORMAT_VERSION 9u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_TEXT_PAYLOAD_MAX_BYTES 200u
 #define CKEY_TEXT_CODEWORD_BYTES 255u
+#define CKEY_EXTENDED_FORMAT_VERSION 10u
+#define CKEY_EXTENDED_PAYLOAD_MAX_BYTES 2048u
+#define CKEY_EXTENDED_BLOCK_COUNT 10u
+#define CKEY_EXTENDED_DATA_BYTES_PER_BLOCK 223u
+#define CKEY_EXTENDED_PARITY_BYTES_PER_BLOCK 32u
+#define CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK 255u
+#define CKEY_EXTENDED_CODEWORD_BYTES (CKEY_EXTENDED_BLOCK_COUNT * CKEY_EXTENDED_CODEWORD_BYTES_PER_BLOCK)
 #define CKEY_LOCATOR_SIDE 29u
 #define CKEY_MAX_RENDER_SCALE 256u
 #define CKEY_MAX_SYMBOL_MODULES (CKEY_LOCATOR_SIDE * CKEY_LOCATOR_SIDE)
@@ -57,6 +64,16 @@ typedef struct ckey_text_symbol {
     uint8_t codeword[CKEY_TEXT_CODEWORD_BYTES];
 } ckey_text_symbol;
 
+/* Profile 3: ten interleaved systematic RS(255,223) blocks.  The public
+ * codeword order is byte-interleaved by block so a local image defect is
+ * distributed across all blocks rather than concentrated in one. */
+typedef struct ckey_extended_symbol {
+    uint32_t abi_version;
+    uint32_t side;
+    uint32_t payload_length;
+    uint8_t codeword[CKEY_EXTENDED_CODEWORD_BYTES];
+} ckey_extended_symbol;
+
 typedef struct ckey_diagnostics {
     uint32_t abi_version;
     ckey_status status;
@@ -80,6 +97,13 @@ CKEY_API ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_l
                                        uint8_t *out_payload, size_t out_capacity,
                                        size_t *out_payload_len,
                                        ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_encode_extended(const uint8_t *payload, size_t payload_len,
+                                           ckey_extended_symbol *out_symbol,
+                                           ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
+                                           uint8_t *out_payload, size_t out_capacity,
+                                           size_t *out_payload_len,
+                                           ckey_diagnostics *out_diagnostics);
 /*
  * Decode an 8-bit grayscale image of one planar CKey locator. quad_xy contains
  * four perimeter points (x0,y0,...,x3,y3) in cyclic order; either winding and
@@ -111,6 +135,9 @@ CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
 CKEY_API ckey_status ckey_render_text_svg(const ckey_text_symbol *symbol, uint32_t scale,
                                            char *out_utf8, size_t out_capacity,
                                            size_t *out_required);
+CKEY_API ckey_status ckey_render_extended_svg(const ckey_extended_symbol *symbol, uint32_t scale,
+                                               char *out_utf8, size_t out_capacity,
+                                               size_t *out_required);
 
 #ifdef __cplusplus
 }

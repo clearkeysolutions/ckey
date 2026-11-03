@@ -1,3 +1,9 @@
+## 0.1.0-dev.28 — 2026-11-03
+
+* Added experimental Format 0.10.0 Profile 3 for 1–2,048 byte payloads: ten byte-interleaved systematic RS(255,223) blocks, 320 total parity bytes, CRC-32C, deterministic codeword decode, and SVG rendering.
+* Expanded polar capacity by lateral geometry rather than dot shrinkage: 24 rings at 288 angular slots, exact run-length arcs, and 573 data rays with a calibrated 3-bit Gray-length/stroke-weight alphabet. Cartesian candidate order is a deterministic two-dimensional permutation so all usable regions fill evenly instead of forming top-to-bottom or radial dead zones.
+* Preserved the camera-validated Format 0.8 locator unchanged. Profile 3 image/mobile decoding remains unimplemented and is explicitly not camera validated.
+
 ## 0.1.0-dev.26 — 2026-11-03
 
 * Added experimental Format 0.9.0 Profile 2 for 1–200 byte text/binary payloads: a framed full RS(255,210) codeword with 45 parity bytes, CRC-32C, and deterministic SVG rendering in a denser 58×58 Cartesian / 144-slot eight-ring polar field.
@@ -131,8 +137,6 @@
 * Spread payload placement across angular sectors of the Cartesian matrix and round-robin across the dial plus all four inner rings.
 * Versioned the wire format as 0.4.0 / format byte 04 and regenerated the CRC-32C/Reed–Solomon interoperability vector.
 * Added maintained geometry and version context for the supplied blueprint.
-
-# Changelog
 
 ## 0.1.0-dev.11 — 2026-11-03
 

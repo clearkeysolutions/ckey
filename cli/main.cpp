@@ -29,7 +29,9 @@ int main(int argc, char **argv) {
         std::cerr << "usage:\n"
                   << "  ckey encode --hex <32-hex-chars> --out <locator.svg>\n"
                   << "  ckey encode-text --utf8 <up-to-200-byte-text> --out <text.svg>\n"
-                  << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n";
+                  << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n"
+                  << "  ckey encode-extended --utf8 <up-to-2048-byte-text> --out <extended.svg>\n"
+                  << "  ckey encode-extended --hex <up-to-4096-hex-chars> --out <extended.svg>\n";
         return 2;
     }
     const std::string command = argv[1], mode = argv[2], value = argv[3], output = argv[5];
@@ -56,6 +58,16 @@ int main(int argc, char **argv) {
         std::string svg(needed, '\0');
         if (ckey_render_text_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
         std::cout << diag.message << "; profile=text-v2; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
+        return 0;
+    }
+    if (command == "encode-extended") {
+        if (payload.empty() || payload.size() > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) { std::cerr << "extended input must contain 1 to 2048 bytes\n"; return 2; }
+        ckey_extended_symbol symbol{};
+        if (ckey_encode_extended(payload.data(), payload.size(), &symbol, &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+        size_t needed = 0; ckey_render_extended_svg(&symbol, 16, nullptr, 0, &needed);
+        std::string svg(needed, '\0');
+        if (ckey_render_extended_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "extended SVG rendering failed\n"; return 1; }
+        std::cout << diag.message << "; profile=extended-v3; payload-bytes=" << payload.size() << "; codeword-bytes=" << CKEY_EXTENDED_CODEWORD_BYTES << "; svg=" << output << '\n';
         return 0;
     }
     std::cerr << "unknown command\n"; return 2;

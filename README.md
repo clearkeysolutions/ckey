@@ -28,6 +28,15 @@ The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes a
 
 It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, and connected multi-unit ring arcs. See [Format 0.9.0](spec/CKey-Format-v0.9.0.md). Its camera image decoder is not implemented yet; do not expect CKeyReader to scan Profile 2 until that work is completed and physically tested.
 
+The experimental extended profile accepts 1–2,048 bytes. It uses ten byte-interleaved RS(255,223) blocks, 24 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
+
+```sh
+./build/ckey encode-extended --utf8 "large payload" --out extended.svg
+./build/ckey encode-extended --hex <up-to-4096-hex-chars> --out extended.svg
+```
+
+See [Format 0.10.0](spec/CKey-Format-v0.10.0.md). The core validates Profile 3 codewords and renders its exact geometry, but the mobile/image decoder does not yet sample Profile 3 and must not be expected to scan it.
+
 ## iPhone reader
 
 An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, uses Vision to locate a square candidate, and passes grayscale camera frames and candidate corners to the C ABI. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. The app reports Vision localization time separately from CKey decode time. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.
