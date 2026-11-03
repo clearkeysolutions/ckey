@@ -22,7 +22,7 @@ struct ReaderView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("CKey Reader").font(.largeTitle.bold())
-                    Text("Format 0.8 · \(softwareVersion)")
+                    Text("Format 0.11 · \(softwareVersion)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
