@@ -1,3 +1,8 @@
+## 0.1.0-dev.13 — 2026-11-02
+
+* Fixed two SwiftUI color inference errors in the iPhone reader by making foreground and status colors explicitly use `Color`.
+* Versioned the build fix. Apple-platform compilation still needs verification in Xcode.
+
 ## 0.1.0-dev.12 — 2026-11-02
 
 * Added an experimental iPhone SwiftUI reader that uses Vision for square-candidate localization and calls the existing C++ C ABI for pixel decoding.
