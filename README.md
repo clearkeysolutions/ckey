@@ -4,7 +4,7 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The first implementation milestone defines a fixed 29 × 29 locator profile, a byte framing format, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and a command-line encoder. Read [the current draft format](spec/CKey-Format-v0.6.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The first implementation milestone defines a fixed 29 × 29 locator profile, a byte framing format, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and a command-line encoder. Read [the current draft format](spec/CKey-Format-v0.7.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
 

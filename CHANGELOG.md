@@ -1,3 +1,10 @@
+## 0.1.0-dev.9 — 2026-11-03
+
+* Restored three nested quarter-arc finders at all corners, with the three top-left arcs split by a one-module orientation gap.
+* Made all inner-ring and Ring Key dots the same 0.30-module diameter; Ring Key arc caps are round while its visible length remains exactly four angular pitches.
+* Encoded each of the 69 data dial bits by a short 0.65-module ray or long 1.35-module ray; calibration rays remain reserved and fixed.
+* Versioned the wire geometry as CKey Format 0.7.0 / format byte 07 and regenerated the CRC-32C/Reed–Solomon example vector. The RS code and C ABI are unchanged.
+
 ## 0.1.0-dev.8 — 2026-11-03
 
 * Increased the central clear radius and moved the four rings outward into a tighter radial group.

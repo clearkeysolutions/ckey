@@ -202,9 +202,13 @@ std::vector<Node> data_nodes() {
             polar_layers[layer].push_back({true, false, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), -1, -1, ring, slot});
         }
     }
+    // Put all dial sites first so every one of the 69 length-coded data rays
+    // is inside the locator codeword, then round-robin the four dot rings.
+    polar = polar_layers[0];
     for (size_t depth = 0; ; ++depth) {
         bool any = false;
-        for (auto &layer : polar_layers) if (depth < layer.size()) { polar.push_back(layer[depth]); any = true; }
+        for (size_t layer = 1; layer < polar_layers.size(); ++layer)
+            if (depth < polar_layers[layer].size()) { polar.push_back(polar_layers[layer][depth]); any = true; }
         if (!any) break;
     }
     // Interleave coordinate systems in the placement sequence.  Local image
@@ -226,9 +230,9 @@ void set_status(ckey_diagnostics *d, ckey_status s, const char *m) {
     std::snprintf(d->message, sizeof(d->message), "%s", m);
 }
 
-double polar_dot_radius(double ring_radius) {
-    // Dot diameter is 72% of the adjacent slot-center chord.
-    return 0.36 * (2.0 * ring_radius * std::sin(kTau / 144.0));
+double polar_dot_radius() {
+    // A single physical dot size keeps all four data rings and the Ring Key uniform.
+    return 0.15;
 }
 
 void svg_circle(std::ostringstream &o, double x, double y, double r) {
@@ -294,22 +298,25 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
-    // One thick quarter arc marks three corners; the top-left arc is split
-    // into two equal-thickness segments with a one-module clear orientation gap.
+    // Three nested quarter arcs mark each corner. The top-left set is split
+    // into two fragments to encode orientation with a one-module clear gap.
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        constexpr double radius = 4.5, thickness = 1.0, cx = .8, cy = .8;
-        if (corner == 0) {
-            const double half_gap = 1.0 / radius; // 2-unit centerline gap leaves 1 unit clear after round caps.
-            const double a1 = (45.0 + half_gap * 180.0 / 3.14159265358979323846) * kTau / 360.0;
-            const double a2 = (45.0 - half_gap * 180.0 / 3.14159265358979323846) * kTau / 360.0;
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius * std::cos(a1) << ' ' << cy + radius * std::sin(a1)
-              << " M " << cx + radius * std::cos(a2) << ' ' << cy + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-              << "\" stroke-width=\"" << thickness << "\"/>";
-        } else {
-            o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
-              << "\" stroke-width=\"" << thickness << "\"/>";
+        constexpr double cx = .8, cy = .8, thickness = .42, visible_gap = 1.0;
+        for (double radius : {3.0, 3.75, 4.5}) {
+            if (corner == 0) {
+                const double half_gap = (visible_gap + thickness) / (2.0 * radius);
+                const double middle = kTau * 45.0 / 360.0;
+                const double a1 = middle + half_gap;
+                const double a2 = middle - half_gap;
+                o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius * std::cos(a1) << ' ' << cy + radius * std::sin(a1)
+                  << " M " << cx + radius * std::cos(a2) << ' ' << cy + radius * std::sin(a2) << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
+                  << "\" stroke-width=\"" << thickness << "\"/>";
+            } else {
+                o << "<path d=\"M " << cx << ' ' << cy + radius << " A " << radius << ' ' << radius << " 0 0 0 " << cx + radius << ' ' << cy
+                  << "\" stroke-width=\"" << thickness << "\"/>";
+            }
         }
         o << "</g>";
     }
@@ -323,19 +330,28 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     }
     // Permanent Ring Key on the outermost inner data ring.
     const double rr = 6.0;
-    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), polar_dot_radius(rr)); }
-    const double a0 = kTau * 21.5 / 72.0, a1 = kTau * 25.5 / 72.0;
-    const double ring_key_dot_diameter = 2.0 * polar_dot_radius(rr);
+    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), polar_dot_radius()); }
+    const double ring_key_dot_diameter = 2.0 * polar_dot_radius();
+    // Round caps add one dot diameter to the visible length. Shorten the arc
+    // centerline accordingly so its total visible length remains four slots.
+    const double cap_angle = polar_dot_radius() / rr;
+    const double a0 = kTau * 21.5 / 72.0 + cap_angle;
+    const double a1 = kTau * 25.5 / 72.0 - cap_angle;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
-      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"butt\"/>";
-    for (size_t i = 0; i < kBits; ++i) if (code_bit(s, i)) {
+      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"round\"/>";
+    for (size_t i = 0; i < kBits; ++i) {
         const Node &n = nodes[i];
         if (n.dial) {
             const double a = kTau * n.slot / 72.0;
-            o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + 9.5 * std::sin(a) << ' ' << kCenter - 9.5 * std::cos(a)
-              << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\"/>";
+            // Every data-bearing dial slot is marked. A short ray encodes 0;
+            // a long ray encodes 1. Both remain distinct from reserved keys.
+            const double length = code_bit(s, i) ? 1.35 : 0.65;
+            o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + (7.6 + length) * std::sin(a) << ' ' << kCenter - (7.6 + length) * std::cos(a)
+              << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\" stroke-linecap=\"round\"/>";
+            continue;
         }
-        else if (n.polar) svg_circle(o, n.x, n.y, polar_dot_radius(std::hypot(n.x - kCenter, n.y - kCenter)));
+        if (!code_bit(s, i)) continue;
+        if (n.polar) svg_circle(o, n.x, n.y, polar_dot_radius());
         else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
     o << "</g></svg>";
