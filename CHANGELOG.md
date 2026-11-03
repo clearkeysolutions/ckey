@@ -1,3 +1,9 @@
+## 0.1.0-dev.22 — 2026-11-03
+
+* Added a CKey-specific, luminance connected-component locator before Vision rectangle analysis. It searches for the continuous bright rounded-square border at half resolution and tests the recovered square bounds directly with the shared C++ decoder.
+* This directly addresses the dev.21 field result: Vision still failed to propose the distant symbol despite the core successfully decoding a 135 px camera-derived fixture when supplied its field corners. Vision remains as the fallback for rotated and projective candidates.
+* Kept format 0.8.0 unchanged. This Swift implementation requires Xcode/iPhone validation and has no distance or latency claim until measured.
+
 ## 0.1.0-dev.21 — 2026-11-03
 
 * Fixed distant-symbol candidate selection: the reader previously ranked generic Vision rectangles by area and only tested the largest eight, which the field recording shows were laptop/display rectangles rather than the contained CKey.

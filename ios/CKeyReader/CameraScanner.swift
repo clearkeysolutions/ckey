@@ -134,6 +134,39 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let stride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
 
         do {
+            // A CKey's continuous outer border remains detectable after the
+            // small payload modules have blurred together at distance. Locate
+            // that high-contrast connected component first. This deliberately
+            // does not depend on Vision deciding that a rounded code border is
+            // a document-shaped rectangle.
+            let borderQuads = brightBorderQuads(gray, width: width, height: height, stride: stride)
+            for quad in borderQuads.prefix(12) {
+                var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
+                var diagnostic = ckey_diagnostics()
+                let decodeStarted = CACurrentMediaTime()
+                var result = CKEY_UNCORRECTABLE
+                // A component bounds the illuminated edge; tolerate raster
+                // bloom and the one-pixel sampling uncertainty on either side.
+                for expansion in [0.94, 0.97, 1.0, 1.03, 1.06] {
+                    let adjusted = expandedCKeyQuad(quadPoints(quad), expansion: expansion,
+                                                    offsetX: 0, offsetY: 0)
+                    result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                        adjusted.withUnsafeBufferPointer { quadBuffer in
+                            ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                              payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                        }
+                    }
+                    if result == CKEY_OK { break }
+                }
+                let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
+                DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
+                if result == CKEY_OK {
+                    publishDecoded(payload, detectionMilliseconds: (CACurrentMediaTime() - started) * 1000,
+                                   candidates: borderQuads.count)
+                    return
+                }
+            }
+
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
             try handler.perform([symbolSquareRequest, rectangleRequest])
             let squareObservations = symbolSquareRequest.results ?? []
@@ -146,7 +179,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 let box = observation.boundingBox
                 return "\(Int(box.width * CGFloat(width)))×\(Int(box.height * CGFloat(height)))"
             }.joined(separator: ", ")
-            DispatchQueue.main.async { self.candidateSizes = sizeSummary }
+            DispatchQueue.main.async {
+                self.candidateSizes = borderQuads.isEmpty ? sizeSummary : "border \(borderQuads.count); \(sizeSummary)"
+            }
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
@@ -204,7 +239,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     DispatchQueue.main.async {
                         self.decodedHex = hex
                         self.detectionMilliseconds = detectionElapsed
-                        self.candidateCount = observations.count
+                        self.candidateCount = observations.count + borderQuads.count
                         self.decodeMilliseconds = decodeElapsed
                         self.status = "CKey decoded"
                         AudioServicesPlaySystemSound(SystemSoundID(1520))
@@ -262,6 +297,94 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // avoid taking the full camera frame ahead of a contained symbol.
         let oversizedPenalty = side > Double(min(frameWidth, frameHeight)) * 0.72 ? 2.0 : 0.0
         return aspectError * 10.0 + oversizedPenalty
+    }
+
+    private func publishDecoded(_ payload: [UInt8], detectionMilliseconds: Double, candidates: Int) {
+        didDecode = true
+        let hex = payload.map { String(format: "%02x", $0) }.joined()
+        DispatchQueue.main.async {
+            self.decodedHex = hex
+            self.detectionMilliseconds = detectionMilliseconds
+            self.candidateCount = candidates
+            self.status = "CKey decoded"
+            AudioServicesPlaySystemSound(SystemSoundID(1520))
+        }
+    }
+
+    private func quadPoints(_ quad: [Double]) -> [CGPoint] {
+        guard quad.count == 8 else { return [] }
+        return stride(from: 0, to: 8, by: 2).map {
+            CGPoint(x: CGFloat(quad[$0]), y: CGFloat(quad[$0 + 1]))
+        }
+    }
+
+    private func brightBorderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
+                                   stride: Int) -> [[Double]] {
+        // Work at half resolution: distant locator borders remain several
+        // samples thick, while this keeps the connected-component pass small.
+        let step = 2
+        let sampledWidth = (width + step - 1) / step
+        let sampledHeight = (height + step - 1) / step
+        var visited = [UInt8](repeating: 0, count: sampledWidth * sampledHeight)
+        var queue = [Int]()
+        var candidates: [(quad: [Double], score: Double)] = []
+        let minFrameSide = min(width, height)
+
+        for sampleY in 0..<sampledHeight {
+            for sampleX in 0..<sampledWidth {
+                let start = sampleY * sampledWidth + sampleX
+                if visited[start] != 0 { continue }
+                let sourceX = min(sampleX * step, width - 1)
+                let sourceY = min(sampleY * step, height - 1)
+                if gray[sourceY * stride + sourceX] < 200 { continue }
+
+                visited[start] = 1
+                queue.removeAll(keepingCapacity: true)
+                queue.append(start)
+                var head = 0
+                var minX = sampleX, maxX = sampleX, minY = sampleY, maxY = sampleY
+                var count = 0
+                while head < queue.count {
+                    let node = queue[head]
+                    head += 1
+                    let x = node % sampledWidth
+                    let y = node / sampledWidth
+                    minX = min(minX, x); maxX = max(maxX, x)
+                    minY = min(minY, y); maxY = max(maxY, y)
+                    count += 1
+                    for dy in -1...1 {
+                        for dx in -1...1 where dx != 0 || dy != 0 {
+                            let nx = x + dx, ny = y + dy
+                            guard nx >= 0, nx < sampledWidth, ny >= 0, ny < sampledHeight else { continue }
+                            let neighbor = ny * sampledWidth + nx
+                            if visited[neighbor] != 0 { continue }
+                            let px = min(nx * step, width - 1)
+                            let py = min(ny * step, height - 1)
+                            if gray[py * stride + px] >= 200 {
+                                visited[neighbor] = 1
+                                queue.append(neighbor)
+                            }
+                        }
+                    }
+                }
+
+                let boxWidth = (maxX - minX + 1) * step
+                let boxHeight = (maxY - minY + 1) * step
+                let side = min(boxWidth, boxHeight)
+                guard count >= 24, side >= 40, side < Int(Double(minFrameSide) * 0.78) else { continue }
+                let aspect = Double(boxWidth) / Double(boxHeight)
+                guard aspect > 0.72, aspect < 1.38 else { continue }
+                // Prefer square outlines over large filled bright UI panels.
+                let fillRatio = Double(count) / Double((maxX - minX + 1) * (maxY - minY + 1))
+                guard fillRatio < 0.38 else { continue }
+                let x0 = Double(minX * step), y0 = Double(minY * step)
+                let x1 = Double(min((maxX + 1) * step, width - 1))
+                let y1 = Double(min((maxY + 1) * step, height - 1))
+                let score = abs(log(aspect)) * 10.0 + fillRatio
+                candidates.append((quad: [x0, y0, x1, y0, x1, y1, x0, y1], score: score))
+            }
+        }
+        return candidates.sorted { $0.score < $1.score }.map(\.quad)
     }
 }
 
