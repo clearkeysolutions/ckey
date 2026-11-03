@@ -1,0 +1,24 @@
+{
+  "software_version": "0.1.0-dev.32",
+  "format_version": "0.11.0",
+  "profile": "locator-v1",
+  "payload_hex": "000102030405060708090a0b0c0d0e0f",
+  "frame_hex": "c74b0b010010000102030405060708090a0b0c0d0e0f7efce260",
+  "rs_parameters": {
+    "n": 77,
+    "k": 26,
+    "field_polynomial": "0x11d",
+    "primitive_element": 2,
+    "roots": "alpha^0 through alpha^50",
+    "parity_hex": "ff1e07fd221f067cf191f907c1bd22fd21ee0632d4aa7cb3f58d79abae55f78c4b5c075c972d859f352794e5cce3ef76b3d7ca"
+  },
+  "codeword_hex": "c74b0b010010000102030405060708090a0b0c0d0e0f7efce260ff1e07fd221f067cf191f907c1bd22fd21ee0632d4aa7cb3f58d79abae55f78c4b5c075c972d859f352794e5cce3ef76b3d7ca",
+  "finder_geometry": {
+    "style": "border-matched",
+    "corner_centers": [[4.0, 4.0], [25.0, 4.0], [25.0, 25.0], [4.0, 25.0]],
+    "radius": 3.15,
+    "thickness": 1.05,
+    "top_left_orientation_gap": true,
+    "note": "Finder arcs share the outer rounded-border corner centers (rx=3.5)."
+  }
+}
