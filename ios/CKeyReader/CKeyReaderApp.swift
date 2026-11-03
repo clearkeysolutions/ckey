@@ -57,12 +57,12 @@ struct ReaderView: View {
                     Text(hex).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    Text("Vision: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms")
+                    Text("Detection: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 } else {
                     Text("The phone finds the symbol, then the C++ core checks its keys, error correction, and checksum.")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    Text("Vision: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms · squares: \(scanner.candidateCount)")
+                    Text("Detection: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms · candidates: \(scanner.candidateCount)")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     if !scanner.candidateSizes.isEmpty {
                         Text("Largest square candidates: \(scanner.candidateSizes) px")

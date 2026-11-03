@@ -1,3 +1,9 @@
+## 0.1.0-dev.41 — 2026-11-03
+
+* Reworked the iOS scanner hot path to try measured quadrilaterals directly against Profiles 1, 2, and 3 before any search. Vision now runs on alternating frames as a rotation/perspective fallback; continuous key-based refinement is restricted to one leading candidate instead of every candidate. Camera capture resolution remains adaptive at 1080p/high.
+* Split detection and CKey decode timing so the displayed measurements no longer include the same work in both values. Updated scanner documentation to distinguish experimental multi-profile camera paths from camera-validated performance.
+* No on-device speed, distance, or reliability target is claimed yet. Xcode and a physical iPhone are required to build and characterize the live scanner.
+
 ## 0.1.0-dev.40 — 2026-11-03
 
 * Fixed Swift/C interop in the macOS renderer: C diagnostic message storage is converted from its imported fixed-size tuple safely, and SVG output buffers are passed through scoped mutable buffer pointers. This resolves the renderer's Xcode compile error without changing C ABI or wire-format behavior.

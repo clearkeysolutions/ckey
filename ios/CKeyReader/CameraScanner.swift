@@ -21,6 +21,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let output = AVCaptureVideoDataOutput()
     private var lastFrameTime = 0.0
     private var lastProgressTime = 0.0
+    private var frameIndex = 0
     private var hasConfigured = false
     private var didDecode = false
     private let rectangleRequest: VNDetectRectanglesRequest = {
@@ -138,6 +139,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let now = CACurrentMediaTime()
         if now - lastFrameTime < 0.05 { return } // Sample up to 20 frames/s while discarding stale frames.
         lastFrameTime = now
+        frameIndex &+= 1
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return }
 
@@ -156,18 +158,46 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // does not depend on Vision deciding that a rounded code border is
             // a document-shaped rectangle.
             let borderQuads = brightBorderQuads(gray, width: width, height: height, stride: stride)
-            for quad in borderQuads.prefix(12) {
+            let borderDetectionMilliseconds = (CACurrentMediaTime() - started) * 1000
+
+            // Test the camera's measured geometry immediately for all profiles.
+            // This avoids running a calibration search on every candidate and
+            // keeps the common locator path responsive at every symbol size.
+            for quad in borderQuads.prefix(4) {
                 let decodeStarted = CACurrentMediaTime()
-                let adjusted = refinedCKeyQuad(quadPoints(quad), gray: gray, width: width,
-                                                height: height, stride: stride)
                 if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                  locatorQuad: adjusted, denseQuad: quad) {
+                                                  locatorQuad: quad, denseQuad: quad) {
                     let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                    DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
-                    publishDecoded(decoded.bytes, profile: decoded.profile, detectionMilliseconds: (CACurrentMediaTime() - started) * 1000,
-                                   candidates: borderQuads.count)
+                    publishDecoded(decoded.bytes, profile: decoded.profile,
+                                   detectionMilliseconds: borderDetectionMilliseconds,
+                                   decodeMilliseconds: decodeElapsed, candidates: borderQuads.count)
                     return
                 }
+            }
+
+            // Vision's rectangle search is the orientation/perspective fallback.
+            // Running it on alternating sampled frames leaves the direct CKey
+            // border path available at the full 20 fps.
+            guard frameIndex.isMultiple(of: 2) else {
+                // Refine one border candidate on alternate frames only. This
+                // is a continuous key-based search, not a fixed size ladder.
+                if let strongest = borderQuads.first {
+                    let adjusted = refinedCKeyQuad(quadPoints(strongest), gray: gray,
+                                                    width: width, height: height, stride: stride)
+                    let decodeStarted = CACurrentMediaTime()
+                    if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                                      locatorQuad: adjusted, denseQuad: adjusted) {
+                        publishDecoded(decoded.bytes, profile: decoded.profile,
+                                       detectionMilliseconds: borderDetectionMilliseconds,
+                                       decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
+                                       candidates: borderQuads.count)
+                        return
+                    }
+                }
+                publishProgress(borderQuads.isEmpty ? "Searching for CKey geometry…" : "Checking CKey calibration…",
+                                detectionMilliseconds: borderDetectionMilliseconds,
+                                candidates: borderQuads.count)
+                return
             }
 
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
@@ -186,34 +216,46 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 self.candidateSizes = borderQuads.isEmpty ? sizeSummary : "border \(borderQuads.count); \(sizeSummary)"
             }
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
-            publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
+            publishProgress(observations.isEmpty ? "Searching for CKey geometry…" : "Checking \(observations.count) camera candidates…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            for observation in observations.prefix(24) {
+            // First decode directly from detector geometry. A handful of the
+            // strongest observations is enough; RS/CRC validate every result.
+            for observation in observations.prefix(8) {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
                 let decodeStarted = CACurrentMediaTime()
-                let refined = refinedCKeyQuad(points, gray: gray, width: width, height: height, stride: stride)
-                let denseQuad = expandedCKeyQuad(points, expansion: 1.0, offsetX: 0, offsetY: 0)
+                let measuredQuad = expandedCKeyQuad(points, expansion: 1.0, offsetX: 0, offsetY: 0)
                 if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                  locatorQuad: refined, denseQuad: denseQuad) {
+                                                  locatorQuad: measuredQuad, denseQuad: measuredQuad) {
                     let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                    didDecode = true
-                    DispatchQueue.main.async {
-                        self.decodedHex = decoded.bytes.map { String(format: "%02x", $0) }.joined()
-                        self.decodedProfile = decoded.profile
-                        self.detectionMilliseconds = detectionElapsed
-                        self.candidateCount = observations.count + borderQuads.count
-                        self.decodeMilliseconds = decodeElapsed
-                        self.status = "CKey decoded"
-                        AudioServicesPlaySystemSound(SystemSoundID(1520))
-                    }
+                    publishDecoded(decoded.bytes, profile: decoded.profile,
+                                   detectionMilliseconds: detectionElapsed,
+                                   decodeMilliseconds: decodeElapsed,
+                                   candidates: observations.count + borderQuads.count)
+                    return
+                }
+            }
+
+            // If direct sampling missed, spend the continuous calibration
+            // search only on the leading Vision candidate.
+            for observation in observations.prefix(1) {
+                let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
+                    .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
+                let refined = refinedCKeyQuad(points, gray: gray, width: width, height: height, stride: stride)
+                let decodeStarted = CACurrentMediaTime()
+                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                                  locatorQuad: refined, denseQuad: refined) {
+                    publishDecoded(decoded.bytes, profile: decoded.profile,
+                                   detectionMilliseconds: detectionElapsed,
+                                   decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
+                                   candidates: observations.count + borderQuads.count)
                     return
                 }
             }
             if !observations.isEmpty {
-                publishProgress("Square found; CKey checks did not match. Hold steady and fill more of the frame.",
-                                detectionMilliseconds: detectionElapsed, candidates: observations.count,
+                publishProgress("Symbol-like shape found; checking CKey keys and error correction…",
+                                detectionMilliseconds: detectionElapsed, candidates: observations.count + borderQuads.count,
                                 force: true)
             }
         } catch {
@@ -357,7 +399,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         return nil
     }
 
-    private func publishDecoded(_ payload: [UInt8], profile: String, detectionMilliseconds: Double, candidates: Int) {
+    private func publishDecoded(_ payload: [UInt8], profile: String, detectionMilliseconds: Double,
+                                decodeMilliseconds: Double, candidates: Int) {
         didDecode = true
         let hex = payload.map { String(format: "%02x", $0) }.joined()
         DispatchQueue.main.async {
@@ -365,6 +408,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             self.decodedProfile = profile
             self.detectionMilliseconds = detectionMilliseconds
             self.candidateCount = candidates
+            self.decodeMilliseconds = decodeMilliseconds
             self.status = "CKey decoded"
             AudioServicesPlaySystemSound(SystemSoundID(1520))
         }
