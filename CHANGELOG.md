@@ -1,3 +1,9 @@
+## 0.1.0-dev.21 — 2026-11-03
+
+* Fixed distant-symbol candidate selection: the reader previously ranked generic Vision rectangles by area and only tested the largest eight, which the field recording shows were laptop/display rectangles rather than the contained CKey.
+* Added a second Vision request for small, near-square candidates (up to 64 observations) and ranks the merged candidate set by squareness before testing up to 24 candidates. The expensive refinement is limited to the leading four candidates.
+* Kept format 0.8.0 unchanged. This fix requires iPhone/Xcode validation.
+
 ## 0.1.0-dev.20 — 2026-11-03
 
 * Expanded the far-distance fallback from 12 to 18 scale hypotheses (0.25×–1.80×) and from nine to 25 center shifts per scale for each of the six leading candidates.
