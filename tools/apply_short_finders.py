@@ -18,7 +18,7 @@ old1 = """    // Finder arcs share the outer border's corner radius centers so t
     for (int corner = 0; corner < 4; ++corner) {
         const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
         o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
-        // Border is rx=3.5 on the 0.5..28.5 rect \u2192 corner center at (4.0, 4.0).
+        // Border is rx=3.5 on the 0.5..28.5 rect → corner center at (4.0, 4.0).
         // Finder radius sits just inside the border stroke so both remain visible.
         constexpr double cx = 4.0, cy = 4.0, radius = 3.15, thickness = 1.05, visible_gap = 1.0;
         if (corner == 0) {
@@ -82,7 +82,7 @@ new2 = """        constexpr double cx=0.8, cy=0.8, radius=3.5, thickness=1.0;
               << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap)
               << " A 3.5000 3.5000 0 0 0 " << cx + radius * std::cos(middle - half_span) << ' ' << cy + radius * std::sin(middle - half_span)
               << "\" stroke-width=\"1.0000\"/>";
-        } else o << "<path d=\"M " << cx + radius * std::cos(middle + half_span) << ' ' << cy + radius * std::sin(middle + half_span)
+        } else o << "<path d=\"M " << cx + radius * std::cos(middle + half_span) << ' ' << cy + radius * std::sin(middle - half_span)
               << " A 3.5000 3.5000 0 0 0 " << cx + radius * std::cos(middle - half_span) << ' ' << cy + radius * std::sin(middle - half_span)
               << "\" stroke-width=\"1.0000\"/>";"""
 
