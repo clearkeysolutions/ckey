@@ -159,7 +159,7 @@ bool ring_key(int ring, int slot) { return ring == 5 && slot >= 18 && slot <= 25
 
 std::vector<Node> data_nodes() {
     std::vector<Node> cart, polar, out;
-    // Fixed Cartesian field is sampled outside the polar aperture.  The four
+    // Fixed Cartesian field is sampled outside the polar aperture. The four
     // corner finders and the left-side Grid Key never carry payload.
     for (int r = 1; r < kSide - 1; ++r) for (int c = 1; c < kSide - 1; ++c) {
         const double x = c + .5, y = r + .5;
@@ -167,8 +167,8 @@ std::vector<Node> data_nodes() {
         if (in_finder(r, c) || grid_key(r, c) || dx * dx + dy * dy <= 10.4 * 10.4) continue;
         cart.push_back({false, x, y, r, c, -1, -1});
     }
-    // Six 72-slot rings use fixed 5-degree angular cells.  The three Ray Key
-    // bearings and the seven-slot Ring Key are structural, never payload.
+    // Six 72-slot rings use fixed 5-degree angular cells. The three Ray Key
+    // bearings and eight-slot Ring Key are structural, never payload.
     for (int ring = 0; ring < 6; ++ring) {
         const double radius = 4.5 + ring;
         for (int slot = 0; slot < 72; ++slot) {
@@ -252,7 +252,7 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
 
 ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
                             size_t cap, size_t *required) {
-    if (!s || !required || scale == 0 || s->abi_version != CKEY_ABI_VERSION || s->side != kSide) return CKEY_INVALID_ARGUMENT;
+    if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION || s->side != kSide) return CKEY_INVALID_ARGUMENT;
     const auto nodes = data_nodes();
     if (nodes.size() < kBits) return CKEY_INTERNAL_ERROR;
     std::ostringstream o; o << std::fixed << std::setprecision(4);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-dev.2 — 2026-11-02
+
+* Corrected the format note to reflect the implemented byte-codeword RS decoder and its tested eight-error correction bound.
+* Fixed shared-library C ABI exports and bounded SVG render scale to prevent dimension overflow and unreasonable outputs.
+* Added independent-review findings and synchronized the public software version and fixture metadata.
+
 ## 0.1.0-dev.1 — 2026-11-02
 
 * Added draft locator-v1 framing with CRC-32C and shortened RS(42,26) over GF(256).

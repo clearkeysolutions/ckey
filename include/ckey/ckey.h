@@ -21,10 +21,11 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 1u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.1"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.2"
 #define CKEY_FORMAT_VERSION 1u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_LOCATOR_SIDE 29u
+#define CKEY_MAX_RENDER_SCALE 256u
 #define CKEY_MAX_SYMBOL_MODULES (CKEY_LOCATOR_SIDE * CKEY_LOCATOR_SIDE)
 
 typedef enum ckey_status {
@@ -60,6 +61,7 @@ CKEY_API ckey_status ckey_encode_locator(const uint8_t *payload, size_t payload_
 CKEY_API ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
                                           uint8_t *out_payload, size_t out_capacity,
                                           ckey_diagnostics *out_diagnostics);
+/* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,
                                       size_t *out_required);

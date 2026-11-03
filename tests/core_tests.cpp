@@ -45,6 +45,9 @@ int main() {
     assert(needed>1000);
     std::string svg(needed,'\0');
     assert(ckey_render_svg(&a, 16, svg.data(), svg.size(), &needed)==CKEY_OK);
+    size_t ignored=0;
+    assert(ckey_render_svg(&a, 0, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
+    assert(ckey_render_svg(&a, CKEY_MAX_RENDER_SCALE + 1, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     assert(svg.find("viewBox=\"-1 -1 31 31\"")!=std::string::npos);
     assert(svg.find("stroke-linecap=\"butt\"")!=std::string::npos);
     assert(svg.find("CKey locator symbol")!=std::string::npos);

@@ -1,8 +1,8 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.1`  
-**Current wire format:** `CKey Format 0.1.0` (format byte `01`, locator profile byte `01`)  
-**Branch:** `main`  
+**Current software version:** `0.1.0-dev.2`
+**Current wire format:** `CKey Format 0.1.0` (format byte `01`, locator profile byte `01`)
+**Branch:** `main`
 **Context updated:** 2026-11-02
 
 ## Mission
@@ -28,9 +28,12 @@ Next engineering gates: (1) implement RS erasure correction and expose decode in
 
 * `g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic`: core compiled without warnings.
 * C++ core tests passed, including 32 distinct eight-byte-error correction patterns.
+* `python3 tools/check_version.py`: software version nodes synchronized.
 * `python3 tools/rs_reference.py`: independently generated RS parity matched the committed vector.
 * CLI generated the example SVG; Python XML parser accepted it.
+* Static and hidden-visibility shared builds passed; shared build exported all five public `ckey_*` ABI functions. Render-scale boundary checks passed.
 * CMake/CTest not run because CMake is unavailable in the current environment.
+* Independent ECC review ran 10,000 randomized eight-symbol-error patterns through the C ABI; all corrected to the original payload. Review identified shared-library visibility and render-scale bounds, addressed in dev.2.
 
 ## Research references and provenance
 
