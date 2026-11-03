@@ -371,9 +371,23 @@ std::vector<ExtendedNode> extended_nodes() {
     // its large Cartesian capacity.
     for (int row = 1; row < grid - 1; ++row) for (int col = 1; col < grid - 1; ++col) {
         const double x = (col + .5) * pitch, y = (row + .5) * pitch;
-        const bool finder = (x < 24.2 && y < 24.2) || (x > 91.8 && y < 24.2) ||
-                            (x < 24.2 && y > 91.8) || (x > 91.8 && y > 91.8);
-        const bool grid_reference = x > 7.2 && x < 16.8 && y > 43.2 && y < 52.8;
+        // Structural boundary plus its anti-alias/blur guard is never payload.
+        if (x < 4.0 || x > 112.0 || y < 4.0 || y > 112.0) continue;
+        // Reserve only the actual finder strokes plus a measurable guard,
+        // not the entire square corner envelope. This keeps data in the
+        // useful regions beside and between the curves.
+        const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
+            const double vx=x-cx, vy=y-cy, distance=std::sqrt(vx*vx+vy*vy);
+            const bool inward_x=right ? vx<=0 : vx>=0, inward_y=bottom ? vy<=0 : vy>=0;
+            // The inside of a finder remains blank; only the exterior around
+            // its true quarter-circle may carry Cartesian payload.
+            return inward_x && inward_y && distance<=21.3;
+        };
+        const bool finder = finder_clearance(3.2,3.2,false,false) || finder_clearance(112.8,3.2,true,false) ||
+                            finder_clearance(3.2,112.8,false,true) || finder_clearance(112.8,112.8,true,true);
+        // The Grid Key occupies the identical module lattice as payload:
+        // 0.34-unit marks on a 0.5-unit pitch, with one clear module around it.
+        const bool grid_reference = x > 7.5 && x < 9.5 && y > 44.5 && y < 46.5;
         const double dx = x - center, dy = y - center;
         if (finder || grid_reference || dx * dx + dy * dy <= 31.3 * 31.3) continue;
         cart.push_back({ExtendedKind::cart, x, y, -1, -1, -1});
@@ -917,9 +931,10 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
         } else o << "<path d=\"M " << cx << ' ' << cy+r << " A 18 18 0 0 0 " << cx+r << ' ' << cy << "\" stroke-width=\"4\"/>";
         o << "</g>";
     }
-    // Fixed Grid Key: a 4x4 array of 2-unit modules. Its known pitch and
-    // gaps establish local module scale before dense data are sampled.
-    for (int r=0;r<4;++r) for (int c=0;c<4;++c) o << "<rect x=\"" << 8+c*2.1 << "\" y=\"" << 44+r*2.1 << "\" width=\"1.45\" height=\"1.45\" rx=\".30\" stroke=\"none\"/>";
+    // Fixed Grid Key: four ordinary 0.34-unit Cartesian modules on the same
+    // 0.5-unit pitch as payload. It calibrates payload pitch and dead space;
+    // it is deliberately not a larger visual marker.
+    for (int r=0;r<2;++r) for (int c=0;c<2;++c) o << "<rect x=\"" << 8.08+c*.5 << "\" y=\"" << 45.08+r*.5 << "\" width=\".34\" height=\".34\" rx=\".08\" stroke=\"none\"/>";
     // Fixed Ray Key: 12:00 full; 9:00 half; 9:05 three-quarter length.
     for (const auto &[slot,fraction] : {std::pair{0,1.0},std::pair{432,.5},std::pair{440,.75}}) {
         const double a=kTau*slot/576.0,r0=26.30,r1=r0+3.6*fraction;

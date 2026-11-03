@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.28"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.31"
 #define CKEY_FORMAT_VERSION 8u
 #define CKEY_TEXT_FORMAT_VERSION 9u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
