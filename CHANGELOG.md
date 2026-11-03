@@ -1,3 +1,7 @@
+## 0.1.0-dev.39 — 2026-11-03
+
+* Corrected the macOS renderer project's current-SDK import and runtime status interpolation, keeping its UI build path explicit and versioned.
+
 ## 0.1.0-dev.38 — 2026-11-03
 
 * Added the shared C ABI contracts required for projective grayscale sampling of the Profile 2 and Profile 3 encodings. The Mac rendering laboratory and camera reader use the same versioned native core.
