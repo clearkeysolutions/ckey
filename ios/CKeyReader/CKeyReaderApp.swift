@@ -26,7 +26,7 @@ struct ReaderView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Circle().fill(scanner.isRunning ? .green : .orange).frame(width: 10, height: 10)
+                Circle().fill(scanner.isRunning ? Color.green : Color.orange).frame(width: 10, height: 10)
             }
 
             ZStack {
@@ -51,7 +51,7 @@ struct ReaderView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label(scanner.status, systemImage: scanner.decodedHex == nil ? "viewfinder" : "checkmark.circle.fill")
                     .font(.headline)
-                    .foregroundStyle(scanner.decodedHex == nil ? .primary : .green)
+                    .foregroundColor(scanner.decodedHex == nil ? Color.primary : Color.green)
                 if let hex = scanner.decodedHex {
                     Text(hex).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
