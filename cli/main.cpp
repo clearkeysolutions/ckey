@@ -1,35 +1,62 @@
 #include "ckey/ckey.h"
-#include <array>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
-static bool from_hex(const std::string &s, std::array<uint8_t,16> &out) {
-    if (s.size() != 32) return false;
-    for (size_t i=0;i<16;i++) {
-        unsigned v=0;
-        if (std::sscanf(s.c_str()+2*i, "%2x", &v)!=1) return false;
-        out[i]=static_cast<uint8_t>(v);
+static bool from_hex(const std::string &input, std::vector<uint8_t> &out) {
+    if (input.size() % 2 != 0) return false;
+    out.resize(input.size() / 2);
+    for (size_t i = 0; i < out.size(); ++i) {
+        unsigned value = 0;
+        if (std::sscanf(input.c_str() + 2 * i, "%2x", &value) != 1) return false;
+        out[i] = static_cast<uint8_t>(value);
     }
     return true;
 }
+
+static bool write_svg(const std::string &path, const std::string &svg) {
+    std::ofstream file(path, std::ios::binary);
+    if (!file) return false;
+    file.write(svg.data(), static_cast<std::streamsize>(svg.size() - 1));
+    return static_cast<bool>(file);
+}
+
 int main(int argc, char **argv) {
-    if (argc != 6 || std::string(argv[1]) != "encode" || std::string(argv[2]) != "--hex" || std::string(argv[4]) != "--out") {
-        std::cerr << "usage: ckey encode --hex <32-hex-chars> --out <symbol.svg>\n"; return 2;
+    if (argc != 6 || (std::string(argv[2]) != "--hex" && std::string(argv[2]) != "--utf8") || std::string(argv[4]) != "--out") {
+        std::cerr << "usage:\n"
+                  << "  ckey encode --hex <32-hex-chars> --out <locator.svg>\n"
+                  << "  ckey encode-text --utf8 <up-to-200-byte-text> --out <text.svg>\n"
+                  << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n";
+        return 2;
     }
-    std::array<uint8_t,16> payload{};
-    if (!from_hex(argv[3], payload)) { std::cerr << "locator input must be 16 bytes encoded as 32 hexadecimal characters\n"; return 2; }
-    ckey_symbol symbol{}; ckey_diagnostics diag{};
-    if (ckey_encode_locator(payload.data(), payload.size(), &symbol, &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
-    size_t n=0; ckey_render_svg(&symbol, 16, nullptr, 0, &n);
-    std::string svg(n, '\0');
-    if (ckey_render_svg(&symbol, 16, svg.data(), svg.size(), &n) != CKEY_OK) { std::cerr << "SVG rendering failed\n"; return 1; }
-    std::ofstream f(argv[5], std::ios::binary);
-    if (!f) { std::cerr << "cannot open output path\n"; return 1; }
-    f.write(svg.data(), static_cast<std::streamsize>(n-1));
-    std::cout << diag.message << "; profile=locator-v1; codeword-bytes=77; svg=" << argv[5] << '\n';
-    return f ? 0 : 1;
+    const std::string command = argv[1], mode = argv[2], value = argv[3], output = argv[5];
+    ckey_diagnostics diag{};
+    std::vector<uint8_t> payload;
+    if (mode == "--hex") {
+        if (!from_hex(value, payload)) { std::cerr << "hex input must contain complete bytes\n"; return 2; }
+    } else payload.assign(value.begin(), value.end());
+    if (command == "encode") {
+        if (mode != "--hex" || payload.size() != CKEY_LOCATOR_PAYLOAD_BYTES) { std::cerr << "locator input must be exactly 16 bytes encoded as 32 hexadecimal characters\n"; return 2; }
+        ckey_symbol symbol{};
+        if (ckey_encode_locator(payload.data(), payload.size(), &symbol, &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+        size_t needed = 0; ckey_render_svg(&symbol, 16, nullptr, 0, &needed);
+        std::string svg(needed, '\0');
+        if (ckey_render_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
+        std::cout << diag.message << "; profile=locator-v1; payload-bytes=16; svg=" << output << '\n';
+        return 0;
+    }
+    if (command == "encode-text") {
+        if (payload.empty() || payload.size() > CKEY_TEXT_PAYLOAD_MAX_BYTES) { std::cerr << "text input must contain 1 to 200 UTF-8 bytes\n"; return 2; }
+        ckey_text_symbol symbol{};
+        if (ckey_encode_text(payload.data(), payload.size(), &symbol, &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+        size_t needed = 0; ckey_render_text_svg(&symbol, 16, nullptr, 0, &needed);
+        std::string svg(needed, '\0');
+        if (ckey_render_text_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
+        std::cout << diag.message << "; profile=text-v2; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
+        return 0;
+    }
+    std::cerr << "unknown command\n"; return 2;
 }

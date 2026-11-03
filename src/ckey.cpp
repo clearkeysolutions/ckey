@@ -18,6 +18,10 @@ constexpr size_t kDataBytes = 26;
 constexpr size_t kParityBytes = 51;
 constexpr size_t kCodewordBytes = kDataBytes + kParityBytes;
 constexpr size_t kBits = kCodewordBytes * 8;
+constexpr size_t kTextDataBytes = 210;
+constexpr size_t kTextParityBytes = 45;
+constexpr size_t kTextCodewordBytes = kTextDataBytes + kTextParityBytes;
+static_assert(kTextCodewordBytes == CKEY_TEXT_CODEWORD_BYTES);
 constexpr int kSide = 29;
 constexpr double kCenter = 14.5;
 constexpr double kTau = 6.283185307179586476925286766559;
@@ -140,6 +144,90 @@ bool rs_correct(std::array<uint8_t, kCodewordBytes> &cw, uint32_t &corrected) {
     return true;
 }
 
+std::vector<uint8_t> rs_generator_generic(size_t parity) {
+    std::vector<uint8_t> polynomial(1, 1);
+    for (size_t root = 0; root < parity; ++root) {
+        std::vector<uint8_t> next(polynomial.size() + 1, 0);
+        for (size_t i = 0; i < polynomial.size(); ++i) {
+            next[i] ^= polynomial[i];
+            next[i + 1] ^= gf.mul(polynomial[i], gf.exp[root]);
+        }
+        polynomial = std::move(next);
+    }
+    return polynomial;
+}
+
+void rs_encode_generic(std::vector<uint8_t> &codeword, size_t data_bytes, size_t parity_bytes) {
+    const auto generator = rs_generator_generic(parity_bytes);
+    std::vector<uint8_t> work = codeword;
+    for (size_t i = 0; i < data_bytes; ++i) {
+        const uint8_t feedback = work[i];
+        if (!feedback) continue;
+        for (size_t j = 1; j <= parity_bytes; ++j) work[i + j] ^= gf.mul(generator[j], feedback);
+    }
+    std::copy(work.begin() + static_cast<std::ptrdiff_t>(data_bytes), work.end(),
+              codeword.begin() + static_cast<std::ptrdiff_t>(data_bytes));
+}
+
+bool rs_correct_generic(std::vector<uint8_t> &cw, size_t parity_bytes, uint32_t &corrected) {
+    if (cw.empty() || parity_bytes == 0 || parity_bytes >= cw.size() || parity_bytes > 254) return false;
+    std::vector<uint8_t> syndromes(parity_bytes, 0);
+    for (size_t j = 0; j < parity_bytes; ++j) for (uint8_t b : cw) syndromes[j] = gf.mul(syndromes[j], gf.exp[j]) ^ b;
+    if (std::all_of(syndromes.begin(), syndromes.end(), [](uint8_t v) { return v == 0; })) { corrected = 0; return true; }
+
+    std::vector<uint8_t> lambda(parity_bytes + 1, 0), previous(parity_bytes + 1, 0);
+    lambda[0] = previous[0] = 1;
+    size_t degree = 0, shift = 1;
+    uint8_t last_discrepancy = 1;
+    for (size_t n = 0; n < parity_bytes; ++n) {
+        uint8_t discrepancy = syndromes[n];
+        for (size_t i = 1; i <= degree; ++i) discrepancy ^= gf.mul(lambda[i], syndromes[n - i]);
+        if (!discrepancy) { ++shift; continue; }
+        const auto saved = lambda;
+        const uint8_t factor = gf.mul(discrepancy, gf.inv(last_discrepancy));
+        for (size_t i = 0; i + shift <= parity_bytes; ++i) lambda[i + shift] ^= gf.mul(factor, previous[i]);
+        if (2 * degree <= n) { degree = n + 1 - degree; previous = saved; last_discrepancy = discrepancy; shift = 1; }
+        else ++shift;
+    }
+    if (degree == 0 || degree > parity_bytes / 2) return false;
+    std::vector<size_t> positions; std::vector<uint8_t> locations;
+    for (size_t pos = 0; pos < cw.size(); ++pos) {
+        const uint8_t location = gf.exp[cw.size() - 1 - pos];
+        uint8_t value = lambda[degree];
+        for (size_t i = degree; i-- > 0;) value = gf.mul(value, gf.inv(location)) ^ lambda[i];
+        if (!value) { positions.push_back(pos); locations.push_back(location); }
+    }
+    if (positions.size() != degree) return false;
+    std::vector<uint8_t> matrix(degree * (degree + 1), 0);
+    const auto at = [&](size_t row, size_t col) -> uint8_t & { return matrix[row * (degree + 1) + col]; };
+    for (size_t row = 0; row < degree; ++row) {
+        for (size_t col = 0; col < degree; ++col) {
+            uint8_t value = 1;
+            for (size_t power = 0; power < row; ++power) value = gf.mul(value, locations[col]);
+            at(row, col) = value;
+        }
+        at(row, degree) = syndromes[row];
+    }
+    for (size_t col = 0; col < degree; ++col) {
+        size_t pivot = col; while (pivot < degree && at(pivot, col) == 0) ++pivot;
+        if (pivot == degree) return false;
+        if (pivot != col) for (size_t j = col; j <= degree; ++j) std::swap(at(pivot, j), at(col, j));
+        const uint8_t inverse = gf.inv(at(col, col));
+        for (size_t j = col; j <= degree; ++j) at(col, j) = gf.mul(at(col, j), inverse);
+        for (size_t row = 0; row < degree; ++row) if (row != col) {
+            const uint8_t factor = at(row, col);
+            for (size_t j = col; j <= degree; ++j) at(row, j) ^= gf.mul(factor, at(col, j));
+        }
+    }
+    for (size_t i = 0; i < degree; ++i) cw[positions[i]] ^= at(i, degree);
+    for (size_t j = 0; j < parity_bytes; ++j) {
+        uint8_t syndrome = 0; for (uint8_t b : cw) syndrome = gf.mul(syndrome, gf.exp[j]) ^ b;
+        if (syndrome) return false;
+    }
+    corrected = static_cast<uint32_t>(degree);
+    return true;
+}
+
 uint32_t crc32c(const uint8_t *data, size_t len) {
     uint32_t crc = 0xffffffffu;
     for (size_t i = 0; i < len; ++i) {
@@ -224,6 +312,44 @@ std::vector<Node> data_nodes() {
 }
 
 bool code_bit(const ckey_symbol *s, size_t i) { return ((s->codeword[i / 8] >> (7 - (i % 8))) & 1u) != 0; }
+
+struct TextNode { bool cart; bool dial; double x, y; int row, col, ring, slot; };
+
+std::vector<TextNode> text_nodes() {
+    constexpr int grid = 58, slots = 144, rings = 8;
+    constexpr double pitch = 29.0 / grid;
+    std::vector<TextNode> cart, polar, out;
+    for (int row = 1; row < grid - 1; ++row) for (int col = 1; col < grid - 1; ++col) {
+        const double x = (col + .5) * pitch, y = (row + .5) * pitch;
+        const bool finder = (x < 6.1 && y < 6.1) || (x > 22.9 && y < 6.1) ||
+                            (x < 6.1 && y > 22.9) || (x > 22.9 && y > 22.9);
+        const bool grid_reference = x > 1.8 && x < 4.2 && y > 10.8 && y < 13.2;
+        const double dx = x - kCenter, dy = y - kCenter;
+        if (finder || grid_reference || dx * dx + dy * dy <= 10.5 * 10.5) continue;
+        cart.push_back({true, false, x, y, row, col, -1, -1});
+    }
+    // The dial is narrow and radial. The eight rings share equal angular
+    // pitch; each pair of adjacent occupied slots may become one arc.
+    for (int slot = 0; slot < slots; ++slot) {
+        if (slot != 0 && slot != 108 && slot != 110) polar.push_back({false, true, 0, 0, -1, -1, -1, slot});
+    }
+    for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
+        if (slot == 0 || slot == 108 || slot == 110 || (ring == rings - 1 && slot >= 36 && slot <= 51)) continue;
+        const double radius = 3.4 + .43 * ring;
+        const double a = kTau * slot / slots;
+        polar.push_back({false, false, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), -1, -1, ring, slot});
+    }
+    // Deterministic coprime permutation plus Cartesian/polar interleaving
+    // spreads adjacent codeword bits across both coordinate systems.
+    size_t ci = 0, pi = 0;
+    while (ci < cart.size() || pi < polar.size()) {
+        if (ci < cart.size()) out.push_back(cart[ci++]);
+        if (pi < polar.size()) out.push_back(polar[pi++]);
+    }
+    return out;
+}
+
+bool text_code_bit(const ckey_text_symbol *s, size_t i) { return ((s->codeword[i / 8] >> (7 - (i % 8))) & 1u) != 0; }
 
 void set_status(ckey_diagnostics *d, ckey_status s, const char *m) {
     if (!d) return;
@@ -356,6 +482,55 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
     std::memcpy(payload, cw.data() + 6, CKEY_LOCATOR_PAYLOAD_BYTES);
     set_status(diag, CKEY_OK, corrected ? "decoded locator; Reed-Solomon symbols corrected" : "decoded locator; no correction needed");
     if (diag) diag->corrected_symbols = corrected;
+    return CKEY_OK;
+}
+
+ckey_status ckey_encode_text(const uint8_t *payload, size_t payload_len,
+                              ckey_text_symbol *out, ckey_diagnostics *diag) {
+    if (!payload || !out) { set_status(diag, CKEY_INVALID_ARGUMENT, "text payload and output are required"); return CKEY_INVALID_ARGUMENT; }
+    if (payload_len > CKEY_TEXT_PAYLOAD_MAX_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "text profile payload exceeds 200 bytes"); return CKEY_INVALID_ARGUMENT; }
+    std::memset(out, 0, sizeof(*out));
+    out->abi_version = CKEY_ABI_VERSION; out->side = kSide; out->payload_length = static_cast<uint32_t>(payload_len);
+    // Frame: magic, format 9, profile 2, u16be payload length, payload,
+    // CRC-32C over all preceding frame bytes, then deterministic zero padding.
+    std::vector<uint8_t> codeword(kTextCodewordBytes, 0);
+    codeword[0] = 0xc7; codeword[1] = 0x4b; codeword[2] = CKEY_TEXT_FORMAT_VERSION; codeword[3] = 2;
+    codeword[4] = static_cast<uint8_t>(payload_len >> 8); codeword[5] = static_cast<uint8_t>(payload_len);
+    std::memcpy(codeword.data() + 6, payload, payload_len);
+    const uint32_t crc = crc32c(codeword.data(), 6 + payload_len);
+    const size_t crc_index = 6 + payload_len;
+    codeword[crc_index] = static_cast<uint8_t>(crc >> 24); codeword[crc_index + 1] = static_cast<uint8_t>(crc >> 16);
+    codeword[crc_index + 2] = static_cast<uint8_t>(crc >> 8); codeword[crc_index + 3] = static_cast<uint8_t>(crc);
+    rs_encode_generic(codeword, kTextDataBytes, kTextParityBytes);
+    std::memcpy(out->codeword, codeword.data(), codeword.size());
+    set_status(diag, CKEY_OK, "encoded text profile v2");
+    return CKEY_OK;
+}
+
+ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
+                              uint8_t *payload, size_t out_capacity, size_t *out_payload_len,
+                              ckey_diagnostics *diag) {
+    if (!codeword || !payload || !out_payload_len || codeword_len != kTextCodewordBytes) {
+        set_status(diag, CKEY_INVALID_ARGUMENT, "text decode requires a 255-byte codeword and output length"); return CKEY_INVALID_ARGUMENT;
+    }
+    std::vector<uint8_t> corrected(codeword, codeword + codeword_len);
+    uint32_t corrections = 0;
+    if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
+    if (corrected[0] != 0xc7 || corrected[1] != 0x4b || corrected[2] != CKEY_TEXT_FORMAT_VERSION || corrected[3] != 2) {
+        set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
+    }
+    const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
+    if (length > CKEY_TEXT_PAYLOAD_MAX_BYTES || out_capacity < length || 6 + length + 4 > kTextDataBytes) {
+        set_status(diag, CKEY_INSUFFICIENT_BUFFER, "text payload length exceeds profile or output capacity"); return CKEY_INSUFFICIENT_BUFFER;
+    }
+    const size_t crc_index = 6 + length;
+    const uint32_t expected = (static_cast<uint32_t>(corrected[crc_index]) << 24) |
+                              (static_cast<uint32_t>(corrected[crc_index + 1]) << 16) |
+                              (static_cast<uint32_t>(corrected[crc_index + 2]) << 8) | corrected[crc_index + 3];
+    if (crc32c(corrected.data(), crc_index) != expected) { set_status(diag, CKEY_INTEGRITY_FAILURE, "text CRC-32C validation failed"); return CKEY_INTEGRITY_FAILURE; }
+    std::memcpy(payload, corrected.data() + 6, length); *out_payload_len = length;
+    set_status(diag, CKEY_OK, corrections ? "decoded text profile; Reed-Solomon symbols corrected" : "decoded text profile; no correction needed");
+    if (diag) diag->corrected_symbols = corrections;
     return CKEY_OK;
 }
 
@@ -551,5 +726,62 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out, text.c_str(), *required);
     return CKEY_OK;
+}
+
+ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char *out,
+                                  size_t cap, size_t *required) {
+    if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE ||
+        s->abi_version != CKEY_ABI_VERSION || s->side != kSide || s->payload_length > CKEY_TEXT_PAYLOAD_MAX_BYTES) return CKEY_INVALID_ARGUMENT;
+    const auto nodes = text_nodes();
+    if (nodes.size() < kTextCodewordBytes * 8) return CKEY_INTERNAL_ERROR;
+    std::ostringstream o; o << std::fixed << std::setprecision(4);
+    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey text symbol profile 2\">"
+      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/>";
+    for (int corner = 0; corner < 4; ++corner) {
+        const char *transform = corner == 0 ? "" : corner == 1 ? "translate(29 0) scale(-1 1)" : corner == 2 ? "translate(29 29) scale(-1 -1)" : "translate(0 29) scale(1 -1)";
+        o << "<g transform=\"" << transform << "\" fill=\"none\" stroke-linecap=\"round\">";
+        constexpr double cx=.8, cy=.8, radius=4.5, thickness=1.0;
+        if (corner == 0) {
+            const double gap = (1.0 + thickness) / (2.0 * radius), middle = kTau / 8.0;
+            o << "<path d=\"M " << cx << ' ' << cy + radius << " A 4.5000 4.5000 0 0 0 " << cx + radius * std::cos(middle + gap) << ' ' << cy + radius * std::sin(middle + gap)
+              << " M " << cx + radius * std::cos(middle - gap) << ' ' << cy + radius * std::sin(middle - gap) << " A 4.5000 4.5000 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0000\"/>";
+        } else o << "<path d=\"M " << cx << ' ' << cy + radius << " A 4.5000 4.5000 0 0 0 " << cx + radius << ' ' << cy << "\" stroke-width=\"1.0000\"/>";
+        o << "</g>";
+    }
+    for (int r : {11,12}) for (int c : {2,3}) o << "<rect x=\"" << c+.13 << "\" y=\"" << r+.13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
+    for (const auto &[slot, fraction] : {std::pair{0,1.0}, std::pair{108,.5}, std::pair{110,.75}}) {
+        const double a=kTau*slot/144.0, r0=7.6, r1=r0+1.9*fraction;
+        o << "<path d=\"M " << kCenter+r0*std::sin(a) << ' ' << kCenter-r0*std::cos(a) << " L " << kCenter+r1*std::sin(a) << ' ' << kCenter-r1*std::cos(a) << "\" fill=\"none\" stroke-width=\"0.22\" stroke-linecap=\"round\"/>";
+    }
+    constexpr double key_radius=6.41, dot_radius=.10;
+    for (int slot : {36,38,42}) { const double a=kTau*slot/144.0; svg_circle(o,kCenter+key_radius*std::sin(a),kCenter-key_radius*std::cos(a),dot_radius); }
+    const double key_cap=dot_radius/key_radius, key_a0=kTau*43.5/144.0+key_cap, key_a1=kTau*51.5/144.0-key_cap;
+    o << "<path d=\"M " << kCenter+key_radius*std::sin(key_a0) << ' ' << kCenter-key_radius*std::cos(key_a0) << " A " << key_radius << ' ' << key_radius << " 0 0 1 " << kCenter+key_radius*std::sin(key_a1) << ' ' << kCenter-key_radius*std::cos(key_a1) << "\" fill=\"none\" stroke-width=\"0.2000\" stroke-linecap=\"round\"/>";
+    std::array<std::array<bool,144>,8> ring_bits{};
+    for (size_t i=0;i<kTextCodewordBytes*8;++i) {
+        const auto &n=nodes[i]; const bool bit=text_code_bit(s,i);
+        if (n.cart) { if (bit) o << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\"0.34\" height=\"0.34\" rx=\"0.08\" stroke=\"none\"/>"; }
+        else if (n.dial) { const double a=kTau*n.slot/144.0, length=bit?1.20:.52; o << "<path d=\"M " << kCenter+7.6*std::sin(a) << ' ' << kCenter-7.6*std::cos(a) << " L " << kCenter+(7.6+length)*std::sin(a) << ' ' << kCenter-(7.6+length)*std::cos(a) << "\" fill=\"none\" stroke-width=\"0.1000\" stroke-linecap=\"round\"/>"; }
+        else ring_bits[n.ring][n.slot]=bit;
+    }
+    for (int ring=0;ring<8;++ring) {
+        const double radius=3.4+.43*ring;
+        for (int slot=0;slot<144;) {
+            if (!ring_bits[ring][slot]) { ++slot; continue; }
+            int end=slot+1; while (end<144 && ring_bits[ring][end]) ++end;
+            if (end-slot==1) { const double a=kTau*slot/144.0; svg_circle(o,kCenter+radius*std::sin(a),kCenter-radius*std::cos(a),dot_radius); }
+            else {
+                const double cap_angle=dot_radius/radius;
+                const double a0=kTau*(slot-.5)/144.0+cap_angle, a1=kTau*(end-.5)/144.0-cap_angle;
+                o << "<path d=\"M " << kCenter+radius*std::sin(a0) << ' ' << kCenter-radius*std::cos(a0) << " A " << radius << ' ' << radius << " 0 0 1 " << kCenter+radius*std::sin(a1) << ' ' << kCenter-radius*std::cos(a1) << "\" fill=\"none\" stroke-width=\"0.2000\" stroke-linecap=\"round\"/>";
+            }
+            slot=end;
+        }
+    }
+    o << "</g></svg>";
+    const std::string text=o.str(); *required=text.size()+1;
+    if (!out || cap<*required) return CKEY_INSUFFICIENT_BUFFER;
+    std::memcpy(out,text.c_str(),*required); return CKEY_OK;
 }
 }
