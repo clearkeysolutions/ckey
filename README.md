@@ -19,6 +19,15 @@ ctest --test-dir build --output-on-failure
 
 `ckey encode` accepts exactly 16 bytes for the locator profile. The C ABI `ckey_decode_gray8` decodes a one-channel 8-bit grayscale crop when the caller supplies the symbol quadrilateral. It rectifies projective perspective, checks the Grid/Ray/Ring calibration keys and both monochrome polarities, samples the matrix, and validates the payload through Reed–Solomon and CRC-32C. The caller must locate the symbol and provide its four corners; full-frame localization, lens-distortion correction, known-erasure recovery, and continuous camera scanning are not implemented. The committed optical image fixture decodes a browser-rendered capture at 670 × 670 pixels, and also checks rotated corner order and inverted polarity. This is evidence of the image sampling path, not a real-camera robustness claim. RS(77,26) is genuine Reed–Solomon error correction over GF(256); it is not masking.
 
+The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes and is intentionally separate from the compact locator:
+
+```sh
+./build/ckey encode-text --utf8 "a message up to 200 UTF-8 bytes" --out text.svg
+./build/ckey encode-text --hex 001122334455 --out binary.svg
+```
+
+It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, and connected multi-unit ring arcs. See [Format 0.9.0](spec/CKey-Format-v0.9.0.md). Its camera image decoder is not implemented yet; do not expect CKeyReader to scan Profile 2 until that work is completed and physically tested.
+
 ## iPhone reader
 
 An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, uses Vision to locate a square candidate, and passes grayscale camera frames and candidate corners to the C ABI. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. The app reports Vision localization time separately from CKey decode time. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.

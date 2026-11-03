@@ -1,3 +1,9 @@
+## 0.1.0-dev.26 — 2026-11-03
+
+* Added experimental Format 0.9.0 Profile 2 for 1–200 byte text/binary payloads: a framed full RS(255,210) codeword with 45 parity bytes, CRC-32C, and deterministic SVG rendering in a denser 58×58 Cartesian / 144-slot eight-ring polar field.
+* Added the public `ckey_text_symbol`, text encode/decode APIs, a `ckey_render_text_svg` renderer, and `ckey encode-text --utf8` / `--hex` CLI commands. Core tests verify a 200-byte round trip and correction of 22 distinct byte errors; renderer output is XML-valid and includes connected multi-unit payload arcs.
+* Preserved the Format 0.8.0 locator and its camera reader. Profile 2 is not yet accepted by the grayscale/mobile image decoder and must not be represented as camera validated until its own sampling, real-capture, blur, damage, and noise suite passes.
+
 ## 0.1.0-dev.25 — 2026-11-03
 
 * Replaced discrete scale/offset ladders in the iPhone reader with continuous, key-driven quadrilateral refinement. The new C ABI calibration-score operation evaluates the permanent Grid, Ring, and Ray keys for contrast and expected evidence under a proposed projective field; it never accepts a payload.

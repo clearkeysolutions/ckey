@@ -60,6 +60,26 @@ int main() {
     assert(ckey_encode_locator(payload.data(), 15, &b, &d)==CKEY_INVALID_ARGUMENT);
     assert(d.status==CKEY_INVALID_ARGUMENT);
 
+    std::array<uint8_t, CKEY_TEXT_PAYLOAD_MAX_BYTES> text_payload{};
+    for (size_t i = 0; i < text_payload.size(); ++i) text_payload[i] = static_cast<uint8_t>((i * 37 + 11) & 0xff);
+    ckey_text_symbol text_symbol{};
+    assert(ckey_encode_text(text_payload.data(), text_payload.size(), &text_symbol, &d) == CKEY_OK);
+    assert(text_symbol.codeword[0] == 0xc7 && text_symbol.codeword[1] == 0x4b && text_symbol.codeword[2] == CKEY_TEXT_FORMAT_VERSION);
+    std::array<uint8_t, CKEY_TEXT_PAYLOAD_MAX_BYTES> text_decoded{}; size_t text_length = 0;
+    assert(ckey_decode_text(text_symbol.codeword, sizeof(text_symbol.codeword), text_decoded.data(), text_decoded.size(), &text_length, &d) == CKEY_OK);
+    assert(text_length == text_payload.size() && text_decoded == text_payload);
+    auto damaged_text = text_symbol;
+    for (size_t i = 0; i < 22; ++i) damaged_text.codeword[(i * 11 + 7) % CKEY_TEXT_CODEWORD_BYTES] ^= static_cast<uint8_t>(0x31 + i);
+    text_decoded.fill(0); text_length = 0;
+    assert(ckey_decode_text(damaged_text.codeword, sizeof(damaged_text.codeword), text_decoded.data(), text_decoded.size(), &text_length, &d) == CKEY_OK);
+    assert(text_length == text_payload.size() && text_decoded == text_payload && d.corrected_symbols == 22);
+    size_t text_needed = 0;
+    assert(ckey_render_text_svg(&text_symbol, 16, nullptr, 0, &text_needed) == CKEY_INSUFFICIENT_BUFFER);
+    std::string text_svg(text_needed, '\0');
+    assert(ckey_render_text_svg(&text_symbol, 16, text_svg.data(), text_svg.size(), &text_needed) == CKEY_OK);
+    assert(text_svg.find("CKey text symbol profile 2") != std::string::npos);
+    assert(text_svg.find("stroke-width=\"0.2000\" stroke-linecap=\"round\"") != std::string::npos);
+
     size_t needed=0;
     assert(ckey_render_svg(&a, 16, nullptr, 0, &needed)==CKEY_INSUFFICIENT_BUFFER);
     assert(needed>1000);

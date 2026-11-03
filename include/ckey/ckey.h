@@ -21,9 +21,12 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.25"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.26"
 #define CKEY_FORMAT_VERSION 8u
+#define CKEY_TEXT_FORMAT_VERSION 9u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
+#define CKEY_TEXT_PAYLOAD_MAX_BYTES 200u
+#define CKEY_TEXT_CODEWORD_BYTES 255u
 #define CKEY_LOCATOR_SIDE 29u
 #define CKEY_MAX_RENDER_SCALE 256u
 #define CKEY_MAX_SYMBOL_MODULES (CKEY_LOCATOR_SIDE * CKEY_LOCATOR_SIDE)
@@ -45,6 +48,15 @@ typedef struct ckey_symbol {
     uint8_t codeword[77];
 } ckey_symbol;
 
+/* Profile 2: a high-capacity text/binary symbol. Its 255-byte codeword is a
+ * full-length RS(255,210) block and carries up to 200 payload bytes. */
+typedef struct ckey_text_symbol {
+    uint32_t abi_version;
+    uint32_t side;
+    uint32_t payload_length;
+    uint8_t codeword[CKEY_TEXT_CODEWORD_BYTES];
+} ckey_text_symbol;
+
 typedef struct ckey_diagnostics {
     uint32_t abi_version;
     ckey_status status;
@@ -61,6 +73,13 @@ CKEY_API ckey_status ckey_encode_locator(const uint8_t *payload, size_t payload_
 CKEY_API ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
                                           uint8_t *out_payload, size_t out_capacity,
                                           ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_encode_text(const uint8_t *payload, size_t payload_len,
+                                       ckey_text_symbol *out_symbol,
+                                       ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
+                                       uint8_t *out_payload, size_t out_capacity,
+                                       size_t *out_payload_len,
+                                       ckey_diagnostics *out_diagnostics);
 /*
  * Decode an 8-bit grayscale image of one planar CKey locator. quad_xy contains
  * four perimeter points (x0,y0,...,x3,y3) in cyclic order; either winding and
@@ -89,6 +108,9 @@ CKEY_API double ckey_calibration_score_gray8(const uint8_t *gray, size_t width,
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,
                                       size_t *out_required);
+CKEY_API ckey_status ckey_render_text_svg(const ckey_text_symbol *symbol, uint32_t scale,
+                                           char *out_utf8, size_t out_capacity,
+                                           size_t *out_required);
 
 #ifdef __cplusplus
 }
