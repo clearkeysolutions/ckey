@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small independent RS parity reference for CKey locator-v1 test vectors.
+"""Independent RS parity reference for the current versioned CKey locator test vector.
 
 This is a test oracle only. Product SDKs must call the portable C++ core.
 It uses polynomial long division with shift/XOR field multiplication.
@@ -50,8 +50,8 @@ def encode(data: bytes, parity_bytes: int) -> bytes:
 
 
 if __name__ == "__main__":
-    fixture = json.loads(Path("tests/vectors/locator-v4.json").read_text())
-    actual = encode(bytes.fromhex(fixture["frame_hex"]), 16).hex()
+    fixture = json.loads(Path("tests/vectors/locator-v5.json").read_text())
+    actual = encode(bytes.fromhex(fixture["frame_hex"]), fixture["rs_parameters"]["n"] - fixture["rs_parameters"]["k"]).hex()
     expected = fixture["rs_parameters"]["parity_hex"]
     if actual != expected:
         raise SystemExit(f"RS fixture mismatch: {actual} != {expected}")

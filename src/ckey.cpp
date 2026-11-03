@@ -13,8 +13,9 @@
 
 namespace {
 constexpr size_t kDataBytes = 26;
-constexpr size_t kParityBytes = 16;
-constexpr size_t kBits = 42 * 8;
+constexpr size_t kParityBytes = 51;
+constexpr size_t kCodewordBytes = kDataBytes + kParityBytes;
+constexpr size_t kBits = kCodewordBytes * 8;
 constexpr int kSide = 29;
 constexpr double kCenter = 14.5;
 constexpr double kTau = 6.283185307179586476925286766559;
@@ -53,7 +54,7 @@ uint8_t eval_low(const std::array<uint8_t, kParityBytes + 1> &p, size_t degree, 
     return y;
 }
 
-std::array<uint8_t, kParityBytes> syndromes(const std::array<uint8_t, 42> &cw) {
+std::array<uint8_t, kParityBytes> syndromes(const std::array<uint8_t, kCodewordBytes> &cw) {
     std::array<uint8_t, kParityBytes> s{};
     for (size_t j = 0; j < kParityBytes; ++j) {
         const uint8_t x = gf.exp[j];
@@ -64,11 +65,11 @@ std::array<uint8_t, kParityBytes> syndromes(const std::array<uint8_t, 42> &cw) {
     return s;
 }
 
-bool rs_correct(std::array<uint8_t, 42> &cw, uint32_t &corrected) {
+bool rs_correct(std::array<uint8_t, kCodewordBytes> &cw, uint32_t &corrected) {
     const auto s = syndromes(cw);
     if (std::all_of(s.begin(), s.end(), [](uint8_t v) { return v == 0; })) { corrected = 0; return true; }
 
-    // Berlekamp–Massey over the 16 syndromes.  Locator coefficients are
+    // Berlekamp–Massey over the 51 syndromes.  Locator coefficients are
     // stored low-degree first: Lambda(z)=prod(1-X_i*z).
     std::array<uint8_t, kParityBytes + 1> lambda{}, previous{};
     lambda[0] = previous[0] = 1;
@@ -108,7 +109,7 @@ bool rs_correct(std::array<uint8_t, 42> &cw, uint32_t &corrected) {
 
     // Solve the first degree syndrome equations for error magnitudes using a
     // small GF(256) Vandermonde system. This avoids a second fragile formula
-    // convention for Forney magnitudes and is cheap for a 42-byte codeword.
+    // convention for Forney magnitudes and is small for a 77-byte codeword.
     uint8_t matrix[kParityBytes / 2][kParityBytes / 2 + 1]{};
     for (size_t row = 0; row < degree; ++row) {
         for (size_t col = 0; col < degree; ++col) {
@@ -239,16 +240,16 @@ ckey_status ckey_encode_locator(const uint8_t *payload, size_t payload_len,
     if (!payload || !out) { set_status(diag, CKEY_INVALID_ARGUMENT, "payload and output are required"); return CKEY_INVALID_ARGUMENT; }
     if (payload_len != CKEY_LOCATOR_PAYLOAD_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "locator payload must be exactly 16 bytes"); return CKEY_INVALID_ARGUMENT; }
 
-    std::array<uint8_t, 42> cw{};
+    std::array<uint8_t, kCodewordBytes> cw{};
     // Frame: magic C7 4B, current format, profile 01, length u16be, 16 payload
-    // bytes, CRC-32C over the first 22 bytes, followed by 16 RS parity bytes.
+    // bytes, CRC-32C over the first 22 bytes, followed by 51 RS parity bytes.
     cw[0] = 0xc7; cw[1] = 0x4b; cw[2] = CKEY_FORMAT_VERSION; cw[3] = 1; cw[4] = 0; cw[5] = 16;
     std::memcpy(cw.data() + 6, payload, 16);
     const uint32_t crc = crc32c(cw.data(), 22);
     cw[22] = static_cast<uint8_t>(crc >> 24); cw[23] = static_cast<uint8_t>(crc >> 16);
     cw[24] = static_cast<uint8_t>(crc >> 8); cw[25] = static_cast<uint8_t>(crc);
     const auto gen = rs_generator();
-    std::array<uint8_t, 42> work = cw;
+    std::array<uint8_t, kCodewordBytes> work = cw;
     for (size_t i = 0; i < kDataBytes; ++i) {
         const uint8_t factor = work[i];
         for (size_t j = 0; j <= kParityBytes; ++j) work[i + j] ^= gf.mul(factor, gen[j]);
@@ -264,8 +265,8 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
                                 uint8_t *payload, size_t out_capacity,
                                 ckey_diagnostics *diag) {
     if (!codeword || !payload) { set_status(diag, CKEY_INVALID_ARGUMENT, "codeword and payload output are required"); return CKEY_INVALID_ARGUMENT; }
-    if (codeword_len != 42 || out_capacity < CKEY_LOCATOR_PAYLOAD_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "locator decode requires 42 bytes and a 16-byte output buffer"); return CKEY_INVALID_ARGUMENT; }
-    std::array<uint8_t,42> cw{}; std::memcpy(cw.data(), codeword, cw.size());
+    if (codeword_len != kCodewordBytes || out_capacity < CKEY_LOCATOR_PAYLOAD_BYTES) { set_status(diag, CKEY_INVALID_ARGUMENT, "locator decode requires 77 bytes and a 16-byte output buffer"); return CKEY_INVALID_ARGUMENT; }
+    std::array<uint8_t,kCodewordBytes> cw{}; std::memcpy(cw.data(), codeword, cw.size());
     uint32_t corrected = 0;
     if (!rs_correct(cw, corrected)) { set_status(diag, CKEY_UNCORRECTABLE, "Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
     if (cw[0] != 0xc7 || cw[1] != 0x4b || cw[2] != CKEY_FORMAT_VERSION || cw[3] != 1 || cw[4] != 0 || cw[5] != 16) {
@@ -317,10 +318,10 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     }
     // Permanent Ring Key on the outermost inner data ring.
     const double rr = 6.4;
-    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), .16); }
-    const double a0 = kTau * 22.0 / 72.0, a1 = kTau * 26.0 / 72.0;
+    for (int slot : {18, 19, 21}) { const double a = kTau * slot / 72.0; svg_circle(o, kCenter + rr * std::sin(a), kCenter - rr * std::cos(a), .06); }
+    const double a0 = kTau * 21.5 / 72.0, a1 = kTau * 25.5 / 72.0;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
-      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.32\" stroke-linecap=\"butt\"/>";
+      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.12\" stroke-linecap=\"butt\"/>";
     for (size_t i = 0; i < kBits; ++i) if (code_bit(s, i)) {
         const Node &n = nodes[i];
         if (n.dial) {
@@ -328,7 +329,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
             o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + 9.5 * std::sin(a) << ' ' << kCenter - 9.5 * std::cos(a)
               << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\"/>";
         }
-        else if (n.polar) svg_circle(o, n.x, n.y, .14);
+        else if (n.polar) svg_circle(o, n.x, n.y, .06);
         else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
     o << "</g></svg>";

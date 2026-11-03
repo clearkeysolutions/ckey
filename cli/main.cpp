@@ -30,6 +30,6 @@ int main(int argc, char **argv) {
     std::ofstream f(argv[5], std::ios::binary);
     if (!f) { std::cerr << "cannot open output path\n"; return 1; }
     f.write(svg.data(), static_cast<std::streamsize>(n-1));
-    std::cout << diag.message << "; profile=locator-v1; codeword-bytes=42; svg=" << argv[5] << '\n';
+    std::cout << diag.message << "; profile=locator-v1; codeword-bytes=77; svg=" << argv[5] << '\n';
     return f ? 0 : 1;
 }

@@ -1,3 +1,10 @@
+## 0.1.0-dev.6 — 2026-11-03
+
+* Reduced ring data dots and Ring Key dots to 0.12-unit diameter; made the four-slot Ring Key arc exactly match four angular slots and dot diameter.
+* Increased locator protection to shortened RS(77,26), adding 51 mathematically computed parity bytes and using 616 of 621 eligible sites for codeword bits.
+* Bumped the C ABI because the public codeword grew from 42 to 77 bytes.
+* Versioned the wire geometry as CKey Format 0.5.0 / format byte 05 and refreshed the independent vector.
+
 ## 0.1.0-dev.5 — 2026-11-03
 
 * Updated locator geometry to one thick arc at three corners and a split top-left orientation arc with a one-module visible gap; enlarged the reserved corner envelopes to eliminate finder/data collisions.
@@ -18,7 +25,7 @@
 
 * Replaced solid QR-like block finders with nested open corner arcs and switched the reference SVG to dark-field/light-mark styling with rounded data modules to follow the supplied target geometry.
 * Advanced the wire geometry version to CKey Format 0.2.0; preserved the 0.1.0 draft and fixture as historical versions.
-* Kept RS(42,26) and CRC-32C framing mathematical encoding unchanged apart from the updated format byte.
+* Kept Reed–Solomon error correction and CRC-32C framing; geometry evolved independently of framing.
 
 ## 0.1.0-dev.2 — 2026-11-02
 

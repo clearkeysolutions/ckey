@@ -20,9 +20,9 @@
 extern "C" {
 #endif
 
-#define CKEY_ABI_VERSION 1u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.5"
-#define CKEY_FORMAT_VERSION 4u
+#define CKEY_ABI_VERSION 2u
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.6"
+#define CKEY_FORMAT_VERSION 5u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_LOCATOR_SIDE 29u
 #define CKEY_MAX_RENDER_SCALE 256u
@@ -42,7 +42,7 @@ typedef struct ckey_symbol {
     uint32_t abi_version;
     uint32_t side;
     /* Systematic RS codeword for the locator profile; geometry is derived. */
-    uint8_t codeword[42];
+    uint8_t codeword[77];
 } ckey_symbol;
 
 typedef struct ckey_diagnostics {
