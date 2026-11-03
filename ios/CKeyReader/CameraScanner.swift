@@ -157,19 +157,13 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
                 var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
-                var result = CKEY_UNCORRECTABLE
-                // A component bounds the illuminated edge; tolerate raster
-                // bloom and the one-pixel sampling uncertainty on either side.
-                for expansion in [0.94, 0.97, 1.0, 1.03, 1.06] {
-                    let adjusted = expandedCKeyQuad(quadPoints(quad), expansion: expansion,
-                                                    offsetX: 0, offsetY: 0)
-                    result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                        adjusted.withUnsafeBufferPointer { quadBuffer in
-                            ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                              payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
-                        }
+                let adjusted = refinedCKeyQuad(quadPoints(quad), gray: gray, width: width,
+                                                height: height, stride: stride)
+                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                    adjusted.withUnsafeBufferPointer { quadBuffer in
+                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
                     }
-                    if result == CKEY_OK { break }
                 }
                 let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
                 DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
@@ -198,50 +192,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            for (candidateIndex, observation) in observations.prefix(24).enumerated() {
+            for observation in observations.prefix(24) {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
                 var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
                 var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
-                var result = CKEY_UNCORRECTABLE
-                // Vision's rectangle corners may follow the border's inner edge,
-                // outer edge, or line intersection. Try nearby canonical bounds.
-                let fastScales = [1.0, 29.0 / 28.0, 1.06, 0.96]
-                for expansion in fastScales {
-                    let quad = expandedCKeyQuad(points, expansion: expansion, offsetX: 0, offsetY: 0)
-                    result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                        quad.withUnsafeBufferPointer { quadBuffer in
-                            ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                              payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
-                        }
-                    }
-                    if result == CKEY_OK { break }
-                }
-                // This broad recovery pass is intentionally retained from the
-                // last known farther-reading build while 1080p acquisition
-                // gives it materially better image data to work with.
-                if result != CKEY_OK && candidateIndex < 4 {
-                    let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
-                                hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
-                    let shifts = [-0.20, -0.10, 0.0, 0.10, 0.20]
-                    refinement: for scale in [0.25, 0.33, 0.40, 0.48, 0.56, 0.64,
-                                              0.72, 0.78, 0.86, 0.94, 1.02, 1.10,
-                                              1.20, 1.30, 1.40, 1.50, 1.60, 1.80] {
-                        for ox in shifts {
-                            for oy in shifts {
-                                let quad = expandedCKeyQuad(points, expansion: scale,
-                                                            offsetX: ox * side, offsetY: oy * side)
-                                result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                                    quad.withUnsafeBufferPointer { quadBuffer in
-                                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
-                                    }
-                                }
-                                if result == CKEY_OK { break refinement }
-                            }
-                        }
+                let refined = refinedCKeyQuad(points, gray: gray, width: width, height: height, stride: stride)
+                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                    refined.withUnsafeBufferPointer { quadBuffer in
+                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
                     }
                 }
                 let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
@@ -298,6 +260,64 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             quad.append(centerY + (y - centerY) * scale + offsetY)
         }
         return quad
+    }
+
+    private func refinedCKeyQuad(_ observed: [CGPoint], gray: UnsafePointer<UInt8>,
+                                 width: Int, height: Int, stride: Int) -> [Double] {
+        guard observed.count == 4 else { return [] }
+        let side = (hypot(observed[1].x - observed[0].x, observed[1].y - observed[0].y) +
+                    hypot(observed[3].x - observed[0].x, observed[3].y - observed[0].y)) * 0.5
+        // Geometry is estimated continuously from the three permanent keys,
+        // not selected from a table of symbol sizes. Coordinate descent starts
+        // at the detector's measured quad and halves its physical step each
+        // round, converging to the best calibrated field at any pixel scale.
+        var scale = 1.0
+        var offsetX = 0.0
+        var offsetY = 0.0
+        var scaleStep = 0.14
+        var offsetStep = Double(side) * 0.08
+        var best = expandedCKeyQuad(observed, expansion: scale, offsetX: offsetX, offsetY: offsetY)
+        var bestScore = calibrationScore(gray, width: width, height: height, stride: stride, quad: best)
+        let directions = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
+                          (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
+                          (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)]
+        for _ in 0..<4 {
+            var roundScale = scale
+            var roundOffsetX = offsetX
+            var roundOffsetY = offsetY
+            var roundScore = bestScore
+            var roundQuad = best
+            for direction in directions {
+                let candidateScale = max(0.35, scale + direction.0 * scaleStep)
+                let candidateOffsetX = offsetX + direction.1 * offsetStep
+                let candidateOffsetY = offsetY + direction.2 * offsetStep
+                let candidate = expandedCKeyQuad(observed, expansion: candidateScale,
+                                                  offsetX: candidateOffsetX, offsetY: candidateOffsetY)
+                let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate)
+                if score > roundScore {
+                    roundScore = score
+                    roundScale = candidateScale
+                    roundOffsetX = candidateOffsetX
+                    roundOffsetY = candidateOffsetY
+                    roundQuad = candidate
+                }
+            }
+            scale = roundScale
+            offsetX = roundOffsetX
+            offsetY = roundOffsetY
+            bestScore = roundScore
+            best = roundQuad
+            scaleStep *= 0.5
+            offsetStep *= 0.5
+        }
+        return best
+    }
+
+    private func calibrationScore(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
+                                  stride: Int, quad: [Double]) -> Double {
+        quad.withUnsafeBufferPointer { buffer in
+            ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
+        }
     }
 
     private func candidatePriority(_ observation: VNRectangleObservation,

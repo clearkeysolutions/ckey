@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.24"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.25"
 #define CKEY_FORMAT_VERSION 8u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_LOCATOR_SIDE 29u
@@ -76,6 +76,15 @@ CKEY_API ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width,
                                         uint8_t *out_payload,
                                         size_t out_capacity,
                                         ckey_diagnostics *out_diagnostics);
+/*
+ * Returns a continuous positive fit score for the Grid, Ring, and Ray Keys
+ * under a proposed quadrilateral. Zero means no usable calibration evidence;
+ * a negative value means invalid arguments. This never accepts a payload and
+ * is intended for callers that refine localization before decoding.
+ */
+CKEY_API double ckey_calibration_score_gray8(const uint8_t *gray, size_t width,
+                                              size_t height, size_t stride,
+                                              const double quad_xy[8]);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

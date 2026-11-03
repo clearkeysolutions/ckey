@@ -359,6 +359,55 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
     return CKEY_OK;
 }
 
+double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t height,
+                                    size_t stride, const double quad_xy[8]) {
+    if (!gray || !quad_xy || width < 2 || height < 2 || stride < width ||
+        height > std::numeric_limits<size_t>::max() / stride) return -1.0;
+    for (int i = 0; i < 8; ++i) if (!std::isfinite(quad_xy[i])) return -1.0;
+    if (!valid_quad(quad_xy)) return -1.0;
+
+    constexpr double canonical[8] = {0,0,29,0,29,29,0,29};
+    double best = 0.0;
+    // Key polarity and orientation are intentionally unknown to localization.
+    // Score every cyclic winding exactly as the decoder does, but retain a
+    // smooth contrast/evidence measure rather than requiring a valid payload.
+    for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
+        double dst[8];
+        for (int i = 0; i < 4; ++i) {
+            const int qi = (start + (reverse ? -i : i) + 8) % 4;
+            dst[2 * i] = quad_xy[2 * qi]; dst[2 * i + 1] = quad_xy[2 * qi + 1];
+        }
+        double h[8]; if (!solve_homography(canonical, dst, h)) continue;
+        std::vector<double> grid, ring, ray, empty;
+        for (int r : {11,12}) for (int c : {2,3}) grid.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
+        for (int slot : {18,19,21}) ring.push_back(polar_sample(gray,width,height,stride,h,6.0,slot));
+        ring.push_back(polar_sample(gray,width,height,stride,h,6.0,23.5));
+        ray.push_back(polar_sample(gray,width,height,stride,h,8.8,0));
+        ray.push_back(polar_sample(gray,width,height,stride,h,8.4,54));
+        ray.push_back(polar_sample(gray,width,height,stride,h,8.8,55));
+        empty.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
+        empty.push_back(polar_sample(gray,width,height,stride,h,6.0,20));
+        empty.push_back(polar_sample(gray,width,height,stride,h,8.8,54));
+        std::vector<double> marks = grid;
+        marks.insert(marks.end(), ring.begin(), ring.end());
+        marks.insert(marks.end(), ray.begin(), ray.end());
+        if (std::any_of(marks.begin(),marks.end(),[](double v){ return v < 0; }) ||
+            std::any_of(empty.begin(),empty.end(),[](double v){ return v < 0; })) continue;
+        const double mark_mean = std::accumulate(marks.begin(),marks.end(),0.0) / marks.size();
+        const double empty_mean = std::accumulate(empty.begin(),empty.end(),0.0) / empty.size();
+        const double contrast = std::abs(mark_mean - empty_mean);
+        const bool dark_marks = mark_mean < empty_mean;
+        const double threshold = (mark_mean + empty_mean) * .5;
+        const auto marked = [&](double v) { return dark_marks ? v < threshold : v > threshold; };
+        const size_t evidence = std::count_if(marks.begin(),marks.end(),marked) +
+                                std::count_if(empty.begin(),empty.end(),[&](double v){ return !marked(v); });
+        // Contrast supplies a continuous hill for sub-pixel geometry search;
+        // expected key evidence prevents a bright non-CKey rectangle winning.
+        best = std::max(best, contrast * static_cast<double>(evidence) / 13.0);
+    }
+    return best;
+}
+
 ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                                const double quad_xy[8], uint8_t *payload, size_t out_capacity,
                                ckey_diagnostics *diag) {
