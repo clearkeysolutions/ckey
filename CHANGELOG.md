@@ -1,3 +1,9 @@
+## 0.1.0-dev.25 — 2026-11-03
+
+* Replaced discrete scale/offset ladders in the iPhone reader with continuous, key-driven quadrilateral refinement. The new C ABI calibration-score operation evaluates the permanent Grid, Ring, and Ray keys for contrast and expected evidence under a proposed projective field; it never accepts a payload.
+* The reader starts from each observed border/rectangle, then performs a shrinking-step coordinate search over physical scale and position to maximize that score before one shared-core decode. This removes fixed distance intervals from localization while retaining the decoder's RS and CRC acceptance checks.
+* Kept C ABI version 2 and Format 0.8.0 unchanged: the new function is an additive ABI entry point. Physical-device benchmark evidence remains required.
+
 ## 0.1.0-dev.24 — 2026-11-03
 
 * Reverted the dev.23 localization throttle and candidate caps after physical testing reported slower, less reliable reads. Restored the dev.22 farther-reading search behavior rather than retaining a regression.

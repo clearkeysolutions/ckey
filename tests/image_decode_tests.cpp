@@ -36,6 +36,7 @@ int main() {
     const double quad[8]={x0,x0,x1,x0,x1,x1,x0,x1};
     constexpr std::array<uint8_t,16> expected={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
     std::array<uint8_t,16> decoded{}; ckey_diagnostics diag{};
+    assert(ckey_calibration_score_gray8(image.data(),width,height,width,quad) > 40.0);
     assert(ckey_decode_gray8(image.data(),width,height,width,quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
     assert(decoded==expected && diag.status==CKEY_OK);
 
