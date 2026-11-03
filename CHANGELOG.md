@@ -1,3 +1,8 @@
+## 0.1.0-dev.19 — 2026-11-03
+
+* Broadened the distant-symbol localization fallback to test 12 candidate scales from 0.40× to 1.40× and a 3×3 center-shift grid for each of the six leading Vision squares. The existing small set of fast hypotheses still runs first.
+* Kept format 0.8.0 unchanged. The wide fallback has not yet been compiled or benchmarked on-device; far-camera fixtures demonstrate decoder performance only when corners are supplied.
+
 ## 0.1.0-dev.18 — 2026-11-03
 
 * Fixed the Swift compiler type-check timeout in quadrilateral generation by using explicit Double conversions and an imperative coordinate loop.
