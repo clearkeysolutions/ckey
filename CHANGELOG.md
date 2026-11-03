@@ -1,3 +1,9 @@
+## 0.1.0-dev.23 — 2026-11-03
+
+* Made the border-first CKey locator the bounded hot path: up to six square-border candidates and three framing hypotheses are tested per sampled frame. The earlier broad Vision scale/offset sweep could attempt up to 1,800 core decodes per frame, producing the slow, intermittent far-distance reads reported from dev.22.
+* Throttled generic Vision localization to once per 300 ms, capped it at eight candidates and three framing hypotheses, and retained it only as a fallback for rotated or projective symbols. The direct border locator is sampled every 80 ms and accepts dimmer blurred display edges before the calibration/ECC/CRC checks reject false candidates.
+* Kept format 0.8.0 unchanged. Physical-device latency and damage/blur/noise recovery still require benchmark evidence.
+
 ## 0.1.0-dev.22 — 2026-11-03
 
 * Added a CKey-specific, luminance connected-component locator before Vision rectangle analysis. It searches for the continuous bright rounded-square border at half resolution and tests the recovered square bounds directly with the shared C++ decoder.
