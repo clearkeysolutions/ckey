@@ -1,3 +1,9 @@
+## 0.1.0-dev.18 — 2026-11-03
+
+* Fixed the Swift compiler type-check timeout in quadrilateral generation by using explicit Double conversions and an imperative coordinate loop.
+* Replaced deprecated iOS 17 camera orientation properties with supported video rotation angle APIs.
+* Kept wire format 0.8.0 unchanged. Xcode build verification requires the user's Apple toolchain.
+
 ## 0.1.0-dev.17 — 2026-11-03
 
 * Added a coarse-to-fine camera localization fallback: the six leading square candidates are tested at smaller and larger scales with small center shifts when the fast hypotheses fail. This addresses distant targets whose display boundary is detected instead of the symbol boundary.

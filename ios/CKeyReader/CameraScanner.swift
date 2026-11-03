@@ -89,8 +89,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     return
                 }
                 self.session.addOutput(self.output)
-                if let connection = self.output.connection(with: .video), connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                if let connection = self.output.connection(with: .video),
+                   connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
                 self.session.commitConfiguration()
                 self.hasConfigured = true
@@ -214,12 +215,17 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // Vision can fit the inner border, outer border, or the SVG canvas.
         // Keep the hypotheses distinct so each candidate can reach the same
         // canonical 29×29 sampling field at a different detected boundary.
-        let center = CGPoint(x: observed.map(\.x).reduce(0, +) / 4,
-                             y: observed.map(\.y).reduce(0, +) / 4)
-        return observed.flatMap { point in
-            [Double(center.x + (point.x - center.x) * scale) + offsetX,
-             Double(center.y + (point.y - center.y) * scale) + offsetY]
+        let centerX = observed.map { Double($0.x) }.reduce(0.0, +) / 4.0
+        let centerY = observed.map { Double($0.y) }.reduce(0.0, +) / 4.0
+        var quad: [Double] = []
+        quad.reserveCapacity(observed.count * 2)
+        for point in observed {
+            let x = Double(point.x)
+            let y = Double(point.y)
+            quad.append(centerX + (x - centerX) * scale + offsetX)
+            quad.append(centerY + (y - centerY) * scale + offsetY)
         }
+        return quad
     }
 }
 
@@ -230,8 +236,9 @@ struct CameraPreview: UIViewRepresentable {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
-        if let connection = view.previewLayer.connection, connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
+        if let connection = view.previewLayer.connection,
+           connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
         }
         return view
     }
