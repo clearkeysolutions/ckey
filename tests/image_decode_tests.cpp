@@ -9,16 +9,24 @@
 #include <string>
 #include <vector>
 
-int main() {
-    const std::string path = std::string(CKEY_TEST_SOURCE_DIR) + "/tests/vectors/locator-v8-preview.pgm";
+struct Pgm { size_t width, height; std::vector<uint8_t> pixels; };
+
+static Pgm load_pgm(const std::string &path, size_t expected_side) {
     std::ifstream file(path, std::ios::binary);
     assert(file && "optical image fixture is required");
     std::string magic; size_t width=0,height=0; unsigned maxval=0;
     file >> magic >> width >> height >> maxval;
     file.get();
-    assert(magic=="P5" && width==670 && height==670 && maxval==255);
-    std::vector<uint8_t> image((std::istreambuf_iterator<char>(file)),{});
-    assert(image.size()==width*height);
+    assert(magic=="P5" && width==expected_side && height==expected_side && maxval==255);
+    std::vector<uint8_t> pixels((std::istreambuf_iterator<char>(file)),{});
+    assert(pixels.size()==width*height);
+    return {width,height,std::move(pixels)};
+}
+
+int main() {
+    const std::string base=std::string(CKEY_TEST_SOURCE_DIR)+"/tests/vectors/";
+    auto fixture=load_pgm(base+"locator-v8-preview.pgm",670);
+    auto &image=fixture.pixels; const size_t width=fixture.width, height=fixture.height;
 
     // The PGM is a crop of a browser-rendered v0.8 locator, not a raw generated
     // bit matrix. The symbol's 31-unit SVG canvas maps canonical [0,29]^2 to
@@ -30,6 +38,18 @@ int main() {
     std::array<uint8_t,16> decoded{}; ckey_diagnostics diag{};
     assert(ckey_decode_gray8(image.data(),width,height,width,quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
     assert(decoded==expected && diag.status==CKEY_OK);
+
+    // This crop is taken from the user's exact reader target image and resized
+    // to 20 px/module. It verifies this image's marks and framing reach the core.
+    auto target=load_pgm(base+"locator-v8-reader-target.pgm",580);
+    const double target_edge=580.0/934.0;
+    const double target_far=933.0*target_edge;
+    const double target_quad[8]={target_edge,target_edge,target_far,target_edge,
+                                 target_far,target_far,target_edge,target_far};
+    decoded.fill(0);
+    assert(ckey_decode_gray8(target.pixels.data(),target.width,target.height,target.width,
+                             target_quad,decoded.data(),decoded.size(),&diag)==CKEY_OK);
+    assert(decoded==expected);
 
     // A rotated corner order and inverted monochrome polarity are both valid.
     const double rotated[8]={x1,x0,x1,x1,x0,x1,x0,x0};

@@ -1,3 +1,9 @@
+## 0.1.0-dev.14 — 2026-11-02
+
+* Loosened Vision square-candidate thresholds and added nearby quadrilateral scale hypotheses for the rounded CKey frame.
+* Added live reader status showing whether Vision found candidates or the CKey structural/ECC checks rejected them, plus ongoing localization timing.
+* Added a regression image from the user's exact CKey target at 20 px/module; the C++ image decoder reads its payload successfully. iPhone camera localization still requires on-device validation.
+
 ## 0.1.0-dev.13 — 2026-11-02
 
 * Fixed two SwiftUI color inference errors in the iPhone reader by making foreground and status colors explicitly use `Color`.

@@ -11,22 +11,26 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published private(set) var decodedHex: String?
     @Published private(set) var decodeMilliseconds = 0.0
     @Published private(set) var detectionMilliseconds = 0.0
+    @Published private(set) var candidateCount = 0
     @Published private(set) var isRunning = false
 
     private let sessionQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.session")
     private let frameQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.frames", qos: .userInitiated)
     private let output = AVCaptureVideoDataOutput()
     private var lastFrameTime = 0.0
+    private var lastProgressTime = 0.0
     private var hasConfigured = false
     private var didDecode = false
     private let rectangleRequest: VNDetectRectanglesRequest = {
         let request = VNDetectRectanglesRequest()
-        request.maximumObservations = 6
-        request.minimumConfidence = 0.55
-        request.minimumSize = 0.16
-        request.minimumAspectRatio = 0.78
-        request.maximumAspectRatio = 1.22
-        request.quadratureTolerance = 35
+        // CKey's rounded-square outline is less box-like than a QR finder.
+        // Keep localization permissive; the key/ECC/CRC checks reject false quads.
+        request.maximumObservations = 20
+        request.minimumConfidence = 0.2
+        request.minimumSize = 0.06
+        request.minimumAspectRatio = 0.62
+        request.maximumAspectRatio = 1.60
+        request.quadratureTolerance = 45
         return request
     }()
 
@@ -122,19 +126,27 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 $0.boundingBox.width * $0.boundingBox.height > $1.boundingBox.width * $1.boundingBox.height
             }
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
+            publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
+                            detectionMilliseconds: detectionElapsed, candidates: observations.count)
             for observation in observations {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
-                let quad = expandedCKeyQuad(points)
                 var payload = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
                 var diagnostic = ckey_diagnostics()
                 let decodeStarted = CACurrentMediaTime()
-                let result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
-                    quad.withUnsafeBufferPointer { quadBuffer in
-                        ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
-                                          payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                var result = CKEY_UNCORRECTABLE
+                // Vision's rectangle corners may follow the border's inner edge,
+                // outer edge, or line intersection. Try nearby canonical bounds.
+                for expansion in [1.0, 29.0 / 28.0, 1.06, 0.96] {
+                    let quad = expandedCKeyQuad(points, expansion: expansion)
+                    result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                        quad.withUnsafeBufferPointer { quadBuffer in
+                            ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                              payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                        }
                     }
+                    if result == CKEY_OK { break }
                 }
                 if result == CKEY_OK {
                     didDecode = true
@@ -143,6 +155,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     DispatchQueue.main.async {
                         self.decodedHex = hex
                         self.detectionMilliseconds = detectionElapsed
+                        self.candidateCount = observations.count
                         self.decodeMilliseconds = decodeElapsed
                         self.status = "CKey decoded"
                         AudioServicesPlaySystemSound(SystemSoundID(1520))
@@ -150,14 +163,28 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     return
                 }
             }
+            if !observations.isEmpty {
+                publishProgress("Square found; CKey checks did not match. Hold steady and fill more of the frame.",
+                                detectionMilliseconds: detectionElapsed, candidates: observations.count)
+            }
         } catch {
-            DispatchQueue.main.async { self.status = "Reading camera frame…" }
+            publishProgress("Camera analysis failed: \(error.localizedDescription)", detectionMilliseconds: 0, candidates: 0)
         }
     }
 
-    private func expandedCKeyQuad(_ observed: [CGPoint]) -> [Double] {
-        // Vision follows the visible rounded-square border at roughly ±0.5 module.
-        // Expand its projective quadrilateral to the decoder's canonical 29×29 field.
+    private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int) {
+        let now = CACurrentMediaTime()
+        guard now - lastProgressTime >= 0.5 else { return }
+        lastProgressTime = now
+        DispatchQueue.main.async {
+            self.status = text
+            self.detectionMilliseconds = detectionMilliseconds
+            self.candidateCount = candidates
+        }
+    }
+
+    private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double) -> [Double] {
+        // Map Vision's candidate bounds onto the canonical 29×29 sampling field.
         let center = CGPoint(x: observed.map(\.x).reduce(0, +) / 4,
                              y: observed.map(\.y).reduce(0, +) / 4)
         let scale = 29.0 / 28.0
