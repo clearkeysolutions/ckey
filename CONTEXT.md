@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.6`
+**Current software version:** `0.1.0-dev.7`
 **Current wire format:** `CKey Format 0.5.0` (format byte `05`, locator profile byte `01`)
 **Branch:** `main`
 **Context updated:** 2026-11-03
@@ -27,7 +27,7 @@ Next engineering gates: (1) implement RS erasure correction and expose decode in
 ## Validation recorded for this version
 
 * `g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic`: core compiled without warnings.
-* C++ core tests passed across error weights 1–25, including 32 distinct 25-byte-error patterns and a 26-error rejection vector. Independent review corrected 1,000 randomized 25-byte-error patterns.
+* C++ core tests passed across error weights 1–25, including 32 distinct 25-byte-error patterns and a 26-error rejection vector. The SVG renderer explicitly disables inherited strokes on dot circles; regression test checks the rendered 0.12-unit diameter. Independent review corrected 1,000 randomized 25-byte-error patterns.
 * `python3 tools/check_version.py`: software version nodes synchronized.
 * `python3 tools/rs_reference.py`: independently generated RS parity matched the committed vector.
 * CLI generated the format-5 example SVG; Python XML parser accepted it.

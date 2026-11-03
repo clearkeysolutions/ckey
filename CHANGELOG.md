@@ -1,3 +1,8 @@
+## 0.1.0-dev.7 — 2026-11-03
+
+* Fixed oversized ring dots: SVG circles inherited the parent group’s default 1-module stroke. Circle marks now explicitly use no stroke, rendering at their specified 0.12-module diameter.
+* Added a renderer regression assertion for stroke-free 0.06-radius dots. The four-slot Ring Key arc remains 0.12 modules wide and spans the same four angular slots.
+
 ## 0.1.0-dev.6 — 2026-11-03
 
 * Reduced ring data dots and Ring Key dots to 0.12-unit diameter; made the four-slot Ring Key arc exactly match four angular slots and dot diameter.

@@ -66,7 +66,7 @@ int main() {
     assert(svg.find("stroke-linecap=\"butt\"")!=std::string::npos);
     assert(svg.find("fill=\"#050505\"")!=std::string::npos);
     assert(svg.find("A 4.5000 4.5000")!=std::string::npos);
-    assert(svg.find("r=\"0.0600\"")!=std::string::npos);
+    assert(svg.find("r=\"0.0600\" stroke=\"none\"")!=std::string::npos);
     assert(svg.find("stroke-width=\"0.12\" stroke-linecap=\"butt\"")!=std::string::npos);
     assert(svg.find("stroke-width=\"1.0000\"")!=std::string::npos);
     assert(svg.find("x=\"2.1300\" y=\"11.1300\"")!=std::string::npos);

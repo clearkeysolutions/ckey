@@ -227,7 +227,7 @@ void set_status(ckey_diagnostics *d, ckey_status s, const char *m) {
 }
 
 void svg_circle(std::ostringstream &o, double x, double y, double r) {
-    o << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"" << r << "\"/>";
+    o << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"" << r << "\" stroke=\"none\"/>";
 }
 }
 
