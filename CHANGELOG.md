@@ -1,3 +1,11 @@
+## 0.1.0-dev.5 — 2026-11-03
+
+* Updated locator geometry to one thick arc at three corners and a split top-left orientation arc with a one-module visible gap; enlarged the reserved corner envelopes to eliminate finder/data collisions.
+* Replaced the previous vertical calibration sequence with the specified 2×2 Grid Key.
+* Spread payload placement across angular sectors of the Cartesian matrix and round-robin across the dial plus all four inner rings.
+* Versioned the wire format as 0.4.0 / format byte 04 and regenerated the CRC-32C/Reed–Solomon interoperability vector.
+* Added maintained geometry and version context for the supplied blueprint.
+
 # Changelog
 
 ## 0.1.0-dev.4 — 2026-11-02
