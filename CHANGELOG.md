@@ -1,3 +1,9 @@
+## 0.1.0-dev.17 — 2026-11-03
+
+* Added a coarse-to-fine camera localization fallback: the six leading square candidates are tested at smaller and larger scales with small center shifts when the fast hypotheses fail. This addresses distant targets whose display boundary is detected instead of the symbol boundary.
+* Added a far-camera regression image with a 135 px symbol (~4.7 px/module); the C++ image decoder recovers its payload when supplied the observed field corners.
+* Kept format 0.8.0 unchanged. The far-distance fixture validates image decoding with known geometry; live Vision localization and latency still require physical-device measurement.
+
 ## 0.1.0-dev.16 — 2026-11-03
 
 * Fixed the iPhone reader's corner-expansion helper: it previously ignored each requested scale, causing every candidate to use the same quadrilateral.

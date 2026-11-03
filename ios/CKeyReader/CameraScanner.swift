@@ -128,7 +128,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             let detectionElapsed = (CACurrentMediaTime() - started) * 1000
             publishProgress(observations.isEmpty ? "Searching for a square…" : "Testing \(observations.count) square candidate(s)…",
                             detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            for observation in observations {
+            for (candidateIndex, observation) in observations.prefix(8).enumerated() {
                 // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
                 let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
                     .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
@@ -138,8 +138,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 var result = CKEY_UNCORRECTABLE
                 // Vision's rectangle corners may follow the border's inner edge,
                 // outer edge, or line intersection. Try nearby canonical bounds.
-                for expansion in [1.0, 29.0 / 28.0, 1.06, 0.96] {
-                    let quad = expandedCKeyQuad(points, expansion: expansion)
+                let fastScales = [1.0, 29.0 / 28.0, 1.06, 0.96]
+                for expansion in fastScales {
+                    let quad = expandedCKeyQuad(points, expansion: expansion, offsetX: 0, offsetY: 0)
                     result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
                         quad.withUnsafeBufferPointer { quadBuffer in
                             ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
@@ -147,6 +148,28 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                         }
                     }
                     if result == CKEY_OK { break }
+                }
+                // The display border is often selected instead of the CKey
+                // itself when the symbol is small. Refine only the leading
+                // candidates with a wider scale range and small center shifts.
+                if result != CKEY_OK && candidateIndex < 6 {
+                    let side = (hypot(points[1].x - points[0].x, points[1].y - points[0].y) +
+                                hypot(points[3].x - points[0].x, points[3].y - points[0].y)) * 0.5
+                    let offsets: [(Double, Double)] = [(0, 0), (0.025, 0), (-0.025, 0),
+                                                       (0, 0.025), (0, -0.025)]
+                    refinement: for scale in [0.78, 0.84, 0.90, 0.94, 1.10, 1.14] {
+                        for (ox, oy) in offsets {
+                            let quad = expandedCKeyQuad(points, expansion: scale,
+                                                        offsetX: ox * side, offsetY: oy * side)
+                            result = payload.withUnsafeMutableBufferPointer { payloadBuffer in
+                                quad.withUnsafeBufferPointer { quadBuffer in
+                                    ckey_decode_gray8(gray, width, height, stride, quadBuffer.baseAddress,
+                                                      payloadBuffer.baseAddress, payloadBuffer.count, &diagnostic)
+                                }
+                            }
+                            if result == CKEY_OK { break refinement }
+                        }
+                    }
                 }
                 let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
                 DispatchQueue.main.async { self.decodeMilliseconds = decodeElapsed }
@@ -186,15 +209,16 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double) -> [Double] {
+    private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double,
+                                  offsetX: Double, offsetY: Double) -> [Double] {
         // Vision can fit the inner border, outer border, or the SVG canvas.
         // Keep the hypotheses distinct so each candidate can reach the same
         // canonical 29×29 sampling field at a different detected boundary.
         let center = CGPoint(x: observed.map(\.x).reduce(0, +) / 4,
                              y: observed.map(\.y).reduce(0, +) / 4)
         return observed.flatMap { point in
-            [Double(center.x + (point.x - center.x) * scale),
-             Double(center.y + (point.y - center.y) * scale)]
+            [Double(center.x + (point.x - center.x) * scale) + offsetX,
+             Double(center.y + (point.y - center.y) * scale) + offsetY]
         }
     }
 }
