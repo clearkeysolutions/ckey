@@ -1,7 +1,11 @@
-## 0.1.0-dev.28 — 2026-11-03
+## 0.1.0-dev.31 — 2026-11-03
 
 * Added experimental Format 0.10.0 Profile 3 for 1–2,048 byte payloads: ten byte-interleaved systematic RS(255,223) blocks, 320 total parity bytes, CRC-32C, deterministic codeword decode, and SVG rendering.
 * Expanded polar capacity by lateral geometry rather than dot shrinkage: 24 rings at 288 angular slots, exact run-length arcs, and 573 data rays with a calibrated 3-bit Gray-length/stroke-weight alphabet. Cartesian candidate order is a deterministic two-dimensional permutation so all usable regions fill evenly instead of forming top-to-bottom or radial dead zones.
+* Restored the Grid Key to a 2×2 block made of the exact same 0.34-unit marks and 0.5-unit pitch as Cartesian payload; it now genuinely calibrates payload scale and clear-space ratio.
+* Restricted Profile 3 finder reservation to its curved finder strokes and guard bands rather than an entire corner square.
+* Excluded the structural-border guard from Profile 3 payload placement after visual inspection found modules outside the rounded frame.
+* Reserved the interior of each curved finder as well as its stroke guard, while leaving the surrounding exterior Cartesian field available for data.
 * Preserved the camera-validated Format 0.8 locator unchanged. Profile 3 image/mobile decoding remains unimplemented and is explicitly not camera validated.
 
 ## 0.1.0-dev.26 — 2026-11-03
