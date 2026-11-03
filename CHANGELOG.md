@@ -1,3 +1,9 @@
+## 0.1.0-dev.11 — 2026-11-03
+
+* Added C ABI grayscale image decoding for a caller-supplied symbol quadrilateral, with projective rectification, calibration-key checks, polarity normalization, data sampling, RS correction, and CRC-32C validation.
+* Added an optical PGM fixture cropped from a browser-rendered v0.8 symbol; tests cover actual pixel-to-payload decode, rotated quadrilateral order, inverted polarity, and invalid geometry.
+* Kept wire geometry at CKey Format 0.8.0. Full-frame symbol localization, lens-distortion correction, camera video scanning, and camera robustness benchmarks remain open.
+
 ## 0.1.0-dev.10 — 2026-11-03
 
 * Corrected the finder interpretation to match the supplied geometry blueprint: one thick quarter-arc at bottom-left, top-right, and bottom-right, with the top-left arc split into two pieces for orientation.
@@ -39,6 +45,12 @@
 * Added maintained geometry and version context for the supplied blueprint.
 
 # Changelog
+
+## 0.1.0-dev.11 — 2026-11-03
+
+* Added C ABI grayscale image decoding for a caller-supplied symbol quadrilateral, with projective rectification, calibration-key checks, polarity normalization, data sampling, RS correction, and CRC-32C validation.
+* Added an optical PGM fixture cropped from a browser-rendered v0.8 symbol; tests cover actual pixel-to-payload decode, rotated quadrilateral order, inverted polarity, and invalid geometry.
+* Kept wire geometry at CKey Format 0.8.0. Full-frame symbol localization, lens-distortion correction, camera video scanning, and camera robustness benchmarks remain open.
 
 ## 0.1.0-dev.4 — 2026-11-02
 

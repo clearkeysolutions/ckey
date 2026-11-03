@@ -4,7 +4,7 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The first implementation milestone defines a fixed 29 × 29 locator profile, a byte framing format, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and a command-line encoder. Read [the current draft format](spec/CKey-Format-v0.8.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read [the current draft format](spec/CKey-Format-v0.8.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
 
@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 ./build/ckey encode --hex 00112233445566778899aabbccddeeff --out locator.svg
 ```
 
-`ckey encode` accepts exactly 16 bytes for the locator profile. The reference SVG now follows the supplied dark-field, light-mark, rounded-corner target direction. SVG styling does not alter payload bits. The C ABI provides byte-codeword decode with up to 25 unknown erroneous byte corrections, CRC-32C verification, and structured status. RS(77,26) is genuine Reed–Solomon error correction over GF(256); it is not masking. Erasure correction, image detection, perspective correction, native platform packages, and browser scanning are later milestones and are not yet claimed as implemented.
+`ckey encode` accepts exactly 16 bytes for the locator profile. The C ABI `ckey_decode_gray8` decodes a one-channel 8-bit grayscale crop when the caller supplies the symbol quadrilateral. It rectifies projective perspective, checks the Grid/Ray/Ring calibration keys and both monochrome polarities, samples the matrix, and validates the payload through Reed–Solomon and CRC-32C. The caller must locate the symbol and provide its four corners; full-frame localization, lens-distortion correction, known-erasure recovery, and continuous camera scanning are not implemented. The committed optical image fixture decodes a browser-rendered capture at 670 × 670 pixels, and also checks rotated corner order and inverted polarity. This is evidence of the image sampling path, not a real-camera robustness claim. RS(77,26) is genuine Reed–Solomon error correction over GF(256); it is not masking.
 
 ## Milestones
 

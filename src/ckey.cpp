@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
+#include <numeric>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -238,6 +240,74 @@ double polar_dot_radius() {
 void svg_circle(std::ostringstream &o, double x, double y, double r) {
     o << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"" << r << "\" stroke=\"none\"/>";
 }
+
+struct ImagePoint { double x, y; };
+
+bool solve_homography(const double src[8], const double dst[8], double h[8]) {
+    double a[8][9]{};
+    for (int i = 0; i < 4; ++i) {
+        const double x = src[2*i], y = src[2*i+1], u = dst[2*i], v = dst[2*i+1];
+        a[2*i][0]=x; a[2*i][1]=y; a[2*i][2]=1; a[2*i][6]=-u*x; a[2*i][7]=-u*y; a[2*i][8]=u;
+        a[2*i+1][3]=x; a[2*i+1][4]=y; a[2*i+1][5]=1; a[2*i+1][6]=-v*x; a[2*i+1][7]=-v*y; a[2*i+1][8]=v;
+    }
+    for (int col=0; col<8; ++col) {
+        int pivot=col;
+        for (int row=col+1; row<8; ++row) if (std::abs(a[row][col])>std::abs(a[pivot][col])) pivot=row;
+        if (std::abs(a[pivot][col])<1e-12) return false;
+        if (pivot!=col) for (int j=col; j<9; ++j) std::swap(a[pivot][j],a[col][j]);
+        const double d=a[col][col]; for (int j=col; j<9; ++j) a[col][j]/=d;
+        for (int row=0; row<8; ++row) if (row!=col) { const double f=a[row][col]; for (int j=col; j<9; ++j) a[row][j]-=f*a[col][j]; }
+    }
+    for (int i=0;i<8;++i) h[i]=a[i][8];
+    return true;
+}
+
+bool map_point(const double h[8], double x, double y, ImagePoint &p) {
+    const double d=h[6]*x+h[7]*y+1.0;
+    if (!std::isfinite(d) || std::abs(d)<1e-12) return false;
+    p={(h[0]*x+h[1]*y+h[2])/d,(h[3]*x+h[4]*y+h[5])/d};
+    return std::isfinite(p.x) && std::isfinite(p.y);
+}
+
+double gray_sample(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                   const double h[8], double x, double y) {
+    // A small center-weighted 3x3 module sample tolerates rasterization and mild blur.
+    constexpr double offsets[3]={-0.12,0.0,0.12};
+    constexpr double weights[3]={1.0,2.0,1.0};
+    double sum=0, weight_sum=0;
+    for (int iy=0;iy<3;++iy) for (int ix=0;ix<3;++ix) {
+        ImagePoint p{}; if (!map_point(h,x+offsets[ix],y+offsets[iy],p)) return -1;
+        if (p.x<0 || p.y<0 || p.x>static_cast<double>(width-1) || p.y>static_cast<double>(height-1)) return -1;
+        const size_t x0=static_cast<size_t>(p.x), y0=static_cast<size_t>(p.y);
+        const size_t x1=std::min(x0+1,width-1), y1=std::min(y0+1,height-1);
+        const double fx=p.x-x0, fy=p.y-y0;
+        const double top=gray[y0*stride+x0]*(1-fx)+gray[y0*stride+x1]*fx;
+        const double bottom=gray[y1*stride+x0]*(1-fx)+gray[y1*stride+x1]*fx;
+        const double w=weights[ix]*weights[iy]; sum+=(top*(1-fy)+bottom*fy)*w; weight_sum+=w;
+    }
+    return sum/weight_sum;
+}
+
+double polar_sample(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                    const double h[8], double radius, double slot) {
+    const double a=kTau*slot/72.0;
+    return gray_sample(gray,width,height,stride,h,kCenter+radius*std::sin(a),kCenter-radius*std::cos(a));
+}
+
+bool valid_quad(const double q[8]) {
+    double area=0; int sign=0;
+    for (int i=0;i<4;++i) {
+        const double x1=q[2*i], y1=q[2*i+1], x2=q[2*((i+1)%4)], y2=q[2*((i+1)%4)+1];
+        area+=x1*y2-x2*y1;
+        const double x3=q[2*((i+2)%4)], y3=q[2*((i+2)%4)+1];
+        const double cross=(x2-x1)*(y3-y2)-(y2-y1)*(x3-x2);
+        if (std::abs(cross)<1e-6) return false;
+        const int current=cross>0?1:-1;
+        if (sign && sign!=current) return false;
+        sign=current;
+    }
+    return std::abs(area)>4.0;
+}
 }
 
 extern "C" {
@@ -286,6 +356,81 @@ ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
     std::memcpy(payload, cw.data() + 6, CKEY_LOCATOR_PAYLOAD_BYTES);
     set_status(diag, CKEY_OK, corrected ? "decoded locator; Reed-Solomon symbols corrected" : "decoded locator; no correction needed");
     if (diag) diag->corrected_symbols = corrected;
+    return CKEY_OK;
+}
+
+ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                               const double quad_xy[8], uint8_t *payload, size_t out_capacity,
+                               ckey_diagnostics *diag) {
+    if (!gray || !quad_xy || !payload || width<2 || height<2 || stride<width ||
+        out_capacity<CKEY_LOCATOR_PAYLOAD_BYTES || height>std::numeric_limits<size_t>::max()/stride) {
+        set_status(diag,CKEY_INVALID_ARGUMENT,"invalid grayscale image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT;
+    }
+    for (int i=0;i<8;++i) if (!std::isfinite(quad_xy[i])) { set_status(diag,CKEY_INVALID_ARGUMENT,"quadrilateral coordinates must be finite"); return CKEY_INVALID_ARGUMENT; }
+    if (!valid_quad(quad_xy)) { set_status(diag,CKEY_INVALID_ARGUMENT,"quadrilateral must be a non-degenerate convex cyclic perimeter"); return CKEY_INVALID_ARGUMENT; }
+
+    std::array<uint8_t,CKEY_LOCATOR_PAYLOAD_BYTES> accepted{};
+    bool found=false, ambiguous=false; uint32_t accepted_corrections=0;
+    constexpr double canonical[8]={0,0,29,0,29,29,0,29};
+    // Try all cyclic starts and both winding directions; orientation is validated by keys and frame CRC.
+    for (int reverse=0;reverse<2;++reverse) for (int start=0;start<4;++start) {
+        double dst[8];
+        for (int i=0;i<4;++i) { int qi=(start+(reverse?-i:i)+8)%4; dst[2*i]=quad_xy[2*qi]; dst[2*i+1]=quad_xy[2*qi+1]; }
+        double h[8]; if (!solve_homography(canonical,dst,h)) continue;
+        // Require the full symbol footprint, including every sample patch, to be in the image.
+        ImagePoint corners[4]; bool inside=true;
+        for(int i=0;i<4;++i) { if(!map_point(h,canonical[2*i],canonical[2*i+1],corners[i]) || corners[i].x<0 || corners[i].y<0 || corners[i].x>=width || corners[i].y>=height) inside=false; }
+        if(!inside) continue;
+
+        std::vector<double> grid_marks, ring_marks, ray_marks, empties;
+        for (int r : {11,12}) for (int c : {2,3}) grid_marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
+        for (int slot : {18,19,21}) ring_marks.push_back(polar_sample(gray,width,height,stride,h,6.0,slot));
+        ring_marks.push_back(polar_sample(gray,width,height,stride,h,6.0,23.5)); // center of the reserved continuous four-slot arc
+        ray_marks.push_back(polar_sample(gray,width,height,stride,h,8.8,0));
+        ray_marks.push_back(polar_sample(gray,width,height,stride,h,8.4,54));
+        ray_marks.push_back(polar_sample(gray,width,height,stride,h,8.8,55));
+        empties.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
+        empties.push_back(polar_sample(gray,width,height,stride,h,6.0,20));
+        empties.push_back(polar_sample(gray,width,height,stride,h,8.8,54));
+        std::vector<double> marks=grid_marks;
+        marks.insert(marks.end(),ring_marks.begin(),ring_marks.end());
+        marks.insert(marks.end(),ray_marks.begin(),ray_marks.end());
+        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empties.begin(),empties.end(),[](double v){return v<0;})) continue;
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
+        const double empty_mean=std::accumulate(empties.begin(),empties.end(),0.0)/empties.size();
+        if (std::abs(mark_mean-empty_mean)<24.0) continue;
+        const bool dark_marks=mark_mean<empty_mean;
+        const double threshold=(mark_mean+empty_mean)*.5;
+        auto marked=[&](double v){return dark_marks?v<threshold:v>threshold;};
+        const size_t grid_valid=std::count_if(grid_marks.begin(),grid_marks.end(),marked);
+        const size_t ring_valid=std::count_if(ring_marks.begin(),ring_marks.end(),marked);
+        const size_t ray_valid=std::count_if(ray_marks.begin(),ray_marks.end(),marked);
+        const size_t empty_keys=std::count_if(empties.begin(),empties.end(),[&](double v){return !marked(v);});
+        if (grid_valid<3 || ring_valid<3 || ray_valid<2 || empty_keys<2) continue;
+
+        std::array<uint8_t,kCodewordBytes> cw{};
+        bool samples_ok=true;
+        const auto nodes=data_nodes();
+        for (size_t bit=0;bit<kBits;++bit) {
+            const Node &n=nodes[bit]; double v;
+            if (n.dial) v=polar_sample(gray,width,height,stride,h,8.8,n.slot); // outer band separates short from long ray
+            else if (n.polar) v=gray_sample(gray,width,height,stride,h,n.x,n.y);
+            else v=gray_sample(gray,width,height,stride,h,n.x,n.y);
+            if (v<0) { samples_ok=false; break; }
+            const bool one=marked(v);
+            if (one) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8)));
+        }
+        if(!samples_ok) continue;
+        std::array<uint8_t,CKEY_LOCATOR_PAYLOAD_BYTES> candidate{}; ckey_diagnostics local{};
+        const ckey_status status=ckey_decode_locator(cw.data(),cw.size(),candidate.data(),candidate.size(),&local);
+        if(status!=CKEY_OK) continue;
+        if(!found) {accepted=candidate; accepted_corrections=local.corrected_symbols; found=true;}
+        else if(candidate!=accepted) ambiguous=true;
+    }
+    if (!found || ambiguous) { set_status(diag,ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE,ambiguous?"multiple orientations yielded different valid payloads":"no orientation passed calibration keys, Reed-Solomon, and CRC-32C"); return ambiguous?CKEY_INTEGRITY_FAILURE:CKEY_UNCORRECTABLE; }
+    std::memcpy(payload,accepted.data(),accepted.size());
+    set_status(diag,CKEY_OK,"decoded rectified locator image; caller supplied symbol quadrilateral");
+    if(diag) diag->corrected_symbols=accepted_corrections;
     return CKEY_OK;
 }
 

@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.10"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.11"
 #define CKEY_FORMAT_VERSION 8u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_LOCATOR_SIDE 29u
@@ -61,6 +61,21 @@ CKEY_API ckey_status ckey_encode_locator(const uint8_t *payload, size_t payload_
 CKEY_API ckey_status ckey_decode_locator(const uint8_t *codeword, size_t codeword_len,
                                           uint8_t *out_payload, size_t out_capacity,
                                           ckey_diagnostics *out_diagnostics);
+/*
+ * Decode an 8-bit grayscale image of one planar CKey locator. quad_xy contains
+ * four perimeter points (x0,y0,...,x3,y3) in cyclic order; either winding and
+ * any starting corner are accepted. They map to canonical (0,0), (29,0),
+ * (29,29), (0,29) coordinates. The caller supplies the detected symbol
+ * quadrilateral. This function rectifies perspective but does not locate a
+ * symbol in a full frame or correct lens distortion. The image is one-channel
+ * 8-bit grayscale; both contrast polarities are supported.
+ */
+CKEY_API ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width,
+                                        size_t height, size_t stride,
+                                        const double quad_xy[8],
+                                        uint8_t *out_payload,
+                                        size_t out_capacity,
+                                        ckey_diagnostics *out_diagnostics);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,
