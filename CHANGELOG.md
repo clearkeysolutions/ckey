@@ -1,3 +1,8 @@
+## 0.1.0-dev.52 — 2026-11-04
+
+* Ignore `macos/build/` and `macos/DerivedData/`. A command-line `xcodebuild` of the renderer writes there; only `/build/` and `/ios/build/` were ignored.
+* Recorded the first verified CKey Renderer build: `xcodebuild` (Xcode 27A9269, macOS 27.0 SDK, arm64 + x86_64) succeeded on the maintainer's Mac with the dev.51 Swift changes.
+
 ## 0.1.0-dev.51 — 2026-11-04
 
 * **The iPhone reader could not decode Profile 3 at all.** It captured 1920×1080, but P3 needs about 11 px per symbol unit, about 1,280 px across its 116-unit field, which is more than the frame's height. Its border detector also capped candidates at 78% of the short frame side.

@@ -7,6 +7,8 @@
 *.dll
 /ios/DerivedData/
 /ios/build/
+/macos/build/
+/macos/DerivedData/
 *.xcuserstate
 xcuserdata/
 tools/__pycache__/
