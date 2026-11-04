@@ -179,7 +179,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                             stride: stride, field: .text)
             let extendedQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
                                                 stride: stride, field: .extended)
+            // Profile 0 (scalable family) first: the core aligns its frame edges,
+            // identifies the version from its Grid/Ring/Ray Keys, then decodes.
+            let scalableQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
+                                               stride: stride, field: .scalable)
             let decodeStarted = CACurrentMediaTime()
+            if let decoded = decodeScalable(gray: gray, width: width, height: height, stride: stride, quad: scalableQuad) {
+                publishDecoded(decoded.bytes, profile: decoded.profile,
+                               detectionMilliseconds: borderDetectionMilliseconds,
+                               decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
+                               candidates: borderQuads.count)
+                return
+            }
             if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
                                               locatorQuad: locatorQuad, textQuad: textQuad, extendedQuad: extendedQuad) {
                 publishDecoded(decoded.bytes, profile: decoded.profile,
@@ -196,11 +207,15 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                          quad: textQuad, field: .text)
             let p3Fit = calibrationScore(gray, width: width, height: height, stride: stride,
                                          quad: extendedQuad, field: .extended)
+            var p0Version: UInt32 = 0
+            let p0Fit = scalableQuad.count == 8 ? scalableQuad.withUnsafeBufferPointer { buffer in
+                ckey_calibration_score_scalable_gray8(gray, width, height, stride, buffer.baseAddress, &p0Version)
+            } : 0
             // Keep the leading candidate visible in real time. It is the one
             // the decoder is most likely to accept and makes a bad border fit
             // obvious without waiting for a successful scan.
             if candidateIndex == 0 {
-                liveDetails = "Border \(String(format: "%.0f", side)) px · fit P1 \(String(format: "%.1f", p1Fit)) · P2 \(String(format: "%.1f", p2Fit)) · P3 \(String(format: "%.1f", p3Fit))\nAttempt \(String(format: "%.1f", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
+                liveDetails = "Border \(String(format: "%.0f", side)) px · fit P0 v\(p0Version) \(String(format: "%.1f", p0Fit)) · P1 \(String(format: "%.1f", p1Fit)) · P2 \(String(format: "%.1f", p2Fit)) · P3 \(String(format: "%.1f", p3Fit))\nAttempt \(String(format: "%.1f", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
             }
         }
         DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "\(borderQuads.count) measured border component(s)" }
@@ -230,7 +245,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                        hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)) * 0.5)
     }
 
-    private enum CalibrationField { case locator, text, extended }
+    private enum CalibrationField { case scalable, locator, text, extended }
 
     // Fit a border to one profile's canonical field against that profile's
     // fixed keys. Shared C++ core (ckey_refine_quad_gray8): coordinate descent
@@ -242,6 +257,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let border = observed.flatMap { [Double($0.x), Double($0.y)] }
         let coreField: ckey_field
         switch field {
+        case .scalable: coreField = CKEY_FIELD_SCALABLE
         case .locator: coreField = CKEY_FIELD_LOCATOR
         case .text: coreField = CKEY_FIELD_TEXT
         case .extended: coreField = CKEY_FIELD_EXTENDED
@@ -259,6 +275,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                   stride: Int, quad: [Double], field: CalibrationField) -> Double {
         quad.withUnsafeBufferPointer { buffer in
             switch field {
+            case .scalable:
+                return ckey_calibration_score_scalable_gray8(gray, width, height, stride, buffer.baseAddress, nil)
             case .locator:
                 return ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
             case .text:
@@ -267,6 +285,25 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 return ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress)
             }
         }
+    }
+
+    // Profile 0 payloads reach 4,619 bytes (v31 at level M), beyond the
+    // 2,048-byte Profile 3 maximum, so this uses its own 64 KB buffer.
+    private func decodeScalable(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
+                                quad: [Double]) -> (bytes: [UInt8], profile: String)? {
+        guard quad.count == 8 else { return nil }
+        var output = [UInt8](repeating: 0, count: 65535)
+        var length = 0
+        var version: UInt32 = 0
+        var diagnostic = ckey_diagnostics()
+        let status = output.withUnsafeMutableBufferPointer { decoded in
+            quad.withUnsafeBufferPointer { q in
+                ckey_decode_scalable_gray8(gray, width, height, stride, q.baseAddress,
+                                           decoded.baseAddress, decoded.count, &length, &version, &diagnostic)
+            }
+        }
+        guard status == CKEY_OK else { return nil }
+        return (Array(output.prefix(length)), "Profile 0 · v\(version)")
     }
 
     private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,

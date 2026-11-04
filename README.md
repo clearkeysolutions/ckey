@@ -38,6 +38,17 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 
 See [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md) and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. The projective decoder reads clean renders of the 2,048-byte tier from about 11 px per unit (round-trip tested in CI); physical camera decode is not yet validated.
 
+## Profile 0: the scalable family
+
+Profile 0 ([Format 0.27.0](spec/CKey-Format-v0.27.0.md)) is one design at 31 sizes. Every version keeps the same frame, finders, rings and dial, and only the module pitch changes. It runs from Profile 1-sized modules (v1, 29 across, 27 bytes at level M) to Profile 3 density (v31, 232 across, 4,619 bytes), about 7% finer per step. It removes the appearance jumps between Profiles 1, 2 and 3: a 33-character URL becomes v2, which still looks like a locator.
+
+The Grid, Ring and Ray Keys are drawn at each version's own pitch, so the reader identifies the version from them. Four correction levels (L/M/Q/H) trade capacity for robustness. Profiles 1–3 remain available and unchanged.
+
+```sh
+./build/ckey encode-scalable --utf8 "https://citeory.com/tour?ref=ckey" --out p0.svg
+./build/ckey encode-scalable --utf8 "a longer message" --version 12 --level Q --out p0-v12.svg
+```
+
 ## Payload conventions
 
 Payloads are bytes. [CKey Payload Conventions](spec/CKey-Payload-Conventions.md) (informative) defines how readers interpret text payloads:
