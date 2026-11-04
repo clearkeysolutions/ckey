@@ -187,7 +187,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // the decoder is most likely to accept and makes a bad border fit
             // obvious without waiting for a successful scan.
             if candidateIndex == 0 {
-                liveDetails = "Border \(String(format: \"%.0f\", side)) px · fit P1 \(String(format: \"%.1f\", p1Fit)) · P2 \(String(format: \"%.1f\", p2Fit)) · P3 \(String(format: \"%.1f\", p3Fit))\nAttempt \(String(format: \"%.1f\", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
+                liveDetails = "Border \(String(format: "%.0f", side)) px · fit P1 \(String(format: "%.1f", p1Fit)) · P2 \(String(format: "%.1f", p2Fit)) · P3 \(String(format: "%.1f", p3Fit))\nAttempt \(String(format: "%.1f", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
             }
         }
         DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "\(borderQuads.count) measured border component(s)" }

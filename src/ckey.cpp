@@ -367,14 +367,14 @@ std::vector<TextNode> text_nodes() {
         // anti-aliasing fringe of the border are neither useful capacity nor
         // reliably separable from the frame by a camera.
         if (x < 1.35 || x > 27.65 || y < 1.35 || y > 27.65) continue;
-        // Reserve the actual outside quadrant of each curved finder, not a
-        // square corner block. The former left four conspicuous dead squares
-        // and threw away useful, well-separated Cartesian capacity.
+        // Reserve a small radial moat around the actual outside finder arc,
+        // not a square corner block.  It prevents payload from appearing
+        // behind anti-aliased finder caps without recreating dead squares.
         const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
             const double dx=x-cx, dy=y-cy;
             const bool outer_x=right ? dx>=0 : dx<=0;
             const bool outer_y=bottom ? dy>=0 : dy<=0;
-            return outer_x && outer_y && dx*dx+dy*dy<=3.05*3.05;
+            return outer_x && outer_y && dx*dx+dy*dy<=3.75*3.75;
         };
         const bool finder = finder_clearance(4.0,4.0,false,false) ||
                             finder_clearance(25.0,4.0,true,false) ||
@@ -382,7 +382,9 @@ std::vector<TextNode> text_nodes() {
                             finder_clearance(25.0,25.0,true,true);
         const bool grid_reference = x > 1.8 && x < 4.2 && y > 10.8 && y < 13.2;
         const double dx = x - kCenter, dy = y - kCenter;
-        if (finder || grid_reference || dx * dx + dy * dy <= 10.5 * 10.5) continue;
+        // Leave only a 0.8-unit measured separation outside the outer ray;
+        // the old 10.5 radius created an unnecessary black annulus.
+        if (finder || grid_reference || dx * dx + dy * dy <= 9.6 * 9.6) continue;
         cart.push_back({true, false, x, y, row, col, -1, -1});
     }
     // The dial is narrow and radial. The eight rings share equal angular
@@ -430,9 +432,9 @@ std::vector<ExtendedNode> extended_nodes() {
         // black clear-space ratio as P1/P2 and stops Cartesian marks from
         // visually spilling into the frame after rasterization or blur.
         if (x < 5.0 || x > 111.0 || y < 5.0 || y > 111.0) continue;
-        // Reserve only the actual finder strokes plus a measurable guard,
-        // not the entire square corner envelope. This keeps data in the
-        // useful regions beside and between the curves.
+        // Reserve a small radial moat around each actual finder arc. This is
+        // intentionally a quarter-disc—not an inward wedge or square—so the
+        // field stays continuous while no module can touch finder ink.
         const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
             const double vx=x-cx, vy=y-cy, distance=std::sqrt(vx*vx+vy*vy);
             // A finder lives in the *outer* corner quadrant: TL is x<=16,
@@ -441,7 +443,7 @@ std::vector<ExtendedNode> extended_nodes() {
             // the real finder arcs.
             const bool outer_x=right ? vx>=0 : vx<=0;
             const bool outer_y=bottom ? vy>=0 : vy<=0;
-            return outer_x && outer_y && distance<=11.30;
+            return outer_x && outer_y && distance<=13.25;
         };
         const bool finder = finder_clearance(16.0,16.0,false,false) || finder_clearance(100.0,16.0,true,false) ||
                             finder_clearance(16.0,100.0,false,true) || finder_clearance(100.0,100.0,true,true);
@@ -449,7 +451,10 @@ std::vector<ExtendedNode> extended_nodes() {
         // 0.34-unit marks on a 0.5-unit pitch, with one clear module around it.
         const bool grid_reference = x > 7.5 && x < 9.5 && y > 44.5 && y < 46.5;
         const double dx = x - center, dy = y - center;
-        if (finder || grid_reference || dx * dx + dy * dy <= 31.3 * 31.3) continue;
+        // The longest ray ends at 29.7. A 0.9-unit measured gap is enough to
+        // separate it from Cartesian modules; the former 31.3 radius created
+        // a visibly empty annulus around the polar field.
+        if (finder || grid_reference || dx * dx + dy * dy <= 30.6 * 30.6) continue;
         cart.push_back({ExtendedKind::cart, x, y, -1, -1, -1});
     }
     // Thirty-four rings occupy the central field from r=7.0 through r=23.96.
@@ -710,7 +715,7 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     uint32_t corrections = 0;
     if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
     if (corrected[0] != 0xc7 || corrected[1] != 0x4b ||
-        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != 18u && corrected[2] != 19u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
+        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != 18u && corrected[2] != 19u && corrected[2] != 22u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
     }
     const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
@@ -791,7 +796,7 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
         if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[3]!=3) return CKEY_INTEGRITY_FAILURE;
         size_t length=0, payload_offset=0, crc_index=0;
         if (tiered) {
-            if ((framed[2] != 17u && framed[2] != 20u && framed[2] != CKEY_EXTENDED_FORMAT_VERSION) || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
+            if ((framed[2] != 17u && framed[2] != 20u && framed[2] != 21u && framed[2] != CKEY_EXTENDED_FORMAT_VERSION) || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
             const size_t selected = framed[4]-1;
             if (data_bytes != (11+kExtendedTierCapacities[selected]+kExtendedBlocks-1)/kExtendedBlocks) return CKEY_INTEGRITY_FAILURE;
             length=(static_cast<size_t>(framed[5])<<8)|framed[6]; payload_offset=7; crc_index=payload_offset+length;
@@ -819,9 +824,9 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
     // them before trying every new parity split avoids doing eight full RS
     // decodes for an unrelated square candidate in the live camera path.
     const bool tier_hint_valid = codeword[40] > 0 && codeword[40] <= kExtendedTierCapacities.size();
-    const bool likely_tiered = (codeword[20]==17u || codeword[20]==20u || codeword[20]==CKEY_EXTENDED_FORMAT_VERSION) ||
+    const bool likely_tiered = (codeword[20]==17u || codeword[20]==20u || codeword[20]==21u || codeword[20]==CKEY_EXTENDED_FORMAT_VERSION) ||
                                (codeword[30]==3 && tier_hint_valid);
-    if (codeword[20] != 17u && codeword[20] != 20u && codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
+    if (codeword[20] != 17u && codeword[20] != 20u && codeword[20] != 21u && codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
         const ckey_status legacy=attempt(kExtendedDataBytes,kExtendedParityBytes,false);
         if (legacy==CKEY_OK || legacy==CKEY_INSUFFICIENT_BUFFER) return legacy;
     }
