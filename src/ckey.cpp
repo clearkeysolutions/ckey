@@ -367,8 +367,19 @@ std::vector<TextNode> text_nodes() {
         // anti-aliasing fringe of the border are neither useful capacity nor
         // reliably separable from the frame by a camera.
         if (x < 1.35 || x > 27.65 || y < 1.35 || y > 27.65) continue;
-        const bool finder = (x < 6.1 && y < 6.1) || (x > 22.9 && y < 6.1) ||
-                            (x < 6.1 && y > 22.9) || (x > 22.9 && y > 22.9);
+        // Reserve the actual outside quadrant of each curved finder, not a
+        // square corner block. The former left four conspicuous dead squares
+        // and threw away useful, well-separated Cartesian capacity.
+        const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
+            const double dx=x-cx, dy=y-cy;
+            const bool outer_x=right ? dx>=0 : dx<=0;
+            const bool outer_y=bottom ? dy>=0 : dy<=0;
+            return outer_x && outer_y && dx*dx+dy*dy<=3.05*3.05;
+        };
+        const bool finder = finder_clearance(4.0,4.0,false,false) ||
+                            finder_clearance(25.0,4.0,true,false) ||
+                            finder_clearance(4.0,25.0,false,true) ||
+                            finder_clearance(25.0,25.0,true,true);
         const bool grid_reference = x > 1.8 && x < 4.2 && y > 10.8 && y < 13.2;
         const double dx = x - kCenter, dy = y - kCenter;
         if (finder || grid_reference || dx * dx + dy * dy <= 10.5 * 10.5) continue;
@@ -403,6 +414,11 @@ struct ExtendedNode { ExtendedKind kind; double x, y; int ring, slot, component;
 std::vector<ExtendedNode> extended_nodes() {
     constexpr int grid = 232, slots = 288, rings = 34;
     constexpr double pitch = .5, center = 58.0;
+    // Keep a genuinely useful quiet center while retaining all 34 rings.
+    // The radial pitch is derived from the fixed outer edge, rather than
+    // crowding more rings into a tiny central hole.
+    constexpr double ring_inner = 7.0, ring_outer = 23.96;
+    constexpr double ring_pitch = (ring_outer - ring_inner) / (rings - 1);
     std::vector<ExtendedNode> cart, polar, out;
     // Profile 3 keeps the same visual finder proportion as Profile 1/2 but
     // grows the field.  Grid density, rather than finder shrinkage, supplies
@@ -419,10 +435,13 @@ std::vector<ExtendedNode> extended_nodes() {
         // useful regions beside and between the curves.
         const auto finder_clearance = [&](double cx, double cy, bool right, bool bottom) {
             const double vx=x-cx, vy=y-cy, distance=std::sqrt(vx*vx+vy*vy);
-            const bool inward_x=right ? vx<=0 : vx>=0, inward_y=bottom ? vy<=0 : vy>=0;
-            // The inside of a finder remains blank; only the exterior around
-            // its true quarter-circle may carry Cartesian payload.
-            return inward_x && inward_y && distance<=11.30;
+            // A finder lives in the *outer* corner quadrant: TL is x<=16,
+            // y<=16; TR is x>=100, y<=16; etc. Reserving the opposite
+            // quadrant creates false diagonal voids while placing data behind
+            // the real finder arcs.
+            const bool outer_x=right ? vx>=0 : vx<=0;
+            const bool outer_y=bottom ? vy>=0 : vy<=0;
+            return outer_x && outer_y && distance<=11.30;
         };
         const bool finder = finder_clearance(16.0,16.0,false,false) || finder_clearance(100.0,16.0,true,false) ||
                             finder_clearance(16.0,100.0,false,true) || finder_clearance(100.0,100.0,true,true);
@@ -433,9 +452,9 @@ std::vector<ExtendedNode> extended_nodes() {
         if (finder || grid_reference || dx * dx + dy * dy <= 31.3 * 31.3) continue;
         cart.push_back({ExtendedKind::cart, x, y, -1, -1, -1});
     }
-    // Thirty-four rings occupy the central field from r=3.5 through r=23.96.
-    // The pitch is 0.62 units, over four diameters, so the added capacity uses
-    // empty radial space rather than reducing a resolvable dot into noise.
+    // Thirty-four rings occupy the central field from r=7.0 through r=23.96.
+    // Their measured pitch is derived above, preserving a readable central
+    // quiet zone without sacrificing ring capacity.
     // A deterministic two-dimensional permutation distributes the finite
     // codeword through the full Cartesian annulus. Row-major and pure radial
     // traversals both leave large, misleading empty regions at this profile.
@@ -447,7 +466,7 @@ std::vector<ExtendedNode> extended_nodes() {
     for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
         if (slot == 0 || slot == 216 || slot == 224 ||
             (ring == rings - 1 && slot >= 72 && slot <= 79)) continue;
-        const double radius = 3.50 + .62 * ring;
+        const double radius = ring_inner + ring_pitch * ring;
         const double a = kTau * slot / slots;
         polar.push_back({ExtendedKind::ring, center + radius * std::sin(a), center - radius * std::cos(a), ring, slot, -1});
     }
@@ -691,7 +710,7 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     uint32_t corrections = 0;
     if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
     if (corrected[0] != 0xc7 || corrected[1] != 0x4b ||
-        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != 18u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
+        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != 18u && corrected[2] != 19u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
     }
     const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
@@ -772,7 +791,7 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
         if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[3]!=3) return CKEY_INTEGRITY_FAILURE;
         size_t length=0, payload_offset=0, crc_index=0;
         if (tiered) {
-            if ((framed[2] != 17u && framed[2] != CKEY_EXTENDED_FORMAT_VERSION) || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
+            if ((framed[2] != 17u && framed[2] != 20u && framed[2] != CKEY_EXTENDED_FORMAT_VERSION) || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
             const size_t selected = framed[4]-1;
             if (data_bytes != (11+kExtendedTierCapacities[selected]+kExtendedBlocks-1)/kExtendedBlocks) return CKEY_INTEGRITY_FAILURE;
             length=(static_cast<size_t>(framed[5])<<8)|framed[6]; payload_offset=7; crc_index=payload_offset+length;
@@ -800,9 +819,9 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
     // them before trying every new parity split avoids doing eight full RS
     // decodes for an unrelated square candidate in the live camera path.
     const bool tier_hint_valid = codeword[40] > 0 && codeword[40] <= kExtendedTierCapacities.size();
-    const bool likely_tiered = (codeword[20]==17u || codeword[20]==CKEY_EXTENDED_FORMAT_VERSION) ||
+    const bool likely_tiered = (codeword[20]==17u || codeword[20]==20u || codeword[20]==CKEY_EXTENDED_FORMAT_VERSION) ||
                                (codeword[30]==3 && tier_hint_valid);
-    if (codeword[20] != 17u && codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
+    if (codeword[20] != 17u && codeword[20] != 20u && codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
         const ckey_status legacy=attempt(kExtendedDataBytes,kExtendedParityBytes,false);
         if (legacy==CKEY_OK || legacy==CKEY_INSUFFICIENT_BUFFER) return legacy;
     }
@@ -1202,6 +1221,8 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION || s->side != kExtendedSide || s->payload_length == 0 || s->payload_length > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) return CKEY_INVALID_ARGUMENT;
     const auto nodes=extended_nodes(); if (nodes.size()<kExtendedBits) return CKEY_INTERNAL_ERROR;
     constexpr int slots=288, rings=34; constexpr double center=58.0, dot_radius=.075;
+    constexpr double ring_inner=7.0, ring_outer=23.96;
+    constexpr double ring_pitch=(ring_outer-ring_inner)/(rings-1);
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
       << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
@@ -1239,7 +1260,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
         o << "<path d=\"M " << center+r0*std::sin(a) << ' ' << center-r0*std::cos(a) << " L " << center+(r0+length)*std::sin(a) << ' ' << center-(r0+length)*std::cos(a) << "\" fill=\"none\" stroke-width=\"" << width << "\" stroke-linecap=\"round\"/>";
     }
     for (int ring=0;ring<rings;++ring) {
-        const double radius=3.50+.62*ring;
+        const double radius=ring_inner+ring_pitch*ring;
         for (int slot=0;slot<slots;) {
             if (!ring_bits[ring][slot]) { ++slot; continue; }
             int end=slot+1; while(end<slots && ring_bits[ring][end]) ++end;

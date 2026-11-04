@@ -82,7 +82,11 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                         camera.focusMode = .continuousAutoFocus
                     }
                     if camera.isAutoFocusRangeRestrictionSupported {
-                        camera.autoFocusRangeRestriction = .far
+                        // The physical wide camera is already fixed at 1×, so
+                        // no lens will swap. Do not force its optics to the
+                        // far range: a CKey may legitimately be shown at a
+                        // close, medium, or distant measured size.
+                        camera.autoFocusRangeRestriction = .none
                     }
                     if camera.isExposureModeSupported(.continuousAutoExposure) {
                         camera.exposureMode = .continuousAutoExposure
@@ -149,10 +153,17 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // optimized using the printed Grid, Ring, Ray, and finder keys. No
         // generic rectangle model or fixed distance ladder participates.
         for quad in borderQuads.prefix(6) {
-            let refined = refinedCKeyQuad(quadPoints(quad), gray: gray, width: width, height: height, stride: stride)
+            let observed = quadPoints(quad)
+            // Compact profiles and Profile 3 have deliberately different
+            // calibration fields. Never let a strong P1/P2 score select the
+            // projective transform used to sample P3 (or vice versa).
+            let compactQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
+                                               stride: stride, field: .compact)
+            let extendedQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
+                                                stride: stride, field: .extended)
             let decodeStarted = CACurrentMediaTime()
             if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                              locatorQuad: refined, denseQuad: refined) {
+                                              compactQuad: compactQuad, extendedQuad: extendedQuad) {
                 publishDecoded(decoded.bytes, profile: decoded.profile,
                                detectionMilliseconds: borderDetectionMilliseconds,
                                decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
@@ -195,8 +206,11 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         return quad
     }
 
+    private enum CalibrationField { case compact, extended }
+
     private func refinedCKeyQuad(_ observed: [CGPoint], gray: UnsafePointer<UInt8>,
-                                 width: Int, height: Int, stride: Int) -> [Double] {
+                                 width: Int, height: Int, stride: Int,
+                                 field: CalibrationField) -> [Double] {
         guard observed.count == 4 else { return [] }
         let side = (hypot(observed[1].x - observed[0].x, observed[1].y - observed[0].y) +
                     hypot(observed[3].x - observed[0].x, observed[3].y - observed[0].y)) * 0.5
@@ -210,7 +224,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         var scaleStep = 0.14
         var offsetStep = Double(side) * 0.08
         var best = expandedCKeyQuad(observed, expansion: scale, offsetX: offsetX, offsetY: offsetY)
-        var bestScore = calibrationScore(gray, width: width, height: height, stride: stride, quad: best)
+        var bestScore = calibrationScore(gray, width: width, height: height, stride: stride, quad: best, field: field)
         let directions = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
                           (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
                           (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)]
@@ -226,7 +240,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 let candidateOffsetY = offsetY + direction.2 * offsetStep
                 let candidate = expandedCKeyQuad(observed, expansion: candidateScale,
                                                   offsetX: candidateOffsetX, offsetY: candidateOffsetY)
-                let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate)
+                let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate, field: field)
                 if score > roundScore {
                     roundScore = score
                     roundScale = candidateScale
@@ -255,7 +269,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     var candidate = best
                     candidate[baseX] += dx
                     candidate[baseY] += dy
-                    let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate)
+                    let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate, field: field)
                     if score > bestScore {
                         best = candidate
                         bestScore = score
@@ -268,20 +282,24 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     private func calibrationScore(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                                  stride: Int, quad: [Double]) -> Double {
+                                  stride: Int, quad: [Double], field: CalibrationField) -> Double {
         quad.withUnsafeBufferPointer { buffer in
-            max(ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress),
-                ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress))
+            switch field {
+            case .compact:
+                return ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
+            case .extended:
+                return ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress)
+            }
         }
     }
 
     private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
-                                  locatorQuad: [Double], denseQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
-        guard locatorQuad.count == 8, denseQuad.count == 8 else { return nil }
+                                  compactQuad: [Double], extendedQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
+        guard compactQuad.count == 8, extendedQuad.count == 8 else { return nil }
         var locator = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
         var diagnostic = ckey_diagnostics()
         let locatorStatus = locator.withUnsafeMutableBufferPointer { output in
-            locatorQuad.withUnsafeBufferPointer { q in
+            compactQuad.withUnsafeBufferPointer { q in
                 ckey_decode_gray8(gray, width, height, stride, q.baseAddress, output.baseAddress, output.count, &diagnostic)
             }
         }
@@ -294,7 +312,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         var dense = [UInt8](repeating: 0, count: Int(CKEY_EXTENDED_PAYLOAD_MAX_BYTES))
         var length = 0
         let textStatus = dense.withUnsafeMutableBufferPointer { output in
-            denseQuad.withUnsafeBufferPointer { q in
+            compactQuad.withUnsafeBufferPointer { q in
                 ckey_decode_text_gray8(gray, width, height, stride, q.baseAddress,
                                        output.baseAddress, output.count, &length, &diagnostic)
             }
@@ -304,7 +322,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
         length = 0
         let extendedStatus = dense.withUnsafeMutableBufferPointer { output in
-            denseQuad.withUnsafeBufferPointer { q in
+            extendedQuad.withUnsafeBufferPointer { q in
                 ckey_decode_extended_gray8(gray, width, height, stride, q.baseAddress,
                                            output.baseAddress, output.count, &length, &diagnostic)
             }
