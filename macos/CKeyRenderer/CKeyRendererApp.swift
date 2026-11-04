@@ -325,17 +325,23 @@ private struct SymbolPreview: NSViewRepresentable {
                 }
             }
             let decodedCount = profile == .locator ? Int(CKEY_LOCATOR_PAYLOAD_BYTES) : outputLength
+            // Raster pixels per symbol unit actually presented to the decoder.
+            // Clean-render floors are about 6 (P1), 10 (P2), and 11 (P3);
+            // below them a FAIL reflects the window/resolution, not the symbol.
+            let pixelsPerUnit = moduleScale * sx
+            let decodeFloor = profile == .locator ? 6.0 : profile == .text ? 10.0 : 11.0
+            let density = String(format: "%.1f px/unit", pixelsPerUnit) + (pixelsPerUnit < decodeFloor ? " (below the ~\(Int(decodeFloor)) px/unit decode floor — enlarge the window or raise Resolution)" : "")
             let expected = expectedPayload
             let matches = result == CKEY_OK && decodedCount == expected.count &&
                           Array(output.prefix(decodedCount)) == expected
             if matches {
-                onRead("Synthetic preview decode: PASS · \(decodedCount) bytes")
+                onRead("Synthetic preview decode: PASS · \(decodedCount) bytes · \(density)")
             } else {
                 let message = withUnsafeBytes(of: diagnostic.message) { bytes -> String in
                     guard let address = bytes.baseAddress else { return "decode rejected" }
                     return String(cString: address.assumingMemoryBound(to: CChar.self))
                 }
-                onRead("Synthetic preview decode: FAIL · \(message)")
+                onRead("Synthetic preview decode: FAIL · \(message) · \(density)")
             }
         }
     }

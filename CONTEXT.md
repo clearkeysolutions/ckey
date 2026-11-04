@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.50`
+**Current software version:** `0.1.0-dev.51`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`)
 **Branch:** `main`
 **Context updated:** 2026-11-04
@@ -47,6 +47,7 @@ Next engineering gates: (1) compile and validate the iPhone reader on physical d
 * These checks use synthetic renders only and do not establish physical-camera robustness.
 * `python3 tools/check_version.py`: software and current wire-format nodes are synchronized for dev.49. It also rejects a stale "current Format" claim in this file and missing README format links.
 * Earlier records: C++ core tests pass across error weights 1–25, including 32 distinct 25-byte-error patterns and a 26-error rejection vector. Independent review corrected 1,000 randomized 25-byte-error patterns and 10,000 eight-symbol-error patterns. `tools/rs_reference.py` independently reproduces the committed RS vector. Static and hidden-visibility shared builds exported the public `ckey_*` ABI.
+* Dev.51: the reader's 1080p capture could not supply P3's ~1,280 px decode floor, so it now prefers 4K, and its border search samples about 960 × 540 points at any capture size. The Swift changes were reviewed by inspection only; no Swift toolchain or Xcode is available here.
 * Xcode build/run and live camera performance remain pending physical-device validation; they are unavailable in this environment.
 
 ## Research references and provenance
