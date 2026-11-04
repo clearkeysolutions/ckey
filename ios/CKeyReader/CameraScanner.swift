@@ -153,8 +153,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // Symbols may be light-on-dark or dark-on-light. Run the same
         // geometric component pass at both polarities; the key fit later
         // resolves the real candidate.
-        let borderQuads = (borderQuads(gray, width: width, height: height, stride: stride, marksAreDark: false) +
-                           borderQuads(gray, width: width, height: height, stride: stride, marksAreDark: true))
+        let borderQuads = borderQuads(gray, width: width, height: height, stride: stride)
         let borderDetectionMilliseconds = (CACurrentMediaTime() - started) * 1000
 
         // The complete locator is measured from the border component, then
@@ -224,97 +223,29 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                        hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)) * 0.5)
     }
 
-    private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double,
-                                  offsetX: Double, offsetY: Double) -> [Double] {
-        // The continuous border may be measured at its inner or outer stroke.
-        // Keep hypotheses distinct so each candidate can reach the same
-        // canonical field from its measured boundary.
-        let centerX = observed.map { Double($0.x) }.reduce(0.0, +) / 4.0
-        let centerY = observed.map { Double($0.y) }.reduce(0.0, +) / 4.0
-        var quad: [Double] = []
-        quad.reserveCapacity(observed.count * 2)
-        for point in observed {
-            let x = Double(point.x)
-            let y = Double(point.y)
-            quad.append(centerX + (x - centerX) * scale + offsetX)
-            quad.append(centerY + (y - centerY) * scale + offsetY)
-        }
-        return quad
-    }
-
     private enum CalibrationField { case locator, text, extended }
 
+    // Fit a border to one profile's canonical field against that profile's
+    // fixed keys. Shared C++ core (ckey_refine_quad_gray8): coordinate descent
+    // over scale, rotation, and offset, then per-corner projective moves.
     private func refinedCKeyQuad(_ observed: [CGPoint], gray: UnsafePointer<UInt8>,
                                  width: Int, height: Int, stride: Int,
                                  field: CalibrationField) -> [Double] {
         guard observed.count == 4 else { return [] }
-        let side = (hypot(observed[1].x - observed[0].x, observed[1].y - observed[0].y) +
-                    hypot(observed[3].x - observed[0].x, observed[3].y - observed[0].y)) * 0.5
-        // Geometry is estimated continuously from the three permanent keys,
-        // not selected from a table of symbol sizes. Coordinate descent starts
-        // at the detector's measured quad and halves its physical step each
-        // round, converging to the best calibrated field at any pixel scale.
-        var scale = 1.0
-        var offsetX = 0.0
-        var offsetY = 0.0
-        var scaleStep = 0.14
-        var offsetStep = Double(side) * 0.08
-        var best = expandedCKeyQuad(observed, expansion: scale, offsetX: offsetX, offsetY: offsetY)
-        var bestScore = calibrationScore(gray, width: width, height: height, stride: stride, quad: best, field: field)
-        let directions = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
-                          (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
-                          (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)]
-        for _ in 0..<4 {
-            var roundScale = scale
-            var roundOffsetX = offsetX
-            var roundOffsetY = offsetY
-            var roundScore = bestScore
-            var roundQuad = best
-            for direction in directions {
-                let candidateScale = max(0.35, scale + direction.0 * scaleStep)
-                let candidateOffsetX = offsetX + direction.1 * offsetStep
-                let candidateOffsetY = offsetY + direction.2 * offsetStep
-                let candidate = expandedCKeyQuad(observed, expansion: candidateScale,
-                                                  offsetX: candidateOffsetX, offsetY: candidateOffsetY)
-                let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate, field: field)
-                if score > roundScore {
-                    roundScore = score
-                    roundScale = candidateScale
-                    roundOffsetX = candidateOffsetX
-                    roundOffsetY = candidateOffsetY
-                    roundQuad = candidate
-                }
-            }
-            scale = roundScale
-            offsetX = roundOffsetX
-            offsetY = roundOffsetY
-            bestScore = roundScore
-            best = roundQuad
-            scaleStep *= 0.5
-            offsetStep *= 0.5
+        let border = observed.flatMap { [Double($0.x), Double($0.y)] }
+        let coreField: ckey_field
+        switch field {
+        case .locator: coreField = CKEY_FIELD_LOCATOR
+        case .text: coreField = CKEY_FIELD_TEXT
+        case .extended: coreField = CKEY_FIELD_EXTENDED
         }
-        // A tilted display is a projective quadrilateral, not a scaled square.
-        // Move each measured corner independently against the physical key
-        // evidence so keystone error is corrected before any data sample.
-        var cornerStep = Double(side) * 0.035
-        for _ in 0..<3 {
-            for corner in 0..<4 {
-                let baseX = corner * 2
-                let baseY = baseX + 1
-                for (dx, dy) in [(cornerStep, 0.0), (-cornerStep, 0.0), (0.0, cornerStep), (0.0, -cornerStep)] {
-                    var candidate = best
-                    candidate[baseX] += dx
-                    candidate[baseY] += dy
-                    let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate, field: field)
-                    if score > bestScore {
-                        best = candidate
-                        bestScore = score
-                    }
-                }
+        var refined = [Double](repeating: 0, count: 8)
+        let score = border.withUnsafeBufferPointer { input in
+            refined.withUnsafeMutableBufferPointer { output in
+                ckey_refine_quad_gray8(gray, width, height, stride, input.baseAddress, coreField, output.baseAddress)
             }
-            cornerStep *= 0.5
         }
-        return best
+        return score >= 0 ? refined : []
     }
 
     private func calibrationScore(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
@@ -399,147 +330,18 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
+    // Candidate border outlines (both polarities), most border-like first,
+    // from the shared C++ core (ckey_find_borders_gray8). Orientation comes
+    // from the border's minimum-area rectangle and each side is line-fitted,
+    // so rotated and keystoned symbols start from the right geometry.
     private func borderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                             stride: Int, marksAreDark: Bool) -> [[Double]] {
-        // Sample about 960 x 540 points regardless of capture size (step 2 at
-        // 1080p, 4 at 4K): the same angular resolution, so a distant border
-        // stays several samples thick, at constant connected-component cost.
-        let step = max(2, 2 * max(width, height) / 1920)
-        let sampledWidth = (width + step - 1) / step
-        let sampledHeight = (height + step - 1) / step
-        var visited = [UInt8](repeating: 0, count: sampledWidth * sampledHeight)
-        var queue = [Int]()
-        var candidates: [(quad: [Double], score: Double)] = []
-        let minFrameSide = min(width, height)
-        // Exposure and display brightness vary more than a fixed threshold
-        // can tolerate.  Derive both polarity thresholds from robust image
-        // percentiles; this is intentionally measured per frame rather than
-        // tied to a camera distance or device profile.
-        let threshold = adaptiveThreshold(gray, width: width, height: height, stride: stride,
-                                          marksAreDark: marksAreDark)
-        let isMark: (UInt8) -> Bool = { marksAreDark ? $0 <= threshold : $0 >= threshold }
-
-        for sampleY in 0..<sampledHeight {
-            for sampleX in 0..<sampledWidth {
-                let start = sampleY * sampledWidth + sampleX
-                if visited[start] != 0 { continue }
-                let sourceX = min(sampleX * step, width - 1)
-                let sourceY = min(sampleY * step, height - 1)
-                // Allow a blurred or dim display border to remain a candidate;
-                // the calibration keys, RS correction, and CRC are the false-
-                // positive gate rather than this coarse luminance threshold.
-                if !isMark(gray[sourceY * stride + sourceX]) { continue }
-
-                visited[start] = 1
-                queue.removeAll(keepingCapacity: true)
-                queue.append(start)
-                var head = 0
-                var minX = sampleX, maxX = sampleX, minY = sampleY, maxY = sampleY
-                var count = 0
-                while head < queue.count {
-                    let node = queue[head]
-                    head += 1
-                    let x = node % sampledWidth
-                    let y = node / sampledWidth
-                    minX = min(minX, x); maxX = max(maxX, x)
-                    minY = min(minY, y); maxY = max(maxY, y)
-                    count += 1
-                    for dy in -1...1 {
-                        for dx in -1...1 where dx != 0 || dy != 0 {
-                            let nx = x + dx, ny = y + dy
-                            guard nx >= 0, nx < sampledWidth, ny >= 0, ny < sampledHeight else { continue }
-                            let neighbor = ny * sampledWidth + nx
-                            if visited[neighbor] != 0 { continue }
-                            let px = min(nx * step, width - 1)
-                            let py = min(ny * step, height - 1)
-                            if isMark(gray[py * stride + px]) {
-                                visited[neighbor] = 1
-                                queue.append(neighbor)
-                            }
-                        }
-                    }
-                }
-
-                let boxWidth = (maxX - minX + 1) * step
-                let boxHeight = (maxY - minY + 1) * step
-                let side = min(boxWidth, boxHeight)
-                // Size limits scale with the sampling step. The upper bound
-                // admits a border filling 90% of the short frame side, since
-                // Profile 3 needs its symbol large in the frame.
-                guard count >= 24, side >= 20 * step, side < Int(Double(minFrameSide) * 0.90) else { continue }
-                let aspect = Double(boxWidth) / Double(boxHeight)
-                guard aspect > 0.72, aspect < 1.38 else { continue }
-                // Prefer square outlines over large filled bright UI panels.
-                let fillRatio = Double(count) / Double((maxX - minX + 1) * (maxY - minY + 1))
-                guard fillRatio < 0.38 else { continue }
-                // Fit an oriented quadrilateral to the continuous border
-                // component.  The old bounding box erased rotation before
-                // calibration and made every oblique scan start from the
-                // wrong geometry.
-                let points = queue.map { index -> (Double, Double) in
-                    let x = (index % sampledWidth) * step
-                    let y = (index / sampledWidth) * step
-                    return (Double(min(x, width - 1)), Double(min(y, height - 1)))
-                }
-                let meanX = points.reduce(0.0) { $0 + $1.0 } / Double(points.count)
-                let meanY = points.reduce(0.0) { $0 + $1.1 } / Double(points.count)
-                let xx = points.reduce(0.0) { $0 + ($1.0 - meanX) * ($1.0 - meanX) }
-                let yy = points.reduce(0.0) { $0 + ($1.1 - meanY) * ($1.1 - meanY) }
-                let xy = points.reduce(0.0) { $0 + ($1.0 - meanX) * ($1.1 - meanY) }
-                let angle = 0.5 * atan2(2.0 * xy, xx - yy)
-                let ux = cos(angle), uy = sin(angle), vx = -uy, vy = ux
-                var minU = Double.infinity, maxU = -Double.infinity
-                var minV = Double.infinity, maxV = -Double.infinity
-                for (x, y) in points {
-                    let u = (x - meanX) * ux + (y - meanY) * uy
-                    let v = (x - meanX) * vx + (y - meanY) * vy
-                    minU = min(minU, u); maxU = max(maxU, u)
-                    minV = min(minV, v); maxV = max(maxV, v)
-                }
-                func projected(_ u: Double, _ v: Double) -> Double { meanX + u * ux + v * vx }
-                func projectedY(_ u: Double, _ v: Double) -> Double { meanY + u * uy + v * vy }
-                let quad = [projected(minU, minV), projectedY(minU, minV),
-                            projected(maxU, minV), projectedY(maxU, minV),
-                            projected(maxU, maxV), projectedY(maxU, maxV),
-                            projected(minU, maxV), projectedY(minU, maxV)]
-                // The generated ranker merely orders mathematically measured
-                // components. It cannot accept a symbol; key fit plus ECC/CRC
-                // below are still required before the result is published.
-                let probability = LocatorRanker.score(aspectError: abs(log(aspect)), fillRatio: fillRatio,
-                                                       relativeSide: Double(side) / Double(minFrameSide))
-                let score = 1.0 - probability
-                candidates.append((quad: quad, score: score))
-            }
+                             stride: Int) -> [[Double]] {
+        let maxQuads = 6
+        var buffer = [Double](repeating: 0, count: maxQuads * 8)
+        let count = buffer.withUnsafeMutableBufferPointer { output in
+            ckey_find_borders_gray8(gray, width, height, stride, output.baseAddress, maxQuads)
         }
-        return candidates.sorted { $0.score < $1.score }.map(\.quad)
-    }
-
-    private func adaptiveThreshold(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                                   stride: Int, marksAreDark: Bool) -> UInt8 {
-        var histogram = [Int](repeating: 0, count: 256)
-        var samples = 0
-        for y in Swift.stride(from: 0, to: height, by: 8) {
-            for x in Swift.stride(from: 0, to: width, by: 8) {
-                histogram[Int(gray[y * stride + x])] += 1
-                samples += 1
-            }
-        }
-        guard samples > 0 else { return marksAreDark ? 92 : 164 }
-        func percentile(_ fraction: Double) -> Int {
-            let target = Int(Double(samples - 1) * fraction)
-            var total = 0
-            for (value, count) in histogram.enumerated() {
-                total += count
-                if total > target { return value }
-            }
-            return 255
-        }
-        let low = percentile(0.10)
-        let high = percentile(0.90)
-        guard high - low >= 32 else { return marksAreDark ? 92 : 164 }
-        let contrast = Double(high - low)
-        let value = marksAreDark ? Double(low) + contrast * 0.32 : Double(high) - contrast * 0.32
-        return UInt8(max(0, min(255, Int(value.rounded()))))
+        return (0..<count).map { Array(buffer[($0 * 8)..<($0 * 8 + 8)]) }
     }
 }
 

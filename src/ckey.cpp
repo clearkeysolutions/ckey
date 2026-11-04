@@ -1654,3 +1654,249 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     return CKEY_OK;
 }
 }
+
+// ---------------------------------------------------------------------------
+// Full-frame localization (moved from the iPhone reader so it is shared and
+// testable). Border candidates are connected components of the continuous
+// frame stroke; each is fitted with a perspective quadrilateral, then refined
+// against a profile's fixed keys. Neither step can accept a payload.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct Point2 { double x, y; };
+
+uint8_t frame_threshold(const uint8_t *gray, size_t width, size_t height, size_t stride, bool dark_marks) {
+    std::array<size_t, 256> histogram{}; size_t samples = 0;
+    for (size_t y = 0; y < height; y += 8) for (size_t x = 0; x < width; x += 8) { ++histogram[gray[y * stride + x]]; ++samples; }
+    if (!samples) return dark_marks ? 92 : 164;
+    const auto percentile = [&](double fraction) {
+        const size_t target = static_cast<size_t>(static_cast<double>(samples - 1) * fraction); size_t total = 0;
+        for (int v = 0; v < 256; ++v) { total += histogram[v]; if (total > target) return v; }
+        return 255;
+    };
+    const int low = percentile(0.10), high = percentile(0.90);
+    if (high - low < 32) return dark_marks ? 92 : 164;
+    const double contrast = high - low;
+    const double value = dark_marks ? low + contrast * 0.32 : high - contrast * 0.32;
+    return static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(value)), 0, 255));
+}
+
+double cross(const Point2 &o, const Point2 &a, const Point2 &b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); }
+
+std::vector<Point2> convex_hull(std::vector<Point2> p) {
+    std::sort(p.begin(), p.end(), [](const Point2 &a, const Point2 &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+    p.erase(std::unique(p.begin(), p.end(), [](const Point2 &a, const Point2 &b) { return a.x == b.x && a.y == b.y; }), p.end());
+    if (p.size() < 3) return p;
+    std::vector<Point2> h(2 * p.size()); size_t k = 0;
+    for (size_t i = 0; i < p.size(); ++i) { while (k >= 2 && cross(h[k - 2], h[k - 1], p[i]) <= 0) --k; h[k++] = p[i]; }
+    for (size_t i = p.size() - 1, t = k + 1; i-- > 0;) { while (k >= t && cross(h[k - 2], h[k - 1], p[i]) <= 0) --k; h[k++] = p[i]; }
+    h.resize(k - 1);
+    return h;
+}
+
+// Fits the outer edge of a square border component. Second moments cannot
+// orient a square (its inertia is isotropic, so the old principal-axis fit
+// returned an essentially random angle, often 45 degrees off). The minimum-
+// area enclosing rectangle of the convex hull gives the orientation; each
+// side is then re-fitted as a line through the stroke's outer edge, so a
+// tilted (keystoned) display yields a true perspective quadrilateral.
+bool fit_border_quad(const std::vector<Point2> &points, double step, std::array<double, 8> &quad) {
+    const auto hull = convex_hull(points);
+    if (hull.size() < 4) return false;
+    double best_area = std::numeric_limits<double>::infinity(), ux = 1, uy = 0;
+    for (size_t i = 0; i < hull.size(); ++i) {
+        const Point2 &a = hull[i], &b = hull[(i + 1) % hull.size()];
+        double ex = b.x - a.x, ey = b.y - a.y; const double len = std::hypot(ex, ey);
+        if (len < 1e-9) continue;
+        ex /= len; ey /= len;
+        double min_u = 1e300, max_u = -1e300, min_v = 1e300, max_v = -1e300;
+        for (const auto &p : hull) {
+            const double u = p.x * ex + p.y * ey, v = -p.x * ey + p.y * ex;
+            min_u = std::min(min_u, u); max_u = std::max(max_u, u); min_v = std::min(min_v, v); max_v = std::max(max_v, v);
+        }
+        const double area = (max_u - min_u) * (max_v - min_v);
+        if (area < best_area) { best_area = area; ux = ex; uy = ey; }
+    }
+    const double vx = -uy, vy = ux;
+    double cx = 0, cy = 0; for (const auto &p : points) { cx += p.x; cy += p.y; } cx /= points.size(); cy /= points.size();
+    double min_u = 1e300, max_u = -1e300, min_v = 1e300, max_v = -1e300;
+    for (const auto &p : points) {
+        const double u = (p.x - cx) * ux + (p.y - cy) * uy, v = (p.x - cx) * vx + (p.y - cy) * vy;
+        min_u = std::min(min_u, u); max_u = std::max(max_u, u); min_v = std::min(min_v, v); max_v = std::max(max_v, v);
+    }
+    const double half_u = (max_u - min_u) / 2, half_v = (max_v - min_v) / 2, mid_u = (max_u + min_u) / 2, mid_v = (max_v + min_v) / 2;
+    // Side lines: normal n (outward), offset d, so that n . p = d on the edge.
+    struct Line { double nx, ny, d; };
+    std::array<Line, 4> lines{};
+    const std::array<std::array<double, 2>, 4> normals = {{{-vx, -vy}, {ux, uy}, {vx, vy}, {-ux, -uy}}};  // top, right, bottom, left
+    for (int s = 0; s < 4; ++s) {
+        const double nx = normals[s][0], ny = normals[s][1];
+        const bool along_u = s == 0 || s == 2;
+        const double half_along = along_u ? half_u : half_v, half_across = along_u ? half_v : half_u;
+        const double band = std::max(3.0 * step, 0.10 * half_across);
+        std::vector<Point2> side;
+        for (const auto &p : points) {
+            const double u = (p.x - cx) * ux + (p.y - cy) * uy - mid_u, v = (p.x - cx) * vx + (p.y - cy) * vy - mid_v;
+            const double across = along_u ? (s == 0 ? -v : v) : (s == 1 ? u : -u);
+            const double along = along_u ? u : v;
+            // Skip the rounded corners: only the straight middle of each side.
+            if (across > half_across - band && std::abs(along) < 0.62 * half_along) side.push_back(p);
+        }
+        Line line{nx, ny, 0};
+        if (side.size() >= 8) {
+            double mx = 0, my = 0; for (const auto &p : side) { mx += p.x; my += p.y; } mx /= side.size(); my /= side.size();
+            double sxx = 0, syy = 0, sxy = 0;
+            for (const auto &p : side) { sxx += (p.x - mx) * (p.x - mx); syy += (p.y - my) * (p.y - my); sxy += (p.x - mx) * (p.y - my); }
+            const double theta = 0.5 * std::atan2(2 * sxy, sxx - syy);   // direction of the side
+            double lx = -std::sin(theta), ly = std::cos(theta);           // its normal
+            if (lx * nx + ly * ny < 0) { lx = -lx; ly = -ly; }
+            if (lx * nx + ly * ny > 0.94) { line.nx = lx; line.ny = ly; }  // accept tilt up to ~20 degrees
+        }
+        // Outer edge: a high percentile of the outward coordinate of the side's
+        // points (the whole stroke lies in the band), plus half a sample.
+        std::vector<double> outward;
+        for (const auto &p : side.size() >= 8 ? side : points) outward.push_back(p.x * line.nx + p.y * line.ny);
+        std::sort(outward.begin(), outward.end());
+        line.d = outward[static_cast<size_t>(0.95 * (outward.size() - 1))] + 0.5 * step;
+        lines[s] = line;
+    }
+    for (int c = 0; c < 4; ++c) {  // corners: top-left, top-right, bottom-right, bottom-left
+        const Line &a = lines[c == 0 ? 3 : c - 1], &b = lines[c];
+        const double det = a.nx * b.ny - a.ny * b.nx;
+        if (std::abs(det) < 1e-9) return false;
+        quad[2 * c] = (a.d * b.ny - a.ny * b.d) / det;
+        quad[2 * c + 1] = (a.nx * b.d - a.d * b.nx) / det;
+    }
+    return std::all_of(quad.begin(), quad.end(), [](double v) { return std::isfinite(v); });
+}
+
+// Candidate ordering only (generated by tools/train_locator_ranker.py).
+double border_rank(double aspect_error, double fill_ratio, double relative_side) {
+    const double z = 0.81059192 - 10.65985208 * aspect_error + 0.18755525 * fill_ratio - 0.55068352 * std::abs(relative_side - 0.32);
+    return 1.0 / (1.0 + std::exp(-z));
+}
+
+// The outer ink edge of the frame stroke sits at canonical 0.175..28.825 in
+// Profiles 1/2 and 0.7..115.3 in Profile 3: both 1.0122x inside the field.
+constexpr double kBorderToField = 29.0 / 28.65;
+
+double field_score(int field, const uint8_t *gray, size_t width, size_t height, size_t stride, const double q[8]) {
+    if (field == CKEY_FIELD_LOCATOR) return ckey_calibration_score_gray8(gray, width, height, stride, q);
+    if (field == CKEY_FIELD_TEXT) return ckey_calibration_score_text_gray8(gray, width, height, stride, q);
+    return ckey_calibration_score_extended_gray8(gray, width, height, stride, q);
+}
+
+}  // namespace
+
+extern "C" {
+
+size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                               double *out_quads, size_t max_quads) {
+    if (!gray || !out_quads || max_quads == 0 || width < 16 || height < 16 || stride < width ||
+        height > std::numeric_limits<size_t>::max() / stride) return 0;
+    // About 960 x 540 samples at any capture size (step 2 at 1080p, 4 at 4K).
+    const size_t step = std::max<size_t>(2, 2 * std::max(width, height) / 1920);
+    const size_t sw = (width + step - 1) / step, sh = (height + step - 1) / step;
+    const size_t min_side = std::min(width, height);
+    struct Candidate { std::array<double, 8> quad; double rank; };
+    std::vector<Candidate> candidates;
+    std::vector<uint8_t> visited(sw * sh);
+    std::vector<size_t> queue;
+    for (int polarity = 0; polarity < 2; ++polarity) {
+        const bool dark = polarity == 1;
+        const uint8_t t = frame_threshold(gray, width, height, stride, dark);
+        const auto is_mark = [&](size_t sx, size_t sy) {
+            const uint8_t v = gray[std::min(sy * step, height - 1) * stride + std::min(sx * step, width - 1)];
+            return dark ? v <= t : v >= t;
+        };
+        std::fill(visited.begin(), visited.end(), 0);
+        for (size_t sy = 0; sy < sh; ++sy) for (size_t sx = 0; sx < sw; ++sx) {
+            const size_t start = sy * sw + sx;
+            if (visited[start] || !is_mark(sx, sy)) continue;
+            visited[start] = 1; queue.assign(1, start);
+            size_t min_x = sx, max_x = sx, min_y = sy, max_y = sy;
+            for (size_t head = 0; head < queue.size(); ++head) {
+                const size_t x = queue[head] % sw, y = queue[head] / sw;
+                min_x = std::min(min_x, x); max_x = std::max(max_x, x); min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+                for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                    if (!dx && !dy) continue;
+                    const long nx = static_cast<long>(x) + dx, ny = static_cast<long>(y) + dy;
+                    if (nx < 0 || ny < 0 || nx >= static_cast<long>(sw) || ny >= static_cast<long>(sh)) continue;
+                    const size_t n = static_cast<size_t>(ny) * sw + static_cast<size_t>(nx);
+                    if (!visited[n] && is_mark(static_cast<size_t>(nx), static_cast<size_t>(ny))) { visited[n] = 1; queue.push_back(n); }
+                }
+            }
+            const size_t box_w = (max_x - min_x + 1) * step, box_h = (max_y - min_y + 1) * step, side = std::min(box_w, box_h);
+            // The whole border must be in view: a component touching the frame
+            // edge is clipped (or is a display bezel). This replaces a fixed
+            // fraction-of-frame cap that rejected large rotated symbols.
+            if (queue.size() < 24 || side < 20 * step || min_x == 0 || min_y == 0 || max_x + 1 >= sw || max_y + 1 >= sh) continue;
+            const double aspect = static_cast<double>(box_w) / box_h;
+            // A rotated square's axis-aligned box stays square; a filled
+            // panel or blob fails the fill test.
+            const double fill = static_cast<double>(queue.size()) / static_cast<double>((max_x - min_x + 1) * (max_y - min_y + 1));
+            if (aspect <= 0.72 || aspect >= 1.38 || fill >= 0.38) continue;
+            std::vector<Point2> points; points.reserve(queue.size());
+            for (size_t index : queue) points.push_back({static_cast<double>((index % sw) * step), static_cast<double>((index / sw) * step)});
+            Candidate c{};
+            if (!fit_border_quad(points, static_cast<double>(step), c.quad)) continue;
+            c.rank = border_rank(std::abs(std::log(aspect)), fill, static_cast<double>(side) / min_side);
+            candidates.push_back(c);
+        }
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) { return a.rank > b.rank; });
+    const size_t count = std::min(max_quads, candidates.size());
+    for (size_t i = 0; i < count; ++i) std::copy(candidates[i].quad.begin(), candidates[i].quad.end(), out_quads + 8 * i);
+    return count;
+}
+
+double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                              const double border_quad[8], ckey_field field, double out_quad[8]) {
+    if (!out_quad || (field != CKEY_FIELD_LOCATOR && field != CKEY_FIELD_TEXT && field != CKEY_FIELD_EXTENDED) ||
+        !valid_image_args(gray, width, height, stride, border_quad)) return -1.0;
+    double cx = 0, cy = 0; for (int i = 0; i < 4; ++i) { cx += border_quad[2 * i] / 4; cy += border_quad[2 * i + 1] / 4; }
+    const double side = (std::hypot(border_quad[2] - border_quad[0], border_quad[3] - border_quad[1]) +
+                         std::hypot(border_quad[6] - border_quad[0], border_quad[7] - border_quad[1])) / 2;
+    const auto similar = [&](double scale, double angle, double ox, double oy, double q[8]) {
+        const double c = std::cos(angle), s = std::sin(angle);
+        for (int i = 0; i < 4; ++i) {
+            const double dx = border_quad[2 * i] - cx, dy = border_quad[2 * i + 1] - cy;
+            q[2 * i] = cx + ox + scale * (c * dx - s * dy); q[2 * i + 1] = cy + oy + scale * (s * dx + c * dy);
+        }
+    };
+    // Coordinate descent over (scale, rotation, offset), then per-corner
+    // projective moves. Steps halve each round, so it converges at any pixel
+    // scale without a symbol-size table.
+    double scale = kBorderToField, angle = 0, ox = 0, oy = 0;
+    double best[8]; similar(scale, angle, ox, oy, best);
+    double best_score = field_score(field, gray, width, height, stride, best);
+    double scale_step = 0.03, angle_step = 2.0 * kTau / 360.0, offset_step = side * 0.02;
+    for (int round = 0; round < 6; ++round) {
+        bool improved = true;
+        while (improved) {
+            improved = false;
+            const double moves[8][4] = {{scale_step, 0, 0, 0}, {-scale_step, 0, 0, 0}, {0, angle_step, 0, 0}, {0, -angle_step, 0, 0},
+                                        {0, 0, offset_step, 0}, {0, 0, -offset_step, 0}, {0, 0, 0, offset_step}, {0, 0, 0, -offset_step}};
+            for (const auto &m : moves) {
+                double q[8]; similar(scale + m[0], angle + m[1], ox + m[2], oy + m[3], q);
+                const double score = field_score(field, gray, width, height, stride, q);
+                if (score > best_score) { best_score = score; scale += m[0]; angle += m[1]; ox += m[2]; oy += m[3]; std::copy(q, q + 8, best); improved = true; }
+            }
+        }
+        scale_step /= 2; angle_step /= 2; offset_step /= 2;
+    }
+    double corner_step = side * 0.02;
+    for (int round = 0; round < 4; ++round) {
+        for (int corner = 0; corner < 4; ++corner) for (const auto &[dx, dy] : {std::pair{1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}}) {
+            double q[8]; std::copy(best, best + 8, q);
+            q[2 * corner] += dx * corner_step; q[2 * corner + 1] += dy * corner_step;
+            const double score = field_score(field, gray, width, height, stride, q);
+            if (score > best_score) { best_score = score; std::copy(q, q + 8, best); }
+        }
+        corner_step /= 2;
+    }
+    std::copy(best, best + 8, out_quad);
+    return best_score;
+}
+
+}  // extern "C"

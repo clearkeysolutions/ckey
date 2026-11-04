@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.52"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.53"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -179,6 +179,26 @@ CKEY_API double ckey_calibration_score_text_gray8(const uint8_t *gray, size_t wi
 CKEY_API double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_t width,
                                                        size_t height, size_t stride,
                                                        const double quad_xy[8]);
+/*
+ * Full-frame localization. ckey_find_borders_gray8 finds candidate CKey
+ * border outlines (either polarity) in a whole grayscale frame and writes up
+ * to max_quads perspective quadrilaterals (8 doubles each: the frame stroke's
+ * outer edge), most border-like first; it returns the count. Pass a border to
+ * ckey_refine_quad_gray8 to fit it to one profile's canonical field using
+ * that profile's fixed keys; it returns the calibration score (negative for
+ * invalid arguments) and writes a quadrilateral suitable for the matching
+ * ckey_decode_*_gray8 call. Neither function accepts a payload.
+ */
+typedef enum ckey_field {
+    CKEY_FIELD_LOCATOR = 1,
+    CKEY_FIELD_TEXT = 2,
+    CKEY_FIELD_EXTENDED = 3
+} ckey_field;
+CKEY_API size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_t height,
+                                        size_t stride, double *out_quads, size_t max_quads);
+CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height,
+                                       size_t stride, const double border_quad[8],
+                                       ckey_field field, double out_quad[8]);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,
