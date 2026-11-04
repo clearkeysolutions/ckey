@@ -8,6 +8,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     let session = AVCaptureSession()
     @Published private(set) var status = "Starting camera…"
     @Published private(set) var decodedHex: String?
+    /// The payload as text, when it is valid UTF-8 with no control characters
+    /// other than tab and newline; nil for binary payloads (hex only).
+    @Published private(set) var decodedText: String?
     @Published private(set) var decodedProfile = ""
     @Published private(set) var decodeMilliseconds = 0.0
     @Published private(set) var detectionMilliseconds = 0.0
@@ -51,6 +54,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         frameQueue.async { self.didDecode = false }
         DispatchQueue.main.async {
             self.decodedHex = nil
+            self.decodedText = nil
             self.decodedProfile = ""
             self.status = "Looking for a CKey…"
         }
@@ -308,12 +312,22 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
+    static func readableText(_ payload: [UInt8]) -> String? {
+        guard !payload.isEmpty, let text = String(bytes: payload, encoding: .utf8) else { return nil }
+        let printable = text.unicodeScalars.allSatisfy { scalar in
+            scalar == "\n" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
+        }
+        return printable ? text : nil
+    }
+
     private func publishDecoded(_ payload: [UInt8], profile: String, detectionMilliseconds: Double,
                                 decodeMilliseconds: Double, candidates: Int) {
         didDecode = true
         let hex = payload.map { String(format: "%02x", $0) }.joined()
+        let text = CameraScanner.readableText(payload)
         DispatchQueue.main.async {
             self.decodedHex = hex
+            self.decodedText = text
             self.decodedProfile = profile
             self.detectionMilliseconds = detectionMilliseconds
             self.candidateCount = candidates

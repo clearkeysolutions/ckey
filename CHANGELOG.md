@@ -1,3 +1,8 @@
+## 0.1.0-dev.54 — 2026-11-04
+
+* **The iPhone reader shows decoded payloads as text.** A payload that is valid UTF-8 without control characters (other than tab and newline) is displayed as text. An `http`/`https` URL gets an explicit "Open host" button and never opens automatically. The hex stays underneath for checking, and binary payloads still show hex.
+* **First successful live scan:** the dev.53 reader decoded `https://citeory.com/tour` on the maintainer's iPhone.
+
 ## 0.1.0-dev.53 — 2026-11-04
 
 * **The iPhone reader started almost every decode from the wrong orientation, so P1 never scanned and P2 rarely did.** Its border detector oriented each candidate from the border's second moments (principal axes). A square outline's second moments are the same in every direction, so that fit cannot orient a square, and the angle came from pixel noise.

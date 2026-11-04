@@ -54,9 +54,26 @@ struct ReaderView: View {
                     .foregroundColor(scanner.decodedHex == nil ? Color.primary : Color.green)
                 if let hex = scanner.decodedHex {
                     Text(scanner.decodedProfile).font(.caption.weight(.semibold)).foregroundStyle(.green)
-                    Text(hex).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    if let text = scanner.decodedText {
+                        Text(text).font(.body.weight(.medium)).textSelection(.enabled)
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        if let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                           let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http", url.host != nil {
+                            Link(destination: url) {
+                                Label("Open \(url.host ?? "link")", systemImage: "safari")
+                            }
+                            .font(.callout.weight(.semibold))
+                        }
+                        Text("\(text.utf8.count) bytes · hex \(hex)")
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                            .lineLimit(2).truncationMode(.middle)
+                    } else {
+                        Text(hex).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        Text("Binary payload · \(hex.count / 2) bytes").font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text("Detection: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 } else {
