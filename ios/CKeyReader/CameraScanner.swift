@@ -157,13 +157,15 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             // Compact profiles and Profile 3 have deliberately different
             // calibration fields. Never let a strong P1/P2 score select the
             // projective transform used to sample P3 (or vice versa).
-            let compactQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
-                                               stride: stride, field: .compact)
+            let locatorQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
+                                               stride: stride, field: .locator)
+            let textQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
+                                            stride: stride, field: .text)
             let extendedQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
                                                 stride: stride, field: .extended)
             let decodeStarted = CACurrentMediaTime()
             if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                              compactQuad: compactQuad, extendedQuad: extendedQuad) {
+                                              locatorQuad: locatorQuad, textQuad: textQuad, extendedQuad: extendedQuad) {
                 publishDecoded(decoded.bytes, profile: decoded.profile,
                                detectionMilliseconds: borderDetectionMilliseconds,
                                decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
@@ -206,7 +208,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         return quad
     }
 
-    private enum CalibrationField { case compact, extended }
+    private enum CalibrationField { case locator, text, extended }
 
     private func refinedCKeyQuad(_ observed: [CGPoint], gray: UnsafePointer<UInt8>,
                                  width: Int, height: Int, stride: Int,
@@ -285,8 +287,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                   stride: Int, quad: [Double], field: CalibrationField) -> Double {
         quad.withUnsafeBufferPointer { buffer in
             switch field {
-            case .compact:
+            case .locator:
                 return ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
+            case .text:
+                return ckey_calibration_score_text_gray8(gray, width, height, stride, buffer.baseAddress)
             case .extended:
                 return ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress)
             }
@@ -294,12 +298,12 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
-                                  compactQuad: [Double], extendedQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
-        guard compactQuad.count == 8, extendedQuad.count == 8 else { return nil }
+                                  locatorQuad: [Double], textQuad: [Double], extendedQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
+        guard locatorQuad.count == 8, textQuad.count == 8, extendedQuad.count == 8 else { return nil }
         var locator = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
         var diagnostic = ckey_diagnostics()
         let locatorStatus = locator.withUnsafeMutableBufferPointer { output in
-            compactQuad.withUnsafeBufferPointer { q in
+            locatorQuad.withUnsafeBufferPointer { q in
                 ckey_decode_gray8(gray, width, height, stride, q.baseAddress, output.baseAddress, output.count, &diagnostic)
             }
         }
@@ -312,7 +316,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         var dense = [UInt8](repeating: 0, count: Int(CKEY_EXTENDED_PAYLOAD_MAX_BYTES))
         var length = 0
         let textStatus = dense.withUnsafeMutableBufferPointer { output in
-            compactQuad.withUnsafeBufferPointer { q in
+            textQuad.withUnsafeBufferPointer { q in
                 ckey_decode_text_gray8(gray, width, height, stride, q.baseAddress,
                                        output.baseAddress, output.count, &length, &diagnostic)
             }
