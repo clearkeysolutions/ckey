@@ -38,6 +38,14 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 
 See [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md) and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. The projective decoder reads clean renders of the 2,048-byte tier from about 11 px per unit (round-trip tested in CI); physical camera decode is not yet validated.
 
+## Payload conventions
+
+Payloads are bytes. [CKey Payload Conventions](spec/CKey-Payload-Conventions.md) (informative) defines how readers interpret text payloads:
+
+- Standard URI forms: `https:`, `mailto:`, `tel:`, `sms:`, `geo:`, and vCard.
+- One CKey convention, `address:`, which carries a free-text street address for the map app.
+- Safety rules: nothing happens until the user taps, and only allowlisted forms get an action.
+
 ## iPhone reader
 
 An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, locks capture to the physical wide rear camera, ranks thresholded border components, and refines each quadrilateral against the printed Grid, Ring, Ray, and finder keys before passing grayscale samples to the C ABI. Its small generated ranker only prioritizes candidates; key agreement plus Reed–Solomon and CRC remain the acceptance gate. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.

@@ -9,8 +9,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published private(set) var status = "Starting camera…"
     @Published private(set) var decodedHex: String?
     /// The payload as text, when it is valid UTF-8 with no control characters
-    /// other than tab and newline; nil for binary payloads (hex only).
+    /// other than tab, LF, and CR; nil for binary payloads (hex only).
     @Published private(set) var decodedText: String?
+    /// The tappable action a text payload offers (link, email, call, map...).
+    @Published private(set) var decodedAction: PayloadAction?
     @Published private(set) var decodedProfile = ""
     @Published private(set) var decodeMilliseconds = 0.0
     @Published private(set) var detectionMilliseconds = 0.0
@@ -55,6 +57,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         DispatchQueue.main.async {
             self.decodedHex = nil
             self.decodedText = nil
+            self.decodedAction = nil
             self.decodedProfile = ""
             self.status = "Looking for a CKey…"
         }
@@ -315,7 +318,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     static func readableText(_ payload: [UInt8]) -> String? {
         guard !payload.isEmpty, let text = String(bytes: payload, encoding: .utf8) else { return nil }
         let printable = text.unicodeScalars.allSatisfy { scalar in
-            scalar == "\n" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
+            // Tab, LF, and CR (vCards use CR LF line endings) are allowed.
+            scalar == "\n" || scalar == "\r" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
         }
         return printable ? text : nil
     }
@@ -325,9 +329,11 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         didDecode = true
         let hex = payload.map { String(format: "%02x", $0) }.joined()
         let text = CameraScanner.readableText(payload)
+        let action = text.flatMap(PayloadAction.interpret)
         DispatchQueue.main.async {
             self.decodedHex = hex
             self.decodedText = text
+            self.decodedAction = action
             self.decodedProfile = profile
             self.detectionMilliseconds = detectionMilliseconds
             self.candidateCount = candidates
