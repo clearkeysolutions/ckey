@@ -458,8 +458,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                    stride: Int, marksAreDark: Bool) -> UInt8 {
         var histogram = [Int](repeating: 0, count: 256)
         var samples = 0
-        for y in stride(from: 0, to: height, by: 8) {
-            for x in stride(from: 0, to: width, by: 8) {
+        for y in Swift.stride(from: 0, to: height, by: 8) {
+            for x in Swift.stride(from: 0, to: width, by: 8) {
                 histogram[Int(gray[y * stride + x])] += 1
                 samples += 1
             }
