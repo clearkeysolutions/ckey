@@ -1,4 +1,5 @@
 #include "ckey/ckey.h"
+#include "svg_raster.h"
 
 #include <algorithm>
 #include <array>
@@ -785,19 +786,33 @@ double class_threshold(const std::vector<double> &values) {
 // context. A context keeps the class cut unless its own two clusters are
 // clearly separated, so a one-sided context is never split spuriously.
 // `grid` maps ring * slots + slot to a site index (-1 for reserved slots).
+void refine_ring_context_rings(const std::vector<int> &grid, const std::vector<int> &ring_slots, int stride, size_t data_sites,
+                               const std::vector<uint8_t> &white, const std::vector<double> &level,
+                               double class_cut, std::vector<uint8_t> &printed);
+
 void refine_ring_context(const std::vector<int> &grid, int rings, int slots, size_t data_sites,
                          const std::vector<uint8_t> &white, const std::vector<double> &level,
                          double class_cut, std::vector<uint8_t> &printed) {
+    refine_ring_context_rings(grid, std::vector<int>(static_cast<size_t>(rings), slots), slots, data_sites, white, level, class_cut, printed);
+}
+
+// grid maps ring * stride + slot -> site index (-1 reserved); ring r has
+// ring_slots[r] slots and wraps at that count.
+void refine_ring_context_rings(const std::vector<int> &grid, const std::vector<int> &ring_slots, int stride, size_t data_sites,
+                               const std::vector<uint8_t> &white, const std::vector<double> &level,
+                               double class_cut, std::vector<uint8_t> &printed) {
+    const int rings = static_cast<int>(ring_slots.size());
     constexpr double kMinSeparation = 0.2;
     const auto value_at = [&](int ring, int slot) -> int {
-        const int index = grid[static_cast<size_t>(ring) * slots + static_cast<size_t>((slot + slots) % slots)];
+        const int slots = ring_slots[static_cast<size_t>(ring)];
+        const int index = grid[static_cast<size_t>(ring) * stride + static_cast<size_t>((slot + slots) % slots)];
         return index < 0 ? 0 : printed[static_cast<size_t>(index)];
     };
     for (int pass = 0; pass < 2; ++pass) {
         std::array<std::vector<double>, 3> by_context;
         std::vector<std::pair<size_t, int>> sites;
-        for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
-            const int index = grid[static_cast<size_t>(ring) * slots + slot];
+        for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < ring_slots[static_cast<size_t>(ring)]; ++slot) {
+            const int index = grid[static_cast<size_t>(ring) * stride + slot];
             if (index < 0 || static_cast<size_t>(index) >= data_sites) continue;
             const int context = value_at(ring, slot - 1) + value_at(ring, slot + 1);
             by_context[context].push_back(level[static_cast<size_t>(index)]);
@@ -1678,73 +1693,114 @@ constexpr size_t kScalableHeaderBytes = 8, kScalableOverheadBytes = 12;  // head
 
 struct ScalableNode { uint8_t kind; double x, y; int ring, slot; uint32_t id; };  // kind: 0 Cartesian, 1 dial, 2 ring
 
+// Layout families. 0 = standard (Format 0.27). 1 = print (Format 0.28): every
+// mark and gap is at least about one module, for small printed sizes.
+constexpr int kScalableFamilies = 2;
+constexpr std::array<int, kScalableVersions> kScalablePrintRings = {2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 7, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 24, 25, 27, 29, 32};
+
 struct ScalableLayout {
-    int version = 0, grid = 0, slots = 0, rings = 0, col0 = 0, row0 = 0;
+    int version = 0, family = 0, grid = 0, rings = 0, col0 = 0, row0 = 0;
+    int dial_slots = 0;            // dial ray slots (Ray Keys use these)
+    int ring_stride = 0;           // max ring slots (ring_grid row length)
+    std::vector<int> ring_slots;   // slots on each ring
     double pitch = 0;
+    double ring_pitch = 0, dot = 0, ray_width = 0, long_len = 0, short_len = 0, dial_sample = 0;
+    int ring_key_span = 16;
     DenseGeometry geom{};
     std::vector<ScalableNode> nodes;
     std::vector<uint8_t> white;
-    std::vector<int> ring_grid;  // ring * slots + slot -> site index, -1 reserved
+    std::vector<int> ring_grid;    // ring * ring_stride + slot -> site index, -1 reserved
     size_t codeword_bytes = 0;
-    double ring_radius(int k) const { return kScalableRingInner + 0.86 * pitch * k; }
-    int ray_key_half() const { return 3 * slots / 4; }       // 9:00, half length
-    int ray_key_three() const { return 3 * slots / 4 - 2; }  // two slots before, 3/4 length
-    int ring_key_slot() const { return slots / 4; }          // 3:00, on the outermost ring
+    uint8_t format = CKEY_SCALABLE_FORMAT_VERSION;
+    double ring_radius(int k) const { return kScalableRingInner + ring_pitch * k; }
+    int ray_key_half() const { return 3 * dial_slots / 4; }       // 9:00, half length
+    int ray_key_three() const { return 3 * dial_slots / 4 - 2; }  // two slots before, 3/4 length
+    int ring_key_slot() const { return ring_slots.back() / 4; }   // 3:00, on the outermost ring
     bool reserved_ray(int slot) const { return slot == 0 || slot == ray_key_half() || slot == ray_key_three(); }
-    // Dial and key dimensions, all proportional to the pitch.
-    double long_ray() const { return 2.2 * pitch; }
-    double short_ray() const { return 1.0 * pitch; }
+    double long_ray() const { return long_len; }
+    double short_ray() const { return short_len; }
     double key_ray() const { return 3.4 * pitch; }
+    // Ring Key on the outermost ring, in slots relative to ring_key_slot():
+    // standard 16-slot pattern (dots 0, 2, 6; run 7.5..15.5), print 8-slot
+    // pattern (dots 0, 2; run 3.5..7.5).
+    std::vector<int> ring_key_dots() const { return family == 0 ? std::vector<int>{0, 2, 6} : std::vector<int>{0, 2}; }
+    std::pair<double, double> ring_key_run() const { return family == 0 ? std::pair{7.5, 15.5} : std::pair{3.5, 7.5}; }
+    std::vector<double> ring_key_marks() const { return family == 0 ? std::vector<double>{0, 2, 6, 11.5} : std::vector<double>{0, 2, 5.5}; }
+    std::vector<double> ring_key_empties() const { return family == 0 ? std::vector<double>{4} : std::vector<double>{1, 3}; }
 };
 
-DenseGeometry scalable_geometry(int col0, int row0, double p, int slots) {
+DenseGeometry scalable_geometry(int col0, int row0, double p, int slots, double ray_ink_outer) {
     const double a = kTau * (3.0 * slots / 4.0 - 2.0) / slots;
     const double clear = std::max(0.375, p);
     return {14.5, 14.0, 3.5, 0.325, clear,
             4.0, 2.3, 0.4, clear, 29.0,
             col0 * p + 0.16 * p, row0 * p + 0.16 * p, (col0 + 2) * p - 0.16 * p, (row0 + 2) * p - 0.16 * p, p,
-            kCenter, kScalableDialInner + 2.2 * p + 0.1 * p, p,
+            kCenter, ray_ink_outer, p,
             kScalableDialInner, 3.4 * p, 0.22 * p,
             {{0.0, -1.0}, {-1.0, 0.0}, {std::sin(a), -std::cos(a)}},
             {1.0, 0.5, 0.75},
             0.34 * p};
 }
 
-std::unique_ptr<ScalableLayout> build_scalable_layout(int v) {
+// Equal-arc slot count: the largest multiple of 8 whose arc spacing at
+// radius r is at least one module (print family).
+int equal_arc_slots(double r, double p) { return 8 * static_cast<int>(std::floor(kTau * r / (8.0 * p))); }
+
+std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int family) {
     auto L = std::make_unique<ScalableLayout>();
     const size_t i = static_cast<size_t>(v - 1);
-    L->version = v; L->grid = kScalableGrid[i]; L->slots = kScalableSlots[i]; L->rings = kScalableRings[i];
+    L->version = v; L->family = family; L->grid = kScalableGrid[i];
     L->col0 = kScalableGridCol[i]; L->row0 = kScalableGridRow[i]; L->pitch = 29.0 / L->grid;
-    L->geom = scalable_geometry(L->col0, L->row0, L->pitch, L->slots);
     const double p = L->pitch;
+    if (family == 0) {
+        L->rings = kScalableRings[i]; L->dial_slots = kScalableSlots[i];
+        L->ring_slots.assign(static_cast<size_t>(L->rings), L->dial_slots);
+        L->ring_pitch = 0.86 * p; L->dot = 0.2 * p; L->ray_width = 0.2 * p; L->long_len = 2.2 * p; L->short_len = 1.0 * p;
+        L->dial_sample = 1.6 * p; L->ring_key_span = 16; L->format = CKEY_SCALABLE_FORMAT_VERSION;
+    } else {
+        L->rings = kScalablePrintRings[i]; L->ring_pitch = 1.0 * p;
+        L->dial_slots = equal_arc_slots(kScalableDialInner, p);
+        for (int k = 0; k < L->rings; ++k) L->ring_slots.push_back(equal_arc_slots(L->ring_radius(k), p));
+        L->dot = 0.3 * p; L->ray_width = 0.35 * p; L->long_len = 2.4 * p; L->short_len = 1.0 * p;
+        L->dial_sample = 1.7 * p; L->ring_key_span = 8; L->format = CKEY_SCALABLE_PRINT_FORMAT_VERSION;
+        if (v == 1) L->row0 = 9;  // its longer rays need the v1 Grid Key one row higher for a pitch of clearance
+    }
+    L->ring_stride = *std::max_element(L->ring_slots.begin(), L->ring_slots.end());
+    L->geom = scalable_geometry(L->col0, L->row0, p, L->dial_slots, kScalableDialInner + L->long_len + L->ray_width / 2);
     for (int row = 0; row < L->grid; ++row) for (int col = 0; col < L->grid; ++col) {
         const double x = (col + .5) * p, y = (row + .5) * p;
         if (dense_site_margin(L->geom, x, y) <= 0.0) continue;
         L->nodes.push_back({0, x, y, -1, -1, site_identity(0, static_cast<uint32_t>(row), static_cast<uint32_t>(col))});
     }
-    for (int slot = 0; slot < L->slots; ++slot)
+    for (int slot = 0; slot < L->dial_slots; ++slot)
         if (!L->reserved_ray(slot)) L->nodes.push_back({1, 0, 0, -1, slot, site_identity(1, 0, static_cast<uint32_t>(slot))});
     const int key = L->ring_key_slot();
-    for (int ring = 0; ring < L->rings; ++ring) for (int slot = 0; slot < L->slots; ++slot) {
-        if (L->reserved_ray(slot) || (ring == L->rings - 1 && slot >= key && slot <= key + 15)) continue;
-        const double r = L->ring_radius(ring), a = kTau * slot / L->slots;
-        L->nodes.push_back({2, kCenter + r * std::sin(a), kCenter - r * std::cos(a), ring, slot,
-                            site_identity(2, static_cast<uint32_t>(ring), static_cast<uint32_t>(slot))});
+    for (int ring = 0; ring < L->rings; ++ring) {
+        const int S = L->ring_slots[static_cast<size_t>(ring)];
+        for (int slot = 0; slot < S; ++slot) {
+            // Standard family: ring slots are also cleared on the Ray Key bearings (inherited from Profile 2).
+            if ((family == 0 && L->reserved_ray(slot)) || (ring == L->rings - 1 && slot >= key && slot < key + L->ring_key_span)) continue;
+            const double r = L->ring_radius(ring), a = kTau * slot / S;
+            L->nodes.push_back({2, kCenter + r * std::sin(a), kCenter - r * std::cos(a), ring, slot,
+                                site_identity(2, static_cast<uint32_t>(ring), static_cast<uint32_t>(slot))});
+        }
     }
-    order_sites(L->nodes, site_hash(0x434b5030u ^ static_cast<uint32_t>(v)));  // "CKP0" keyed by version
-    L->white = whitening_bits(0x434b5730u + static_cast<uint32_t>(v), L->nodes.size());
+    const uint32_t placement = family == 0 ? 0x434b5030u : 0x434b5031u;  // "CKP0" / "CKP1"
+    const uint32_t whitening = family == 0 ? 0x434b5730u : 0x434b5731u;  // "CKW0" / "CKW1"
+    order_sites(L->nodes, site_hash(placement ^ static_cast<uint32_t>(v)));
+    L->white = whitening_bits(whitening + static_cast<uint32_t>(v), L->nodes.size());
     L->codeword_bytes = L->nodes.size() / 8;
-    L->ring_grid.assign(static_cast<size_t>(L->rings) * L->slots, -1);
+    L->ring_grid.assign(static_cast<size_t>(L->rings) * L->ring_stride, -1);
     for (size_t n = 0; n < L->nodes.size(); ++n)
-        if (L->nodes[n].kind == 2) L->ring_grid[static_cast<size_t>(L->nodes[n].ring) * L->slots + L->nodes[n].slot] = static_cast<int>(n);
+        if (L->nodes[n].kind == 2) L->ring_grid[static_cast<size_t>(L->nodes[n].ring) * L->ring_stride + L->nodes[n].slot] = static_cast<int>(n);
     return L;
 }
 
-const ScalableLayout &scalable_layout(int v) {
-    static std::array<std::once_flag, kScalableVersions> once;
-    static std::array<std::unique_ptr<ScalableLayout>, kScalableVersions> cache;
-    const size_t i = static_cast<size_t>(v - 1);
-    std::call_once(once[i], [&] { cache[i] = build_scalable_layout(v); });
+const ScalableLayout &scalable_layout(int v, int family = 0) {
+    static std::array<std::once_flag, kScalableVersions * kScalableFamilies> once;
+    static std::array<std::unique_ptr<ScalableLayout>, kScalableVersions * kScalableFamilies> cache;
+    const size_t i = static_cast<size_t>(family * kScalableVersions + v - 1);
+    std::call_once(once[i], [&] { cache[i] = build_scalable_layout(v, family); });
     return *cache[i];
 }
 
@@ -1767,9 +1823,9 @@ size_t scalable_data_bytes(size_t codeword_bytes, int level) {
     size_t k = 0; for (const auto &b : scalable_blocks(codeword_bytes, level)) k += b.k; return k;
 }
 
-size_t scalable_capacity(int v, int level) {
-    if (v < 1 || v > kScalableVersions || level < 0 || level > 3) return 0;
-    const size_t k = scalable_data_bytes(scalable_layout(v).codeword_bytes, level);
+size_t scalable_capacity(int v, int level, int family = 0) {
+    if (v < 1 || v > kScalableVersions || level < 0 || level > 3 || family < 0 || family >= kScalableFamilies) return 0;
+    const size_t k = scalable_data_bytes(scalable_layout(v, family).codeword_bytes, level);
     return k > kScalableOverheadBytes ? std::min<size_t>(k - kScalableOverheadBytes, 65535) : 0;
 }
 
@@ -1820,18 +1876,18 @@ KeyFit scalable_skeleton_fit(const uint8_t *gray, size_t width, size_t height, s
 // Grid Key on the payload lattice, the Ring Key's dot/gap/run pattern on the
 // outermost ring, and the three Ray Keys. A wrong version misses them.
 KeyFit scalable_version_fit(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
-    const double p = L.pitch, rk = L.ring_radius(L.rings - 1), S = L.slots;
+    const double p = L.pitch, rk = L.ring_radius(L.rings - 1), S = L.ring_slots.back(), D = L.dial_slots, ds = 0.25 * L.dot;
     std::vector<double> marks, empty;
     for (int r = 0; r < 2; ++r) for (int c = 0; c < 2; ++c)
         marks.push_back(gray_sample(gray, width, height, stride, h, (L.col0 + c + .5) * p, (L.row0 + r + .5) * p, 0.12 * p));
     const int k = L.ring_key_slot();
-    for (double slot : {k + 0.0, k + 2.0, k + 6.0, k + 11.5}) marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, slot, S, 0.05 * p));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 3.0 * p, 0, S, 0.04 * p));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 1.3 * p, L.ray_key_half(), S, 0.04 * p));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.3 * p, L.ray_key_three(), S, 0.04 * p));
+    for (double slot : L.ring_key_marks()) marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
+    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 3.0 * p, 0, D, 0.04 * p));
+    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 1.3 * p, L.ray_key_half(), D, 0.04 * p));
+    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.3 * p, L.ray_key_three(), D, 0.04 * p));
     empty.push_back(gray_sample(gray, width, height, stride, h, (L.col0 - 1 + .5) * p, (L.row0 + .5) * p, 0.12 * p));
-    empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + 4.0, S, 0.05 * p));
-    empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.6 * p, L.ray_key_half(), S, 0.04 * p));
+    for (double slot : L.ring_key_empties()) empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
+    empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.6 * p, L.ray_key_half(), D, 0.04 * p));
     return sample_fit(marks, empty);
 }
 
@@ -1897,12 +1953,13 @@ double scalable_version_score(const ScalableLayout &L, const uint8_t *gray, size
     return best;
 }
 
-int best_scalable_version(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double &score) {
-    int best_v = 0; score = 0;
-    for (int v = 1; v <= kScalableVersions; ++v) {
-        const double s = scalable_version_score(scalable_layout(v), gray, width, height, stride, quad);
-        if (s > score) { score = s; best_v = v; }
+int best_scalable_version(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double &score, int *family = nullptr) {
+    int best_v = 0, best_f = 0; score = 0;
+    for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
+        const double s = scalable_version_score(scalable_layout(v, f), gray, width, height, stride, quad);
+        if (s > score) { score = s; best_v = v; best_f = f; }
     }
+    if (family) *family = best_f;
     return best_v;
 }
 
@@ -1916,25 +1973,27 @@ uint32_t ckey_scalable_modules_across(uint32_t version) {
     return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT ? static_cast<uint32_t>(kScalableGrid[version - 1]) : 0u;
 }
 
-size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level) {
-    return scalable_capacity(static_cast<int>(version), static_cast<int>(level));
+size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level, ckey_scalable_layout layout) {
+    return scalable_capacity(static_cast<int>(version), static_cast<int>(level), static_cast<int>(layout));
 }
 
 ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uint32_t version, ckey_ecc_level level,
-                                 ckey_scalable_symbol *out, ckey_diagnostics *diag) {
-    if ((!payload && payload_len) || !out || static_cast<int>(level) < 0 || static_cast<int>(level) > 3 || version > CKEY_SCALABLE_VERSION_COUNT) {
+                                 ckey_scalable_layout layout, ckey_scalable_symbol *out, ckey_diagnostics *diag) {
+    const int family = static_cast<int>(layout);
+    if ((!payload && payload_len) || !out || static_cast<int>(level) < 0 || static_cast<int>(level) > 3 || version > CKEY_SCALABLE_VERSION_COUNT ||
+        family < 0 || family >= kScalableFamilies) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 payload, version, level, or output"); return CKEY_INVALID_ARGUMENT;
     }
     int v = static_cast<int>(version);
-    if (v == 0) { for (v = 1; v <= kScalableVersions && scalable_capacity(v, level) < payload_len; ++v) {} }
-    if (v > kScalableVersions || scalable_capacity(v, level) < payload_len) {
+    if (v == 0) { for (v = 1; v <= kScalableVersions && scalable_capacity(v, level, family) < payload_len; ++v) {} }
+    if (v > kScalableVersions || scalable_capacity(v, level, family) < payload_len) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "payload exceeds the selected Profile 0 version and level"); return CKEY_INVALID_ARGUMENT;
     }
-    const ScalableLayout &L = scalable_layout(v);
+    const ScalableLayout &L = scalable_layout(v, family);
     if (L.codeword_bytes > CKEY_SCALABLE_MAX_CODEWORD_BYTES) { set_status(diag, CKEY_INTERNAL_ERROR, "Profile 0 layout exceeds codeword storage"); return CKEY_INTERNAL_ERROR; }
     const auto blocks = scalable_blocks(L.codeword_bytes, level);
     std::vector<uint8_t> framed(scalable_data_bytes(L.codeword_bytes, level), 0);
-    framed[0] = 0xc7; framed[1] = 0x4b; framed[2] = CKEY_SCALABLE_FORMAT_VERSION; framed[3] = 0;
+    framed[0] = 0xc7; framed[1] = 0x4b; framed[2] = L.format; framed[3] = 0;
     framed[4] = static_cast<uint8_t>(v); framed[5] = static_cast<uint8_t>(level);
     framed[6] = static_cast<uint8_t>(payload_len >> 8); framed[7] = static_cast<uint8_t>(payload_len);
     if (payload_len) std::memcpy(framed.data() + kScalableHeaderBytes, payload, payload_len);
@@ -1950,21 +2009,23 @@ ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uin
     }
     std::memset(out, 0, sizeof(*out));
     out->abi_version = CKEY_ABI_VERSION; out->version = static_cast<uint32_t>(v); out->ecc_level = static_cast<uint32_t>(level);
+    out->layout = static_cast<uint32_t>(family);
     out->payload_length = static_cast<uint32_t>(payload_len); out->codeword_length = static_cast<uint32_t>(L.codeword_bytes);
     // Byte-interleave the blocks so local damage spreads across all of them.
     size_t pos = 0;
     for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) out->codeword[pos++] = coded[b][j];
-    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0 v%d level %c; %zu RS blocks", v, "LMQH"[level], blocks.size());
+    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0%s v%d level %c; %zu RS blocks", family ? ".1 (print)" : "", v, "LMQH"[level], blocks.size());
     set_status(diag, CKEY_OK, message);
     return CKEY_OK;
 }
 
-ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, uint32_t version, uint8_t *out_payload,
-                                 size_t out_capacity, size_t *out_payload_len, ckey_diagnostics *diag) {
-    if (!codeword || !out_payload_len || version < 1 || version > CKEY_SCALABLE_VERSION_COUNT) {
-        set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 codeword or version"); return CKEY_INVALID_ARGUMENT;
+ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, uint32_t version, ckey_scalable_layout layout,
+                                 uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, ckey_diagnostics *diag) {
+    const int family = static_cast<int>(layout);
+    if (!codeword || !out_payload_len || version < 1 || version > CKEY_SCALABLE_VERSION_COUNT || family < 0 || family >= kScalableFamilies) {
+        set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 codeword, version, or layout"); return CKEY_INVALID_ARGUMENT;
     }
-    const ScalableLayout &L = scalable_layout(static_cast<int>(version));
+    const ScalableLayout &L = scalable_layout(static_cast<int>(version), family);
     if (codeword_len != L.codeword_bytes) { set_status(diag, CKEY_INVALID_ARGUMENT, "codeword length does not match the Profile 0 version"); return CKEY_INVALID_ARGUMENT; }
     for (int level = 0; level < 4; ++level) {
         const auto blocks = scalable_blocks(L.codeword_bytes, level);
@@ -1980,7 +2041,7 @@ ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, u
             framed.insert(framed.end(), work[b].begin(), work[b].begin() + static_cast<std::ptrdiff_t>(blocks[b].k));
         }
         if (!ok || framed.size() < kScalableOverheadBytes) continue;
-        if (framed[0] != 0xc7 || framed[1] != 0x4b || framed[2] != CKEY_SCALABLE_FORMAT_VERSION || framed[3] != 0 ||
+        if (framed[0] != 0xc7 || framed[1] != 0x4b || framed[2] != L.format || framed[3] != 0 ||
             framed[4] != version || framed[5] != level) continue;
         const size_t length = (static_cast<size_t>(framed[6]) << 8) | framed[7];
         if (kScalableOverheadBytes + length > framed.size()) continue;
@@ -1990,7 +2051,7 @@ ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, u
         if (out_capacity < length || (!out_payload && length)) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 payload exceeds output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
         if (length) std::memcpy(out_payload, framed.data() + kScalableHeaderBytes, length);
         *out_payload_len = length;
-        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0 v%u level %c", version, "LMQH"[level]);
+        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0%s v%u level %c", family ? ".1 (print)" : "", version, "LMQH"[level]);
         set_status(diag, CKEY_OK, message); if (diag) diag->corrected_symbols = corrections;
         return CKEY_OK;
     }
@@ -2007,31 +2068,31 @@ double ckey_calibration_score_scalable_gray8(const uint8_t *gray, size_t width, 
 
 ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
                                        uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, uint32_t *out_version,
-                                       ckey_diagnostics *diag) {
+                                       uint32_t *out_layout, ckey_diagnostics *diag) {
     if (!out_payload || !out_payload_len || !valid_image_args(gray, width, height, stride, quad_xy)) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT;
     }
     // 1. The skeleton gates orientation. 2. Each version's keys are tested at
     //    that orientation; only agreeing versions are fully sampled, best
     //    first. 3. RS, the frame's version byte, and CRC-32C decide.
-    struct Attempt { double score; int version; double h[8]; };
+    struct Attempt { double score; int version, family; double h[8]; };
     std::vector<Attempt> attempts;
     for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
         double h[8]; bool ok; orientation_homography(quad_xy, reverse, start, h, ok); if (!ok) continue;
         const KeyFit skeleton = scalable_skeleton_fit(gray, width, height, stride, h);
         if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < 14.0) continue;
-        for (int v = 1; v <= kScalableVersions; ++v) {
-            const KeyFit keys = scalable_version_fit(scalable_layout(v), gray, width, height, stride, h);
+        for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
+            const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
             if (!keys.valid || keys.evidence < 0.85) continue;
-            Attempt a{keys.contrast * keys.evidence * keys.evidence, v, {}}; std::copy(h, h + 8, a.h);
+            Attempt a{keys.contrast * keys.evidence * keys.evidence, v, f, {}}; std::copy(h, h + 8, a.h);
             attempts.push_back(a);
         }
     }
     std::sort(attempts.begin(), attempts.end(), [](const Attempt &a, const Attempt &b) { return a.score > b.score; });
-    if (attempts.size() > 6) attempts.resize(6);
+    if (attempts.size() > 8) attempts.resize(8);
     std::vector<uint8_t> candidate(65535);
     for (const auto &attempt : attempts) {
-        const ScalableLayout &L = scalable_layout(attempt.version); const double *h = attempt.h; const double p = L.pitch;
+        const ScalableLayout &L = scalable_layout(attempt.version, attempt.family); const double *h = attempt.h; const double p = L.pitch;
         // References: the Grid Key (printed) and two never-printed points.
         std::vector<double> marks, empties;
         for (int r = 0; r < 2; ++r) for (int c = 0; c < 2; ++c)
@@ -2047,8 +2108,8 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         for (size_t i = 0; i < bits && usable; ++i) {
             const auto &n = L.nodes[i];
             const double v = n.kind == 0 ? gray_sample(gray, width, height, stride, h, n.x, n.y, 0.12 * p)
-                           : n.kind == 1 ? polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 1.6 * p, n.slot, L.slots, 0.04 * p)
-                                         : gray_sample(gray, width, height, stride, h, n.x, n.y, 0.05 * p);
+                           : n.kind == 1 ? polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + L.dial_sample, n.slot, L.dial_slots, 0.04 * p)
+                                         : gray_sample(gray, width, height, stride, h, n.x, n.y, 0.25 * L.dot);
             if (v < 0) { usable = false; break; }
             level[i] = (v - empty_mean) / (mark_mean - empty_mean);
             classes[n.kind].push_back(level[i]);
@@ -2057,14 +2118,16 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         const std::array<double, 3> cut = {class_threshold(classes[0]), class_threshold(classes[1]), class_threshold(classes[2])};
         std::vector<uint8_t> printed(L.nodes.size());
         for (size_t i = 0; i < L.nodes.size(); ++i) printed[i] = i < bits ? (level[i] > cut[L.nodes[i].kind]) : L.white[i];
-        refine_ring_context(L.ring_grid, L.rings, L.slots, bits, L.white, level, cut[2], printed);
+        refine_ring_context_rings(L.ring_grid, L.ring_slots, L.ring_stride, bits, L.white, level, cut[2], printed);
         std::vector<uint8_t> cw(L.codeword_bytes, 0);
         for (size_t i = 0; i < bits; ++i) if ((printed[i] != 0) != (L.white[i] != 0)) cw[i / 8] |= static_cast<uint8_t>(1u << (7 - i % 8));
         size_t length = 0; ckey_diagnostics local{};
-        if (ckey_decode_scalable(cw.data(), cw.size(), static_cast<uint32_t>(attempt.version), candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
+        if (ckey_decode_scalable(cw.data(), cw.size(), static_cast<uint32_t>(attempt.version), static_cast<ckey_scalable_layout>(attempt.family),
+                                 candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
         if (out_capacity < length) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 output buffer is too small"); return CKEY_INSUFFICIENT_BUFFER; }
         std::memcpy(out_payload, candidate.data(), length); *out_payload_len = length;
         if (out_version) *out_version = static_cast<uint32_t>(attempt.version);
+        if (out_layout) *out_layout = static_cast<uint32_t>(attempt.family);
         set_status(diag, CKEY_OK, local.message); if (diag) diag->corrected_symbols = local.corrected_symbols;
         return CKEY_OK;
     }
@@ -2100,9 +2163,9 @@ std::string xml_escape(const char *text) {
 }
 
 // The empty centre (inside ring 0's ink) holds a logo without hiding marks.
-double logo_quiet_radius(const ScalableLayout &L) { return kScalableRingInner - 0.2 * L.pitch - 0.15; }
+double logo_quiet_radius(const ScalableLayout &L) { return kScalableRingInner - L.dot - 0.15; }
 // Keep the outermost ring (which carries the Ring Key) fully visible.
-double logo_max_radius(const ScalableLayout &L) { return L.ring_radius(L.rings - 1) - 0.2 * L.pitch - 0.25; }
+double logo_max_radius(const ScalableLayout &L) { return L.ring_radius(L.rings - 1) - L.dot - 0.25; }
 
 double logo_load(const ScalableLayout &L, int level, double radius) {
     if (radius <= logo_quiet_radius(L)) return 0.0;
@@ -2113,7 +2176,7 @@ double logo_load(const ScalableLayout &L, int level, double radius) {
     for (size_t i = 0; i < L.codeword_bytes * 8; ++i) {
         const auto &n = L.nodes[i];
         if (n.kind != 2) continue;  // only ring marks can lie under an allowed logo
-        if (std::hypot(n.x - kCenter, n.y - kCenter) - 0.2 * L.pitch <= radius + 0.05) hidden[i / 8] = 1;
+        if (std::hypot(n.x - kCenter, n.y - kCenter) - L.dot <= radius + 0.05) hidden[i / 8] = 1;
     }
     std::vector<size_t> per_block(blocks.size(), 0);
     for (size_t byte = 0; byte < hidden.size(); ++byte) per_block[block_of[byte]] += hidden[byte];
@@ -2194,21 +2257,22 @@ void ckey_style_default(ckey_style *st) {
     st->modules = CKEY_MODULE_ROUNDED; st->rings = CKEY_RING_JOINED; st->rays = CKEY_RAY_ROUND;
 }
 
-double ckey_scalable_logo_max_radius(uint32_t version) {
-    return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT ? logo_max_radius(scalable_layout(static_cast<int>(version))) : -1.0;
+double ckey_scalable_logo_max_radius(uint32_t version, ckey_scalable_layout layout) {
+    return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT && static_cast<int>(layout) >= 0 && static_cast<int>(layout) < kScalableFamilies
+        ? logo_max_radius(scalable_layout(static_cast<int>(version), static_cast<int>(layout))) : -1.0;
 }
 
 double ckey_scalable_logo_load(const ckey_scalable_symbol *s, double radius) {
-    if (!s || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || !std::isfinite(radius) || radius < 0) return -1.0;
-    return logo_load(scalable_layout(static_cast<int>(s->version)), static_cast<int>(s->ecc_level), radius);
+    if (!s || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || s->layout >= kScalableFamilies || !std::isfinite(radius) || radius < 0) return -1.0;
+    return logo_load(scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout)), static_cast<int>(s->ecc_level), radius);
 }
 
 ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_style *st, ckey_diagnostics *diag) {
-    if (!s || !st || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3) {
+    if (!s || !st || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || s->layout >= kScalableFamilies) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "style check needs a Profile 0 symbol and a style"); return CKEY_INVALID_ARGUMENT;
     }
     double contrast = 0, load = 0;
-    const std::string problem = check_style(scalable_layout(static_cast<int>(s->version)), *s, *st, contrast, load);
+    const std::string problem = check_style(scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout)), *s, *st, contrast, load);
     if (!problem.empty()) { set_status(diag, CKEY_INVALID_ARGUMENT, problem.c_str()); return CKEY_INVALID_ARGUMENT; }
     char message[96]; std::snprintf(message, sizeof(message), "style OK: contrast >= %.1f:1; logo uses %.0f%% of block correction", contrast, 100 * load);
     set_status(diag, CKEY_OK, message);
@@ -2223,19 +2287,19 @@ ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *s, uint32_t sca
 ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const ckey_style *st, uint32_t scale,
                                             char *out, size_t cap, size_t *required) {
     if (!s || !st || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
-        s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT) return CKEY_INVALID_ARGUMENT;
-    const ScalableLayout &L = scalable_layout(static_cast<int>(s->version));
+        s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->layout >= kScalableFamilies) return CKEY_INVALID_ARGUMENT;
+    const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
     double contrast = 0, load = 0;
     if (!check_style(L, *s, *st, contrast, load).empty()) return CKEY_INVALID_ARGUMENT;
-    const double p = L.pitch, dot = 0.2 * p;
+    const double p = L.pitch, dot = L.dot;
     const std::string dot_stroke = fixed4(2 * dot), cap_style = st->rays == CKEY_RAY_FLAT ? "butt" : "round";
     const bool sheen = !same_colour(st->ink, st->ink_shade), vignette = !same_colour(st->background, st->background_edge);
     const bool depth = st->bevel > 0 || st->shadow > 0;
     const std::string ink = sheen ? "url(#ckey-ink)" : hex_colour(st->ink);
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);
-    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0 version " << s->version << "\">";
+    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0" << (L.family ? ".1" : "") << " version " << s->version << "\">";
     // ---- Materials ----
     if (sheen || vignette || depth || st->texture > 0 || (st->logo_href && *st->logo_href)) {
         o << "<defs>";
@@ -2270,42 +2334,43 @@ ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const
     for (int r = 0; r < 2; ++r) for (int cc = 0; cc < 2; ++cc) emit_module(o, (L.col0 + cc + .5) * p, (L.row0 + r + .5) * p, p, st->modules, "");
     o << "</g><g class=\"ckey-polar-keys\">";
     for (const auto &[slot, fraction] : {std::pair{0, 1.0}, std::pair{L.ray_key_half(), 0.5}, std::pair{L.ray_key_three(), 0.75}}) {
-        const double a = kTau * slot / L.slots, r0 = kScalableDialInner, r1 = r0 + L.key_ray() * fraction;
+        const double a = kTau * slot / L.dial_slots, r0 = kScalableDialInner, r1 = r0 + L.key_ray() * fraction;
         o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
           << "\" fill=\"none\" stroke-width=\"" << 0.44 * p << "\" stroke-linecap=\"" << cap_style << "\"/>";
     }
     // The Ring Key keeps its dot/gap/run pattern in every style: it is a key.
-    const double rk = L.ring_radius(L.rings - 1); const int k = L.ring_key_slot();
-    for (int slot : {k, k + 2, k + 6}) { const double a = kTau * slot / L.slots; svg_circle(o, kCenter + rk * std::sin(a), kCenter - rk * std::cos(a), dot); }
-    svg_ring_run(o, kCenter, rk, k + 7.5, k + 15.5, L.slots, dot, dot_stroke.c_str());
+    const double rk = L.ring_radius(L.rings - 1); const int k = L.ring_key_slot(); const double SK = L.ring_slots.back();
+    for (int slot : L.ring_key_dots()) { const double a = kTau * (k + slot) / SK; svg_circle(o, kCenter + rk * std::sin(a), kCenter - rk * std::cos(a), dot); }
+    svg_ring_run(o, kCenter, rk, k + L.ring_key_run().first, k + L.ring_key_run().second, SK, dot, dot_stroke.c_str());
     o << "</g><g class=\"ckey-data-polar\">";
-    std::vector<uint8_t> ring_bits(static_cast<size_t>(L.rings) * L.slots, 0);
-    std::vector<int> ring_accent(static_cast<size_t>(L.rings) * L.slots, -1);
+    const size_t stride = static_cast<size_t>(L.ring_stride);
+    std::vector<uint8_t> ring_bits(static_cast<size_t>(L.rings) * stride, 0);
+    std::vector<int> ring_accent(static_cast<size_t>(L.rings) * stride, -1);
     for (size_t i = 0; i < L.nodes.size(); ++i) {
         const auto &n = L.nodes[i]; const bool bit = scalable_site_value(L, s, i);
         const int accent = accent_of(n.id, *st);
         if (n.kind == 0) { if (bit) emit_module(c, n.x, n.y, p, st->modules, accent >= 0 ? hex_colour(st->accents[accent]) : ""); }
         else if (n.kind == 1) {
-            const double a = kTau * n.slot / L.slots, r0 = kScalableDialInner, r1 = r0 + (bit ? L.long_ray() : L.short_ray());
+            const double a = kTau * n.slot / L.dial_slots, r0 = kScalableDialInner, r1 = r0 + (bit ? L.long_ray() : L.short_ray());
             o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
-              << "\" fill=\"none\" stroke-width=\"" << 0.2 * p << "\" stroke-linecap=\"" << cap_style << "\"/>";
-        } else { ring_bits[static_cast<size_t>(n.ring) * L.slots + n.slot] = bit; ring_accent[static_cast<size_t>(n.ring) * L.slots + n.slot] = accent; }
+              << "\" fill=\"none\" stroke-width=\"" << L.ray_width << "\" stroke-linecap=\"" << cap_style << "\"/>";
+        } else { ring_bits[static_cast<size_t>(n.ring) * stride + n.slot] = bit; ring_accent[static_cast<size_t>(n.ring) * stride + n.slot] = accent; }
     }
     for (int ring = 0; ring < L.rings; ++ring) {
-        const double radius = L.ring_radius(ring);
-        for (int slot = 0; slot < L.slots;) {
-            const size_t at = static_cast<size_t>(ring) * L.slots + slot;
+        const double radius = L.ring_radius(ring); const int S = L.ring_slots[static_cast<size_t>(ring)];
+        for (int slot = 0; slot < S;) {
+            const size_t at = static_cast<size_t>(ring) * stride + slot;
             if (!ring_bits[at]) { ++slot; continue; }
             int end = slot + 1;
-            if (st->rings == CKEY_RING_JOINED) while (end < L.slots && ring_bits[static_cast<size_t>(ring) * L.slots + end]) ++end;
+            if (st->rings == CKEY_RING_JOINED) while (end < S && ring_bits[static_cast<size_t>(ring) * stride + end]) ++end;
             const int accent = ring_accent[at];
             const std::string colour = accent >= 0 ? hex_colour(st->accents[accent]) : "";
             if (end - slot == 1) {
-                const double a = kTau * slot / L.slots;
+                const double a = kTau * slot / S;
                 o << "<circle cx=\"" << kCenter + radius * std::sin(a) << "\" cy=\"" << kCenter - radius * std::cos(a) << "\" r=\"" << dot << "\" stroke=\"none\""
                   << (colour.empty() ? "" : " fill=\"" + colour + "\"") << "/>";
-            } else if (colour.empty()) svg_ring_run(o, kCenter, radius, slot - .5, end - .5, L.slots, dot, dot_stroke.c_str());
-            else { o << "<g stroke=\"" << colour << "\">"; svg_ring_run(o, kCenter, radius, slot - .5, end - .5, L.slots, dot, dot_stroke.c_str()); o << "</g>"; }
+            } else if (colour.empty()) svg_ring_run(o, kCenter, radius, slot - .5, end - .5, S, dot, dot_stroke.c_str());
+            else { o << "<g stroke=\"" << colour << "\">"; svg_ring_run(o, kCenter, radius, slot - .5, end - .5, S, dot, dot_stroke.c_str()); o << "</g>"; }
             slot = end;
         }
     }
@@ -2609,10 +2674,10 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
         // keys fit best and fine-tune against them. They sit at the version's
         // own module and slot pitch, so they pin the scale far more tightly
         // than the frame and finders can at high densities.
-        double version_score = 0;
-        const int v = best_scalable_version(gray, width, height, stride, best, version_score);
+        double version_score = 0; int family = 0;
+        const int v = best_scalable_version(gray, width, height, stride, best, version_score, &family);
         if (v > 0) {
-            const ScalableLayout &L = scalable_layout(v);
+            const ScalableLayout &L = scalable_layout(v, family);
             const double pitch_px = side / L.grid;
             double score = scalable_version_score(L, gray, width, height, stride, best);
             for (double step = pitch_px * 0.5; step > pitch_px * 0.02; step /= 2) {
@@ -2632,6 +2697,25 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
     }
     std::copy(best, best + 8, out_quad);
     return best_score;
+}
+
+ckey_status ckey_render_scalable_print(const ckey_scalable_symbol *s, const ckey_style *style, double width_in, double dpi,
+                                       uint8_t *out, size_t cap, size_t *out_side) {
+    if (!s || !out_side || !std::isfinite(width_in) || !std::isfinite(dpi) || width_in <= 0 || dpi < 72 || dpi > 4800 || width_in * dpi > 20000)
+        return CKEY_INVALID_ARGUMENT;
+    ckey_style st; ckey_style_default(&st);
+    if (style) { st.modules = style->modules; st.rings = style->rings; st.rays = style->rays; }  // shapes only
+    size_t needed = 0;
+    if (ckey_render_scalable_styled_svg(s, &st, 8, nullptr, 0, &needed) != CKEY_INSUFFICIENT_BUFFER) return CKEY_INVALID_ARGUMENT;
+    const int side = std::max(16, static_cast<int>(std::lround(width_in * dpi)));
+    *out_side = static_cast<size_t>(side);
+    if (!out || cap < static_cast<size_t>(side) * side) return CKEY_INSUFFICIENT_BUFFER;
+    std::string svg(needed, '\0');
+    if (ckey_render_scalable_styled_svg(s, &st, 8, svg.data(), needed, &needed) != CKEY_OK) return CKEY_INTERNAL_ERROR;
+    svg.resize(needed - 1);
+    const auto cover = svgtest::rasterize(svgtest::parse(svg), side, side, 3, 0, 255);
+    for (size_t i = 0; i < cover.size(); ++i) out[i] = cover[i] >= 128 ? 0 : 255;
+    return CKEY_OK;
 }
 
 }  // extern "C"

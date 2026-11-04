@@ -1,4 +1,6 @@
-// Minimal rasterizer for the SVG subset emitted by CKey's renderers: <g>
+// Reference rasterizer (header-only, no dependencies) for the SVG subset
+// emitted by CKey's renderers. Used by the tests and by the CLI's print
+// sheets, so both rasterize exactly what the renderer emits: <g>
 // with translate/scale transforms and inherited fill/stroke/linecap/class,
 // <rect> (filled or stroked, rounded), <circle>, <polygon>, and stroked
 // <path> made of M/L/A commands. Styled output: <defs> are skipped, gradient

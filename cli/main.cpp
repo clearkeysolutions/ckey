@@ -1,4 +1,5 @@
 #include "ckey/ckey.h"
+#include "print_output.h"
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -54,7 +55,9 @@ static std::string base64(const std::string &in) {
 //   [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]
 //   [--logo <png|jpg|svg file>] [--logo-radius <units>]
 static int encode_scalable(int argc, char **argv) {
-    std::string mode, value, output, logo_href; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    std::string mode, value, output, logo_href, png; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    double size_in = 1.0, dpi = 600;
+    ckey_scalable_layout layout = CKEY_LAYOUT_STANDARD;
     ckey_style style; ckey_style_default(&style);
     for (int i = 2; i + 1 < argc; i += 2) {
         const std::string flag = argv[i], arg = argv[i + 1];
@@ -67,6 +70,14 @@ static int encode_scalable(int argc, char **argv) {
         } else if (flag == "--level") {
             if (arg == "L") level = CKEY_ECC_L; else if (arg == "M") level = CKEY_ECC_M; else if (arg == "Q") level = CKEY_ECC_Q; else if (arg == "H") level = CKEY_ECC_H;
             else { std::cerr << "--level must be L, M, Q, or H\n"; return 2; }
+        } else if (flag == "--png") { png = arg;
+        } else if (flag == "--size-in" || flag == "--dpi") {
+            char *end = nullptr; const double v = std::strtod(arg.c_str(), &end);
+            if (!end || *end || !(v > 0)) { std::cerr << flag << " must be a positive number\n"; return 2; }
+            (flag == "--dpi" ? dpi : size_in) = v;
+        } else if (flag == "--layout") {
+            if (arg == "standard") layout = CKEY_LAYOUT_STANDARD; else if (arg == "print") layout = CKEY_LAYOUT_PRINT;
+            else { std::cerr << "--layout must be standard or print\n"; return 2; }
         } else if (flag == "--preset") {
             if (arg == "concept") {
                 style.background = {0x14, 0x16, 0x1e}; style.background_edge = {0x07, 0x08, 0x0c};
@@ -97,8 +108,8 @@ static int encode_scalable(int argc, char **argv) {
         } else { std::cerr << "unknown option " << flag << '\n'; return 2; }
     }
     if (!logo_href.empty()) style.logo_href = logo_href.c_str();
-    if ((argc % 2) != 0 || mode.empty() || output.empty()) {
-        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"
+    if ((argc % 2) != 0 || mode.empty() || (output.empty() && png.empty())) {
+        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H] [--layout standard|print]\n"
                      "         [--preset plain|concept] [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]\n"
                      "         [--logo <file>] [--logo-radius <units>]\n"; return 2;
     }
@@ -106,19 +117,76 @@ static int encode_scalable(int argc, char **argv) {
     if (mode == "--hex") { if (!from_hex(value, payload)) { std::cerr << "hex input must be an even number of hexadecimal digits\n"; return 2; } }
     else payload.assign(value.begin(), value.end());
     auto symbol = std::make_unique<ckey_scalable_symbol>(); ckey_diagnostics diag{};
-    if (ckey_encode_scalable(payload.data(), payload.size(), version, level, symbol.get(), &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+    if (ckey_encode_scalable(payload.data(), payload.size(), version, level, layout, symbol.get(), &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
     ckey_diagnostics check{};
     if (ckey_check_scalable_style(symbol.get(), &style, &check) != CKEY_OK) { std::cerr << "design refused: " << check.message << '\n'; return 1; }
     size_t needed = 0; ckey_render_scalable_styled_svg(symbol.get(), &style, 16, nullptr, 0, &needed);
     std::string svg(needed, '\0');
-    if (ckey_render_scalable_styled_svg(symbol.get(), &style, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
-    std::cout << diag.message << "; profile=0; format=0." << CKEY_SCALABLE_FORMAT_VERSION << ".0; version=" << symbol->version
-              << "; payload-bytes=" << payload.size() << "; capacity=" << ckey_scalable_capacity(symbol->version, level) << "; svg=" << output << '\n';
+    if (ckey_render_scalable_styled_svg(symbol.get(), &style, 16, svg.data(), svg.size(), &needed) != CKEY_OK || (!output.empty() && !write_svg(output, svg))) { std::cerr << "SVG rendering failed\n"; return 1; }
+    if (!png.empty()) {
+        // Print export: black ink on paper on the printer's dot grid. Colours,
+        // materials, and logo images are screen styling and are not printed.
+        printout::Page page; page.width = page.height = static_cast<int>(std::lround(size_in * dpi)); page.ink.assign(static_cast<size_t>(page.width) * page.height, 0);
+        svg.resize(needed - 1); printout::draw_symbol(page, svg, 0, 0, page.width);
+        if (!printout::write_png(png, page, dpi)) { std::cerr << "could not write " << png << '\n'; return 1; }
+        std::cout << "print PNG: " << png << " (" << size_in << " in at " << dpi << " dpi, 1-bit, black on paper)\n";
+    }
+    std::cout << diag.message << "; profile=0" << (layout == CKEY_LAYOUT_PRINT ? ".1" : "") << "; format=0."
+              << (layout == CKEY_LAYOUT_PRINT ? CKEY_SCALABLE_PRINT_FORMAT_VERSION : CKEY_SCALABLE_FORMAT_VERSION) << ".0; version=" << symbol->version
+              << "; payload-bytes=" << payload.size() << "; capacity=" << ckey_scalable_capacity(symbol->version, level, layout) << "; svg=" << output << '\n';
+    return 0;
+}
+
+// ckey print-sheet --out sheet.png [--dpi 600] [--set small|large]
+// A US Letter calibration ladder of P0 and P0.1 symbols at several payloads
+// and printed sizes, as a 1-bit device-grid PNG. Each symbol's payload names
+// its own cell ("CKEY-CAL P0.1 120B 0.50in ..."), so a scan identifies it.
+static int print_sheet(int argc, char **argv) {
+    std::string out, set = "small"; double dpi = 600;
+    for (int i = 2; i + 1 < argc; i += 2) {
+        const std::string flag = argv[i], arg = argv[i + 1];
+        if (flag == "--out") out = arg; else if (flag == "--set") set = arg;
+        else if (flag == "--dpi") { dpi = std::strtod(arg.c_str(), nullptr); if (!(dpi >= 150 && dpi <= 2400)) { std::cerr << "--dpi must be 150..2400\n"; return 2; } }
+        else { std::cerr << "unknown option " << flag << '\n'; return 2; }
+    }
+    if (out.empty() || (set != "small" && set != "large") || (argc % 2) != 0) { std::cerr << "usage: ckey print-sheet --out sheet.png [--dpi 600] [--set small|large]\n"; return 2; }
+    const std::vector<size_t> payloads = set == "small" ? std::vector<size_t>{8, 30, 120, 400} : std::vector<size_t>{1200, 2400};
+    const std::vector<double> sizes = set == "small" ? std::vector<double>{0.25, 0.375, 0.5, 0.75, 1.0} : std::vector<double>{1.0, 1.25, 1.5, 2.0};
+    printout::Page page; page.width = static_cast<int>(std::lround(8.5 * dpi)); page.height = static_cast<int>(std::lround(11 * dpi));
+    page.ink.assign(static_cast<size_t>(page.width) * page.height, 0);
+    const int text = std::max(2, static_cast<int>(std::lround(dpi / 150)));  // label scale
+    const auto in = [&](double v) { return static_cast<int>(std::lround(v * dpi)); };
+    printout::draw_text(page, "CKey print calibration - print at 100% actual size", in(0.5), in(0.35), text + 1);
+    printout::draw_text(page, "dpi " + std::to_string(static_cast<int>(dpi)) + "  level M  black on paper", in(0.5), in(0.35) + 9 * (text + 1), text);
+    int y = in(0.9); const double max_size = sizes.back();
+    for (size_t bytes : payloads) for (auto layout : {CKEY_LAYOUT_STANDARD, CKEY_LAYOUT_PRINT}) {
+        printout::draw_text(page, std::string(layout ? "P0.1 " : "P0 ") + std::to_string(bytes) + "B", in(0.5), y + in(max_size / 2), text);
+        int x = in(1.5);
+        for (double size : sizes) {
+            char label[64]; std::snprintf(label, sizeof(label), "CKEY-CAL %s %zuB %.2fin ", layout ? "P0.1" : "P0", bytes, size);
+            std::string payload = label; while (payload.size() < bytes) payload += "0123456789";
+            payload.resize(bytes);
+            auto symbol = std::make_unique<ckey_scalable_symbol>(); ckey_diagnostics diag{};
+            if (ckey_encode_scalable(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), 0, CKEY_ECC_M, layout, symbol.get(), &diag) != CKEY_OK) {
+                std::cerr << "cannot encode " << label << ": " << diag.message << '\n'; return 1;
+            }
+            size_t needed = 0; ckey_render_scalable_svg(symbol.get(), 8, nullptr, 0, &needed);
+            std::string svg(needed, '\0'); ckey_render_scalable_svg(symbol.get(), 8, svg.data(), needed, &needed); svg.resize(needed - 1);
+            printout::draw_symbol(page, svg, x, y, in(size));
+            char caption[32]; std::snprintf(caption, sizeof(caption), "v%u %.2fin", symbol->version, size);
+            printout::draw_text(page, caption, x, y + in(size) + text * 2, text);
+            x += in(size) + in(0.3);
+        }
+        y += in(max_size) + in(0.3);
+    }
+    if (!printout::write_png(out, page, dpi)) { std::cerr << "could not write " << out << '\n'; return 1; }
+    std::cout << "calibration sheet: " << out << " (US Letter, " << dpi << " dpi, 1-bit). Print at 100% / actual size.\n";
     return 0;
 }
 
 int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "encode-scalable") return encode_scalable(argc, argv);
+    if (argc >= 2 && std::string(argv[1]) == "print-sheet") return print_sheet(argc, argv);
     const bool tierOption = argc == 8 && std::string(argv[2]) == "--tier";
     const int modeIndex = tierOption ? 4 : 2;
     const int outIndex = tierOption ? 6 : 4;

@@ -295,15 +295,16 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         var output = [UInt8](repeating: 0, count: 65535)
         var length = 0
         var version: UInt32 = 0
+        var layout: UInt32 = 0
         var diagnostic = ckey_diagnostics()
         let status = output.withUnsafeMutableBufferPointer { decoded in
             quad.withUnsafeBufferPointer { q in
                 ckey_decode_scalable_gray8(gray, width, height, stride, q.baseAddress,
-                                           decoded.baseAddress, decoded.count, &length, &version, &diagnostic)
+                                           decoded.baseAddress, decoded.count, &length, &version, &layout, &diagnostic)
             }
         }
         guard status == CKEY_OK else { return nil }
-        return (Array(output.prefix(length)), "Profile 0 · v\(version)")
+        return (Array(output.prefix(length)), layout == 1 ? "Profile 0.1 · print · v\(version)" : "Profile 0 · v\(version)")
     }
 
     private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,

@@ -14,12 +14,12 @@ static size_t occurrences(const std::string &s, const std::string &needle) {
 }
 
 int main() {
-    CKEY_CHECK(ckey_get_abi_version() == 2);
+    CKEY_CHECK(ckey_get_abi_version() == 3);
     std::array<uint8_t,16> payload{};
     for (size_t i=0;i<payload.size();++i) payload[i]=static_cast<uint8_t>(i);
     ckey_symbol a{}, b{}; ckey_diagnostics d{};
     CKEY_CHECK(ckey_encode_locator(payload.data(), payload.size(), &a, &d) == CKEY_OK);
-    CKEY_CHECK(d.status == CKEY_OK && a.side == 29 && a.abi_version == 2);
+    CKEY_CHECK(d.status == CKEY_OK && a.side == 29 && a.abi_version == 3);
     CKEY_CHECK(a.codeword[0]==0xc7 && a.codeword[1]==0x4b && a.codeword[2]==CKEY_FORMAT_VERSION && a.codeword[3]==1);
     CKEY_CHECK(a.codeword[4]==0 && a.codeword[5]==16);
     for (size_t i=0;i<16;++i) CKEY_CHECK(a.codeword[6+i]==i);

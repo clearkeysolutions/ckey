@@ -1,7 +1,7 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.57`
-**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`)
+**Current software version:** `0.1.0-dev.58`
+**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout)
 **Branch:** `main`
 **Context updated:** 2026-11-04
 
@@ -20,6 +20,12 @@ CKey is an independent, monochrome optical encoding standard that must work with
   * **Scaling:** every mark, key and clearance scales with the pitch.
   * **Capacity:** every site carries a codeword bit (no fill waste), protected by four Reed–Solomon levels (L/M/Q/H, about 7/14/22/30% per block). Capacity at level M rises from 27 to 4,619 bytes, with no step above 1.6×.
   * **Version identification:** the Grid, Ring and Ray Keys are drawn at each version's own module and slot pitch, so the decoder identifies the version from them. The frame's version byte, RS and CRC confirm.
+* Profile 0.1, Format 0.28.0 (byte `1C`, profile `00`, layout `CKEY_LAYOUT_PRINT`), is a print-robust layout family alongside Profile 0. It keeps Profile 0's skeleton, version table, framing and ECC. Every mark and gap is at least about one module:
+  * equal-arc ring slots;
+  * 0.3p ring dots;
+  * wider, fewer rays;
+  * a compact 8-slot Ring Key.
+  The decoder identifies the family from the keys. ABI 3 adds `layout` to `ckey_scalable_symbol` and to the P0 encode/decode/capacity calls.
 * RS parameters are primitive polynomial `0x11D`, primitive element 2, roots `α^0…α^50`, high-degree coefficient first, with parity appended. CRC-32C is integrity detection, separate from error correction.
 * Geometry is fixed at 29 × 29 for profile 1. The Grid, Ray, and Ring Keys are structural and reserved. The data sites alternate Cartesian and polar coordinate families; exact definitions live in the matching versioned format document. Format 0.14.0 uses one broad inboard arc per rounded corner, inside a continuous rounded-square border; each arc's mouth faces the central polar field. Only the top-left arc is split on its diagonal for orientation. The 6 × 6 corner envelopes are reserved to prevent finder/data collisions. Ring dots are a uniform 0.30 module diameter; the Ring Key arc has round ends and a four-slot visible length; data dial slots encode each bit using short and long rays; the codeword uses 51 parity bytes so 616 of 621 available sites carry RS-coded bits.
 * The C ABI now decodes 8-bit grayscale images when given a caller-supplied cyclic quadrilateral: it tries all corner starts/windings, rectifies a projective mapping, verifies Grid/Ray/Ring calibration evidence, samples the Cartesian and polar payload sites, normalizes light/dark polarity, and runs RS plus frame/CRC validation. It decodes committed browser-rendered captures and a 500×500 crop from the user's iPhone camera preview of a laptop display. Full-frame localization, lens-distortion correction, and live-device verification remain incomplete. No QR-parity or sub-200 ms end-to-end performance claim is made; the 2,048-byte profile is implemented but its physical-camera capacity is not characterized. Erasure decoding is not implemented.
@@ -69,6 +75,12 @@ Next engineering gates: (1) compile and validate the iPhone reader on physical d
   * **Browser:** concept-styled renders in Chromium decode exactly, sharp and blurred.
   * **Logo limit:** logos fit the empty centre (radius about 3.2). A larger logo would need byte-grouped placement, a wire-format change.
   * **Unbuilt:** the Mac Design panel has not been compiled yet.
+* Dev.58 printing work:
+  * **Simulator:** a print simulator (`tests/print_sim.h`) models binary device dots, ink spread, paper blur, then a camera at a given resolution.
+  * **Baseline P0 findings:** printing dark marks on paper beats the cream-on-black palette by about 35% on plain inkjet. Ink-spread compensation is ineffective at 600 dpi, because the spread is about one dot. At the limit, ring dots fail first.
+  * **P0.1 result:** the same payload decodes at about half P0's width, for example 120 B at 0.32 in versus 0.68 in on the old-inkjet model. A regression test locks this in: at 0.42 in, P0 fails and P0.1 decodes.
+  * **Print output:** device-grid 1-bit output through `ckey_render_scalable_print`, `ckey encode-scalable --png`, `ckey print-sheet` (calibration ladder) and the Renderer's Export Print PNG.
+  * **Still to do:** the simulation parameters are estimates; real prints from the calibration sheet are pending.
 * Xcode build/run and live camera performance remain pending physical-device validation; they are unavailable in this environment.
 
 ## Research references and provenance
