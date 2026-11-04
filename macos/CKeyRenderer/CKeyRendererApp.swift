@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
@@ -27,6 +28,14 @@ private final class RendererModel: ObservableObject {
     @Published var scalableVersion = 0 { didSet { scheduleRegenerate() } }
     /// Profile 0 correction level: 0 L, 1 M, 2 Q, 3 H.
     @Published var scalableLevel = 1 { didSet { scheduleRegenerate() } }
+    /// Profile 0 layout: 0 standard, 1 print-robust (P0.1).
+    @Published var scalableLayout = 0 { didSet { scheduleRegenerate() } }
+    /// Print export width (inches) and printer resolution (dpi).
+    @Published var printWidthInches = 1.0
+    @Published var printDPI = 600.0
+    /// The most recent Profile 0 symbol, kept for print export.
+    private let lastSymbol = UnsafeMutablePointer<ckey_scalable_symbol>.allocate(capacity: 1)
+    private var hasLastSymbol = false
     /// Module pitch of the current symbol in canonical units (29-unit field).
     @Published private(set) var modulePitch = 1.0
     // Profile 0 design system (ckey_style). Foreground/Background below are
@@ -67,6 +76,7 @@ private final class RendererModel: ObservableObject {
     private var regenerationWorkItem: DispatchWorkItem?
 
     init() { scheduleRegenerate() }
+    deinit { lastSymbol.deallocate() }
 
     private func scheduleRegenerate() {
         regenerationWorkItem?.cancel()
@@ -82,10 +92,12 @@ private final class RendererModel: ObservableObject {
         var detail = ""
         switch profile {
         case .scalable:
-            let symbol = UnsafeMutablePointer<ckey_scalable_symbol>.allocate(capacity: 1)
-            defer { symbol.deallocate() }
+            let symbol = lastSymbol
             let level = ckey_ecc_level(rawValue: UInt32(scalableLevel))
-            guard ckey_encode_scalable(input, input.count, UInt32(scalableVersion), level, symbol, &diag) == CKEY_OK else { svg = ""; return fail(diag) }
+            let layout = ckey_scalable_layout(rawValue: UInt32(scalableLayout))
+            hasLastSymbol = false
+            guard ckey_encode_scalable(input, input.count, UInt32(scalableVersion), level, layout, symbol, &diag) == CKEY_OK else { svg = ""; return fail(diag) }
+            hasLastSymbol = true
             let version = symbol.pointee.version
             var style = ckey_style()
             ckey_style_default(&style)
@@ -102,7 +114,7 @@ private final class RendererModel: ObservableObject {
             style.rays = ckey_ray_cap(rawValue: UInt32(rayCap))
             style.bevel = bevel; style.shadow = depth; style.texture = grain
             style.logo_plate = logoPlate ? 1 : 0
-            let maxRadius = ckey_scalable_logo_max_radius(version)
+            let maxRadius = ckey_scalable_logo_max_radius(version, layout)
             style.logo_radius = logoSize <= 0 ? 0 : 3.0 + (maxRadius - 3.0) * logoSize
             var checkDiag = ckey_diagnostics()
             var checked = CKEY_OK
@@ -115,7 +127,7 @@ private final class RendererModel: ObservableObject {
             guard checked == CKEY_OK else { svg = ""; status = "Design refused: \(styleStatus)"; return }
             let modules = ckey_scalable_modules_across(version)
             modulePitch = 29.0 / Double(max(modules, 1))
-            detail = "\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level)) B"
+            detail = "\(scalableLayout == 1 ? "P0.1 print · " : "")\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level, layout)) B"
         case .locator:
             guard input.count == Int(CKEY_LOCATOR_PAYLOAD_BYTES) else {
                 svg = ""; status = "Profile 1 requires exactly 16 UTF-8 bytes; entered \(input.count)."; return
@@ -193,6 +205,36 @@ private final class RendererModel: ObservableObject {
     }
 
     func removeLogo() { logoDataURI = nil; logoName = "" }
+
+    /// Exports the current Profile 0 symbol as a 1-bit-style print PNG: black
+    /// ink on paper on the printer's dot grid (no grey to halftone), tagged
+    /// with its resolution so it prints at the chosen physical width.
+    func exportPrintPNG() {
+        guard profile == .scalable, hasLastSymbol else { status = "Print export is for Profile 0 symbols."; return }
+        var side = 0
+        guard ckey_render_scalable_print(lastSymbol, nil, printWidthInches, printDPI, nil, 0, &side) == CKEY_INSUFFICIENT_BUFFER, side > 0 else {
+            status = "Print export: width × dpi is out of range."; return
+        }
+        var pixels = [UInt8](repeating: 255, count: side * side)
+        let rendered = pixels.withUnsafeMutableBufferPointer { buffer in
+            ckey_render_scalable_print(lastSymbol, nil, printWidthInches, printDPI, buffer.baseAddress, buffer.count, &side)
+        }
+        guard rendered == CKEY_OK else { status = "Print export failed."; return }
+        let panel = NSSavePanel(); panel.nameFieldStringValue = "ckey-print.png"; panel.allowedContentTypes = [.png]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+              let image = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: side,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+              let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            status = "Print export: could not create the PNG."; return
+        }
+        let properties = [kCGImagePropertyDPIWidth as String: printDPI, kCGImagePropertyDPIHeight as String: printDPI] as CFDictionary
+        CGImageDestinationAddImage(destination, image, properties)
+        status = CGImageDestinationFinalize(destination)
+            ? "Saved \(url.lastPathComponent): \(String(format: "%.2f", printWidthInches)) in at \(Int(printDPI)) dpi, black on paper. Print at 100% / actual size."
+            : "Print export: could not write the PNG."
+    }
 
     /// The original concept art's look: champagne metal, navy vignette,
     /// sage and grey accents, embossed depth, and fine grain.
@@ -288,6 +330,20 @@ private struct RendererView: View {
                     Picker("Correction", selection: $model.scalableLevel) {
                         Text("L · ~7%").tag(0); Text("M · ~14%").tag(1); Text("Q · ~22%").tag(2); Text("H · ~30%").tag(3)
                     }.pickerStyle(.segmented)
+                    Picker("Layout", selection: $model.scalableLayout) {
+                        Text("Standard").tag(0); Text("Print · P0.1").tag(1)
+                    }.pickerStyle(.segmented)
+                    DisclosureGroup("Print") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            LabSlider(title: "Width", value: $model.printWidthInches, range: 0.2...4.0, suffix: " in")
+                            Picker("Printer", selection: $model.printDPI) {
+                                Text("300 dpi").tag(300.0); Text("600 dpi").tag(600.0); Text("1200 dpi").tag(1200.0)
+                            }.pickerStyle(.segmented)
+                            Button("Export Print PNG…") { model.exportPrintPNG() }
+                            Text("Black ink on paper on the printer's dot grid. For small prints use Print · P0.1 and print at 100% / actual size.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.padding(.top, 6)
+                    }
                     DisclosureGroup("Design") {
                         VStack(alignment: .leading, spacing: 10) {
                             Picker("Modules", selection: $model.moduleShape) {
@@ -463,6 +519,7 @@ private struct SymbolPreview: NSViewRepresentable {
             }
             var output = [UInt8](repeating: 0, count: 65535)  // Profile 0 payloads exceed 2,048 bytes
             var scalableVersion: UInt32 = 0
+            var scalableLayoutFound: UInt32 = 0
             var outputLength = 0
             var diagnostic = ckey_diagnostics()
             let result: ckey_status = gray.withUnsafeBufferPointer { pixels in
@@ -471,7 +528,8 @@ private struct SymbolPreview: NSViewRepresentable {
                         switch profile {
                         case .scalable:
                             return ckey_decode_scalable_gray8(pixels.baseAddress, width, height, width, q.baseAddress,
-                                                              decoded.baseAddress, decoded.count, &outputLength, &scalableVersion, &diagnostic)
+                                                              decoded.baseAddress, decoded.count, &outputLength, &scalableVersion,
+                                                              &scalableLayoutFound, &diagnostic)
                         case .locator:
                             return ckey_decode_gray8(pixels.baseAddress, width, height, width, q.baseAddress,
                                                      decoded.baseAddress, Int(CKEY_LOCATOR_PAYLOAD_BYTES), &diagnostic)
@@ -494,7 +552,7 @@ private struct SymbolPreview: NSViewRepresentable {
             if profile == .scalable {
                 // Profile 0 needs about 6 px per module at every version.
                 let pixelsPerModule = pixelsPerUnit * modulePitch
-                density = "v\(scalableVersion) · " + String(format: "%.1f px/module", pixelsPerModule) +
+                density = (scalableLayoutFound == 1 ? "P0.1 " : "") + "v\(scalableVersion) · " + String(format: "%.1f px/module", pixelsPerModule) +
                     (pixelsPerModule < 6.0 ? " (below the ~6 px/module decode floor — enlarge the window or raise Resolution)" : "")
             } else {
                 let decodeFloor = profile == .locator ? 6.0 : profile == .text ? 10.0 : 11.0

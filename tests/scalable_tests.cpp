@@ -3,11 +3,13 @@
 #include "../src/ckey.cpp"
 #include "check.h"
 #include "svg_raster.h"
+#include "print_sim.h"
 
 #include <cstdio>
 
 namespace {
 
+constexpr uint64_t kPrintKatV3 = 0x1908543413f369b8ull, kPrintKatV31 = 0x684c56624d3558a8ull;  // stated in spec/CKey-Format-v0.28.0.md
 constexpr uint64_t kScalableKatV2 = 0xb97ef7acabd3c8d7ull, kScalableKatV31 = 0xc7df4dfd1c36458bull;  // stated in spec/CKey-Format-v0.27.0.md
 
 std::vector<uint8_t> pseudo(size_t n, uint32_t seed) {
@@ -30,7 +32,7 @@ uint32_t decode_svg(const std::string &svg, double unit, const std::vector<uint8
     const double k = static_cast<double>(side) / 31.0, lo = k, hi = 30 * k;
     const double q[8] = {lo, lo, hi, lo, hi, hi, lo, hi};
     std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0; ckey_diagnostics d{};
-    if (ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, &d) != CKEY_OK) return 0;
+    if (ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, nullptr, &d) != CKEY_OK) return 0;
     return len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()) ? version : 0;
 }
 
@@ -57,7 +59,7 @@ uint32_t image_round_trip(const ckey_scalable_symbol &s, const std::vector<uint8
     const double k = static_cast<double>(side) / 31.0, lo = k, hi = 30 * k;
     const double q[8] = {lo, lo, hi, lo, hi, hi, lo, hi};
     std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0; ckey_diagnostics d{};
-    if (ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, &d) != CKEY_OK) return 0;
+    if (ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, nullptr, &d) != CKEY_OK) return 0;
     if (len != payload.size() || !std::equal(payload.begin(), payload.end(), out.begin())) return 0;
     return version;
 }
@@ -65,14 +67,27 @@ uint32_t image_round_trip(const ckey_scalable_symbol &s, const std::vector<uint8
 }  // namespace
 
 int main() {
-    // ---- Table invariants ----
-    for (int v = 1; v <= kScalableVersions; ++v) {
-        const ScalableLayout &L = scalable_layout(v); const double p = L.pitch;
-        CKEY_CHECK(L.slots % 8 == 0);
-        CKEY_CHECK(L.ring_radius(L.rings - 1) <= kScalableDialInner - 2.38 * p + 1e-9);      // ring band clears the dial
-        CKEY_CHECK(L.ring_radius(L.rings) > kScalableDialInner - 2.38 * p + 1e-9 || L.rings == kScalableRings[v - 1]);
-        CKEY_CHECK(L.ring_key_slot() + 15 < L.ray_key_three());
+    // ---- Table invariants (both layout families) ----
+    for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
+        const ScalableLayout &L = scalable_layout(v, f); const double p = L.pitch;
+        const double ring_limit = kScalableDialInner - (f == 0 ? 2.38 : 2.4) * p;
+        CKEY_CHECK(L.dial_slots % 8 == 0);
+        for (int S : L.ring_slots) CKEY_CHECK(S % 8 == 0);
+        CKEY_CHECK(L.ring_radius(L.rings - 1) <= ring_limit + 1e-9);   // ring band clears the dial
+        CKEY_CHECK(L.ring_radius(L.rings) > ring_limit - 1e-9);         // and uses all the room it has
+        CKEY_CHECK(L.ring_key_slot() + L.ring_key_span <= L.ring_slots.back());
         CKEY_CHECK(L.codeword_bytes <= CKEY_SCALABLE_MAX_CODEWORD_BYTES);
+        if (f == 1) {
+            // Print family: every mark and gap is at least about one module.
+            for (int k = 0; k < L.rings; ++k) {
+                const double spacing = kTau * L.ring_radius(k) / L.ring_slots[static_cast<size_t>(k)];
+                CKEY_CHECK(spacing >= p - 1e-9 && spacing - 2 * L.dot >= 0.39 * p);
+                const double exact = kTau * L.ring_radius(k) / (8.0 * p);  // slot count decided with slack
+                CKEY_CHECK(std::abs(exact - std::round(exact)) > 1e-6);
+            }
+            CKEY_CHECK(kTau * kScalableDialInner / L.dial_slots - L.ray_width >= 0.6 * p);
+            CKEY_CHECK(L.ring_pitch - 2 * L.dot >= 0.39 * p);
+        }
         // Grid Key ink keeps a pitch of clearance from the frame, finders, and radial alphabet.
         const DenseGeometry &g = L.geom; double worst = 1e9;
         for (double x = g.grid_x0; x <= g.grid_x1 + 1e-12; x += (g.grid_x1 - g.grid_x0) / 8)
@@ -89,32 +104,59 @@ int main() {
         CKEY_CHECK(slack > 1e-6);
     }
 
+    // ---- P0.1 (print family): capacities, and every version decodes ----
+    std::printf("P0.1 (print) payload bytes at level M:");
+    size_t previous_print = 0;
+    for (uint32_t v = 1; v <= kScalableVersions; ++v) {
+        const size_t m = ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_PRINT);
+        std::printf(" %zu", m);
+        CKEY_CHECK(m > previous_print && m < ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD));
+        previous_print = m;
+    }
+    std::printf("\n");
+    {
+        ckey_scalable_symbol ps{}; ckey_diagnostics pd{};
+        for (uint32_t v = 1; v <= kScalableVersions; ++v) {
+            const auto payload = pseudo(ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_PRINT), 3000u + v);
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), v, CKEY_ECC_M, CKEY_LAYOUT_PRINT, &ps, &pd) == CKEY_OK && ps.layout == CKEY_LAYOUT_PRINT);
+            const ScalableLayout &L = scalable_layout(static_cast<int>(v), 1);
+            const double unit = 6.0 / L.pitch; const int side = static_cast<int>(std::ceil(31 * unit));
+            const auto px = svgtest::rasterize(svgtest::parse(render(ps)), side, side, 3);
+            const double k = static_cast<double>(side) / 31.0, q[8] = {k, k, 30 * k, k, 30 * k, 30 * k, k, 30 * k};
+            std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0, layout = 9;
+            const ckey_status st = ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, &layout, &pd);
+            if (st != CKEY_OK || version != v || layout != CKEY_LAYOUT_PRINT) std::printf("P0.1 v%u: status %d version %u layout %u\n", v, st, version, layout);
+            CKEY_CHECK(st == CKEY_OK && version == v && layout == CKEY_LAYOUT_PRINT && len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
+        }
+        std::printf("P0.1: all 31 versions decode at 6 px/module and are told apart from P0 by their keys\n");
+    }
+
     // ---- Capacity grows smoothly ----
     std::printf(" v  modules  sites   L     M     Q     H  (payload bytes)\n");
     size_t previous_m = 0;
     for (int v = 1; v <= kScalableVersions; ++v) {
-        const size_t m = ckey_scalable_capacity(static_cast<uint32_t>(v), CKEY_ECC_M);
+        const size_t m = ckey_scalable_capacity(static_cast<uint32_t>(v), CKEY_ECC_M, CKEY_LAYOUT_STANDARD);
         std::printf("%2d %6d %7zu %5zu %5zu %5zu %5zu\n", v, kScalableGrid[v - 1], scalable_layout(v).nodes.size(),
-                    ckey_scalable_capacity(v, CKEY_ECC_L), m, ckey_scalable_capacity(v, CKEY_ECC_Q), ckey_scalable_capacity(v, CKEY_ECC_H));
+                    ckey_scalable_capacity(v, CKEY_ECC_L, CKEY_LAYOUT_STANDARD), m, ckey_scalable_capacity(v, CKEY_ECC_Q, CKEY_LAYOUT_STANDARD), ckey_scalable_capacity(v, CKEY_ECC_H, CKEY_LAYOUT_STANDARD));
         CKEY_CHECK(m > previous_m);
         if (previous_m) CKEY_CHECK(static_cast<double>(m) / previous_m < 1.6);  // no large jumps
-        CKEY_CHECK(ckey_scalable_capacity(v, CKEY_ECC_L) > m && m > ckey_scalable_capacity(v, CKEY_ECC_Q) && ckey_scalable_capacity(v, CKEY_ECC_Q) > ckey_scalable_capacity(v, CKEY_ECC_H));
+        CKEY_CHECK(ckey_scalable_capacity(v, CKEY_ECC_L, CKEY_LAYOUT_STANDARD) > m && m > ckey_scalable_capacity(v, CKEY_ECC_Q, CKEY_LAYOUT_STANDARD) && ckey_scalable_capacity(v, CKEY_ECC_Q, CKEY_LAYOUT_STANDARD) > ckey_scalable_capacity(v, CKEY_ECC_H, CKEY_LAYOUT_STANDARD));
         previous_m = m;
     }
-    CKEY_CHECK(ckey_scalable_capacity(0, CKEY_ECC_M) == 0 && ckey_scalable_capacity(32, CKEY_ECC_M) == 0);
+    CKEY_CHECK(ckey_scalable_capacity(0, CKEY_ECC_M, CKEY_LAYOUT_STANDARD) == 0 && ckey_scalable_capacity(32, CKEY_ECC_M, CKEY_LAYOUT_STANDARD) == 0);
 
     // ---- Auto version selection is the smallest that fits ----
     ckey_scalable_symbol s{}; ckey_diagnostics d{};
     const std::string text33 = "https://citeory.com/tour?ref=ckey";  // 33 characters
     CKEY_CHECK(text33.size() == 33);
-    CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(text33.data()), text33.size(), 0, CKEY_ECC_M, &s, &d) == CKEY_OK);
-    CKEY_CHECK(ckey_scalable_capacity(s.version, CKEY_ECC_M) >= 33 && (s.version == 1 || ckey_scalable_capacity(s.version - 1, CKEY_ECC_M) < 33));
+    CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(text33.data()), text33.size(), 0, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
+    CKEY_CHECK(ckey_scalable_capacity(s.version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD) >= 33 && (s.version == 1 || ckey_scalable_capacity(s.version - 1, CKEY_ECC_M, CKEY_LAYOUT_STANDARD) < 33));
     std::printf("33-character payload -> Profile 0 v%u (%d modules across) at level M\n", s.version, kScalableGrid[s.version - 1]);
 
     // ---- Byte-level ECC: correct up to parity/2 errors in every block ----
     for (int level = 0; level < 4; ++level) {
-        const auto payload = pseudo(ckey_scalable_capacity(14, static_cast<ckey_ecc_level>(level)), 5u + level);
-        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 14, static_cast<ckey_ecc_level>(level), &s, &d) == CKEY_OK);
+        const auto payload = pseudo(ckey_scalable_capacity(14, static_cast<ckey_ecc_level>(level), CKEY_LAYOUT_STANDARD), 5u + level);
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 14, static_cast<ckey_ecc_level>(level), CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
         const auto blocks = scalable_blocks(s.codeword_length, level);
         auto damaged = s;
         // Interleaved position of (block b, byte j) is the count of earlier bytes.
@@ -128,22 +170,22 @@ int main() {
             }
         }
         std::vector<uint8_t> out(65535); size_t len = 0;
-        CKEY_CHECK(ckey_decode_scalable(damaged.codeword, damaged.codeword_length, 14, out.data(), out.size(), &len, &d) == CKEY_OK);
+        CKEY_CHECK(ckey_decode_scalable(damaged.codeword, damaged.codeword_length, 14, CKEY_LAYOUT_STANDARD, out.data(), out.size(), &len, &d) == CKEY_OK);
         CKEY_CHECK(len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
     }
 
     // ---- Every version: render, rasterize, decode; the keys identify the version ----
     for (int v = 1; v <= kScalableVersions; ++v) {
         for (int kind = 0; kind < 3; ++kind) {
-            const size_t cap = ckey_scalable_capacity(v, CKEY_ECC_M);
+            const size_t cap = ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD);
             const auto payload = kind == 0 ? pseudo(cap, 100u + v) : std::vector<uint8_t>(cap, kind == 1 ? 0x00 : 0xff);
-            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), static_cast<uint32_t>(v), CKEY_ECC_M, &s, &d) == CKEY_OK);
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), static_cast<uint32_t>(v), CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
             const uint32_t detected = image_round_trip(s, payload, 6.0, false);
             if (detected != static_cast<uint32_t>(v)) std::printf("version %d payload kind %d: detected %u\n", v, kind, detected);
             CKEY_CHECK(detected == static_cast<uint32_t>(v));
         }
-        const auto payload = pseudo(ckey_scalable_capacity(v, CKEY_ECC_M), 900u + v);
-        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), static_cast<uint32_t>(v), CKEY_ECC_M, &s, &d) == CKEY_OK);
+        const auto payload = pseudo(ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD), 900u + v);
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), static_cast<uint32_t>(v), CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
         CKEY_CHECK(image_round_trip(s, payload, 8.0, true) == static_cast<uint32_t>(v));
     }
     std::printf("all %d versions decode from rendered images (6 px/module clean, 8 px/module blurred) and are identified by their keys\n", kScalableVersions);
@@ -153,7 +195,7 @@ int main() {
     {
         const std::string text = "CKey renderer test";
         for (const auto &[version, expected] : {std::pair{2u, kScalableKatV2}, std::pair{31u, kScalableKatV31}}) {
-            CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(text.data()), text.size(), version, CKEY_ECC_M, &s, &d) == CKEY_OK);
+            CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(text.data()), text.size(), version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
             const ScalableLayout &L = scalable_layout(static_cast<int>(version));
             uint64_t hash = 0xcbf29ce484222325ull;
             const auto fnv = [&](uint8_t b) { hash = (hash ^ b) * 0x100000001b3ull; };
@@ -165,15 +207,15 @@ int main() {
     // ---- Design system ----
     {
         ckey_style base; ckey_style_default(&base);
-        const auto payload = pseudo(ckey_scalable_capacity(11, CKEY_ECC_M), 4242);
-        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, &s, &d) == CKEY_OK);
+        const auto payload = pseudo(ckey_scalable_capacity(11, CKEY_ECC_M, CKEY_LAYOUT_STANDARD), 4242);
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
         CKEY_CHECK(ckey_check_scalable_style(&s, &base, &d) == CKEY_OK);
         CKEY_CHECK(render_styled(s, base) == render(s));  // the plain renderer is the default style
 
         // Every payload-mark shape option decodes, at a coarse and a fine version.
         for (uint32_t version : {2u, 20u}) {
-            const auto data = pseudo(ckey_scalable_capacity(version, CKEY_ECC_M), 77 + version);
-            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, CKEY_ECC_M, &s, &d) == CKEY_OK);
+            const auto data = pseudo(ckey_scalable_capacity(version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD), 77 + version);
+            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
             const double unit = 7.0 / (29.0 / ckey_scalable_modules_across(version));
             for (int shape = 0; shape < 4; ++shape) for (int rings = 0; rings < 2; ++rings) for (int rays = 0; rays < 2; ++rays) {
                 ckey_style st = base;
@@ -191,7 +233,7 @@ int main() {
         art.ink = {0xf6, 0xee, 0xe0}; art.ink_shade = {0xc8, 0xb6, 0x9a};
         art.accents[0] = {0xa9, 0xb8, 0x96}; art.accents[1] = {0x9e, 0xa1, 0xa6}; art.accent_count = 2; art.accent_percent = 18;
         art.bevel = 0.6; art.shadow = 0.5; art.texture = 0.4;
-        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, &s, &d) == CKEY_OK);
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
         CKEY_CHECK(ckey_check_scalable_style(&s, &art, &d) == CKEY_OK);
         std::printf("concept style: %s\n", d.message);
         CKEY_CHECK(decode_svg(render_styled(s, art), 7.0 / 0.5, payload) == 11);
@@ -214,18 +256,58 @@ int main() {
         ckey_style logo = base; logo.logo_href = "data:image/png;base64,iVBORw0KGgo=";
         CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_OK && ckey_scalable_logo_load(&s, 0) == 0);
         logo.logo_radius = 5.0; CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_INVALID_ARGUMENT);  // no plate
-        logo.logo_plate = 1; logo.logo_radius = ckey_scalable_logo_max_radius(11) + 0.1;
+        logo.logo_plate = 1; logo.logo_radius = ckey_scalable_logo_max_radius(11, CKEY_LAYOUT_STANDARD) + 0.1;
         CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_INVALID_ARGUMENT);  // would hide the Ring Key
         for (uint32_t version : {6u, 11u, 20u}) for (int level = 0; level < 4; ++level) {
-            const auto data = pseudo(ckey_scalable_capacity(version, static_cast<ckey_ecc_level>(level)), 900 + version * 4 + level);
-            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, static_cast<ckey_ecc_level>(level), &s, &d) == CKEY_OK);
+            const auto data = pseudo(ckey_scalable_capacity(version, static_cast<ckey_ecc_level>(level), CKEY_LAYOUT_STANDARD), 900 + version * 4 + level);
+            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, static_cast<ckey_ecc_level>(level), CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
             double best = 0;
-            for (double r = 3.0; r <= ckey_scalable_logo_max_radius(version); r += 0.05) { logo.logo_radius = r; if (ckey_check_scalable_style(&s, &logo, &d) == CKEY_OK) best = r; }
+            for (double r = 3.0; r <= ckey_scalable_logo_max_radius(version, CKEY_LAYOUT_STANDARD); r += 0.05) { logo.logo_radius = r; if (ckey_check_scalable_style(&s, &logo, &d) == CKEY_OK) best = r; }
             logo.logo_radius = best;
             const uint32_t got = best > 0 ? decode_svg(render_styled(s, logo), 7.0 / (29.0 / ckey_scalable_modules_across(version)), data) : version;
             std::printf("v%u level %c: largest accepted logo radius %.2f (load %.0f%%) -> %s\n", version, "LMQH"[level], best,
                         100 * ckey_scalable_logo_load(&s, best), got == version ? "decodes" : "FAILS");
             CKEY_CHECK(got == version);
+        }
+    }
+    // ---- Print: device-grid bitmaps, and P0.1's advantage on a printer model ----
+    {
+        const std::string text = "CKEY-CAL P0.1 120B 0.42in ";
+        std::string payload = text; while (payload.size() < 120) payload += "0123456789";
+        payload.resize(120);
+        const std::vector<uint8_t> bytes(payload.begin(), payload.end());
+        // Old inkjet on plain paper (600 dpi, 0.045 mm ink spread), black on paper, camera 23 px/mm.
+        const printsim::Printer inkjet{600, 0.045, 0.03}; const printsim::Camera camera{23, 0.7, 4};
+        bool decoded[2] = {false, false};
+        for (int family = 0; family < 2; ++family) {
+            ckey_scalable_symbol ps{}; ckey_diagnostics pd{};
+            CKEY_CHECK(ckey_encode_scalable(bytes.data(), bytes.size(), 0, CKEY_ECC_M, static_cast<ckey_scalable_layout>(family), &ps, &pd) == CKEY_OK);
+            size_t side = 0;
+            CKEY_CHECK(ckey_render_scalable_print(&ps, nullptr, 0.5, 600, nullptr, 0, &side) == CKEY_INSUFFICIENT_BUFFER && side == 300);
+            std::vector<uint8_t> bitmap(side * side);
+            CKEY_CHECK(ckey_render_scalable_print(&ps, nullptr, 0.5, 600, bitmap.data(), bitmap.size(), &side) == CKEY_OK);
+            for (uint8_t v : bitmap) CKEY_CHECK(v == 0 || v == 255);  // no grey for a printer to halftone
+            int cam_side = 0;
+            const auto frame = printsim::print_and_capture(render(ps), 0.42 * 25.4, inkjet, camera, true, 99, cam_side);
+            const double k = cam_side / 31.0, q[8] = {k, k, 30 * k, k, 30 * k, 30 * k, k, 30 * k};
+            std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0, layout = 0;
+            decoded[family] = ckey_decode_scalable_gray8(frame.data(), cam_side, cam_side, cam_side, q, out.data(), out.size(), &len, &version, &layout, &pd) == CKEY_OK &&
+                              len == bytes.size() && std::equal(bytes.begin(), bytes.end(), out.begin());
+        }
+        std::printf("120-byte payload printed 0.42 in wide on the old-inkjet model: P0 %s, P0.1 %s\n", decoded[0] ? "decodes" : "fails", decoded[1] ? "decodes" : "fails");
+        CKEY_CHECK(!decoded[0] && decoded[1]);
+
+        // P0.1 conformance vectors (same method as Profile 0's).
+        const std::string kat = "CKey renderer test";
+        for (const auto &[version, expected] : {std::pair{3u, kPrintKatV3}, std::pair{31u, kPrintKatV31}}) {
+            ckey_scalable_symbol ps{}; ckey_diagnostics pd{};
+            CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(kat.data()), kat.size(), version, CKEY_ECC_M, CKEY_LAYOUT_PRINT, &ps, &pd) == CKEY_OK);
+            const ScalableLayout &L = scalable_layout(static_cast<int>(version), 1);
+            uint64_t hash = 0xcbf29ce484222325ull;
+            const auto fnv = [&](uint8_t b) { hash = (hash ^ b) * 0x100000001b3ull; };
+            for (size_t i = 0; i < L.nodes.size(); ++i) { for (int k = 0; k < 4; ++k) fnv(static_cast<uint8_t>(L.nodes[i].id >> (8 * k))); fnv(scalable_site_value(L, &ps, i) ? 1 : 0); }
+            std::printf("Profile 0.1 v%u conformance hash %016llx\n", version, static_cast<unsigned long long>(hash));
+            CKEY_CHECK(hash == expected);
         }
     }
     std::printf("CKey Profile 0 tests passed\n");

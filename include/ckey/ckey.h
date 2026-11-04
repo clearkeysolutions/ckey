@@ -20,8 +20,8 @@
 extern "C" {
 #endif
 
-#define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.57"
+#define CKEY_ABI_VERSION 3u
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.58"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -210,6 +210,15 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
  * carries a codeword bit at one of four correction levels.
  */
 #define CKEY_SCALABLE_FORMAT_VERSION 27u
+#define CKEY_SCALABLE_PRINT_FORMAT_VERSION 28u
+/* Profile 0 layout families. STANDARD is Format 0.27. PRINT (Format 0.28,
+ * "P0.1") keeps every mark and gap at least about one module (equal-arc ring
+ * slots, larger dots, wider and fewer rays) so symbols survive small prints:
+ * lower capacity per version, readable at a smaller printed size. */
+typedef enum ckey_scalable_layout {
+    CKEY_LAYOUT_STANDARD = 0,
+    CKEY_LAYOUT_PRINT = 1
+} ckey_scalable_layout;
 #define CKEY_SCALABLE_VERSION_COUNT 31u
 #define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u
 typedef enum ckey_ecc_level {
@@ -222,6 +231,7 @@ typedef struct ckey_scalable_symbol {
     uint32_t abi_version;
     uint32_t version;          /* 1..CKEY_SCALABLE_VERSION_COUNT */
     uint32_t ecc_level;        /* ckey_ecc_level */
+    uint32_t layout;           /* ckey_scalable_layout */
     uint32_t payload_length;
     uint32_t codeword_length;  /* bytes used in codeword[] */
     uint8_t codeword[CKEY_SCALABLE_MAX_CODEWORD_BYTES];
@@ -229,23 +239,26 @@ typedef struct ckey_scalable_symbol {
 /* Modules across the field for a version (29..232); 0 if invalid. The
  * module pitch in the 29-unit canonical field is 29 / modules. */
 CKEY_API uint32_t ckey_scalable_modules_across(uint32_t version);
-/* Maximum payload bytes for a version and level; 0 if either is invalid. */
-CKEY_API size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level);
+/* Maximum payload bytes for a version, level, and layout; 0 if invalid. */
+CKEY_API size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level, ckey_scalable_layout layout);
 /* version 0 selects the smallest version whose capacity fits the payload. */
 CKEY_API ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len,
                                            uint32_t version, ckey_ecc_level level,
+                                           ckey_scalable_layout layout,
                                            ckey_scalable_symbol *out_symbol,
                                            ckey_diagnostics *out_diagnostics);
 CKEY_API ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len,
-                                           uint32_t version, uint8_t *out_payload,
-                                           size_t out_capacity, size_t *out_payload_len,
-                                           ckey_diagnostics *out_diagnostics);
-/* Identifies the version from the keys, then decodes. out_version may be NULL. */
+                                           uint32_t version, ckey_scalable_layout layout,
+                                           uint8_t *out_payload, size_t out_capacity,
+                                           size_t *out_payload_len, ckey_diagnostics *out_diagnostics);
+/* Identifies the layout and version from the keys, then decodes.
+ * out_version and out_layout may be NULL. */
 CKEY_API ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width,
                                                  size_t height, size_t stride,
                                                  const double quad_xy[8],
                                                  uint8_t *out_payload, size_t out_capacity,
                                                  size_t *out_payload_len, uint32_t *out_version,
+                                                 uint32_t *out_layout,
                                                  ckey_diagnostics *out_diagnostics);
 /* Best key fit over all versions for a proposed quadrilateral (negative for
  * invalid arguments); out_version (may be NULL) receives that version. */
@@ -301,7 +314,7 @@ typedef struct ckey_style {
 /* Fills the default style (the plain Profile 0 look). */
 CKEY_API void ckey_style_default(ckey_style *style);
 /* Largest logo radius for a version (keeps the Ring Key and outer ring). */
-CKEY_API double ckey_scalable_logo_max_radius(uint32_t version);
+CKEY_API double ckey_scalable_logo_max_radius(uint32_t version, ckey_scalable_layout layout);
 /* Share (0..) of the worst RS block's correction capacity consumed by marks
  * hidden under a logo of this radius; negative for invalid arguments. A
  * style is accepted up to 0.5, leaving half the correction for damage. */
@@ -311,6 +324,17 @@ CKEY_API ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *symbo
 CKEY_API ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *symbol, const ckey_style *style,
                                                       uint32_t scale, char *out_utf8, size_t out_capacity,
                                                       size_t *out_required);
+/*
+ * Print rendering: black ink on paper on the printer's dot grid, width_in
+ * inches wide (the 31-unit canvas including the quiet margin) at dpi. Each
+ * out_gray byte is 0 (ink) or 255 (paper): there is no grey for a printer
+ * to halftone into noise. style may be NULL (default mark shapes); colours,
+ * materials, and logo images are screen styling and are not printed. Call
+ * with out_gray NULL to get *out_side; the buffer needs side * side bytes.
+ */
+CKEY_API ckey_status ckey_render_scalable_print(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                 double width_in, double dpi, uint8_t *out_gray,
+                                                 size_t out_capacity, size_t *out_side);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

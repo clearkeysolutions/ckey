@@ -19,14 +19,14 @@ struct Rng { uint32_t s; uint32_t next() { s = s * 1664525u + 1013904223u; retur
 uint32_t g_scalable_version = 1;
 
 std::vector<uint8_t> payload_for(int profile, uint32_t seed) {
-    const size_t n = profile == 0 ? ckey_scalable_capacity(g_scalable_version, CKEY_ECC_M)
+    const size_t n = profile == 0 ? ckey_scalable_capacity(g_scalable_version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD)
                    : profile == 1 ? 16 : profile == 2 ? 120 : 1200;
     std::vector<uint8_t> p(n); Rng r{seed}; for (auto &b : p) b = static_cast<uint8_t>(r.next() >> 24); return p;
 }
 
 std::string render(int profile, const std::vector<uint8_t> &payload) {
     ckey_diagnostics d{}; size_t n = 0; std::string svg;
-    if (profile == 0) { ckey_scalable_symbol s{}; ckey_encode_scalable(payload.data(), payload.size(), g_scalable_version, CKEY_ECC_M, &s, &d); ckey_render_scalable_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_scalable_svg(&s, 8, svg.data(), n, &n); }
+    if (profile == 0) { ckey_scalable_symbol s{}; ckey_encode_scalable(payload.data(), payload.size(), g_scalable_version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d); ckey_render_scalable_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_scalable_svg(&s, 8, svg.data(), n, &n); }
     else if (profile == 1) { ckey_symbol s{}; ckey_encode_locator(payload.data(), payload.size(), &s, &d); ckey_render_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_svg(&s, 8, svg.data(), n, &n); }
     else if (profile == 2) { ckey_text_symbol s{}; ckey_encode_text(payload.data(), payload.size(), &s, &d); ckey_render_text_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_text_svg(&s, 8, svg.data(), n, &n); }
     else { ckey_extended_symbol s{}; ckey_encode_extended(payload.data(), payload.size(), &s, &d); ckey_render_extended_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_extended_svg(&s, 8, svg.data(), n, &n); }
@@ -110,7 +110,7 @@ int scan(const std::vector<uint8_t> &frame, int w, int h, const std::vector<uint
     for (size_t i = 0; i < n; ++i) {
         double q[8]; uint32_t version = 0;
         if (ckey_refine_quad_gray8(frame.data(), w, h, w, borders + 8 * i, CKEY_FIELD_SCALABLE, q) > 0 &&
-            ckey_decode_scalable_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &len, &version, &d) == CKEY_OK &&
+            ckey_decode_scalable_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &len, &version, nullptr, &d) == CKEY_OK &&
             len == expected.size() && std::equal(expected.begin(), expected.end(), out.begin())) return 0;
         if (ckey_refine_quad_gray8(frame.data(), w, h, w, borders + 8 * i, CKEY_FIELD_LOCATOR, q) > 0 &&
             ckey_decode_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &d) == CKEY_OK &&

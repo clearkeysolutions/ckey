@@ -64,6 +64,15 @@ A built-in check enforces contrast and effect limits and the logo's error-correc
 ./build/ckey encode-scalable --utf8 "https://citeory.com/tour" --preset concept --modules circle --logo logo.png --out branded.svg
 ```
 
+## Printing
+
+Small prints need dark marks on paper, a device-grid bitmap printed at actual size, and, for small or dense symbols, the print-robust **Profile 0.1** layout ([Format 0.28.0](spec/CKey-Format-v0.28.0.md)). See the [printing guide](spec/CKey-Printing.md).
+
+```sh
+./build/ckey encode-scalable --utf8 "https://citeory.com/tour" --layout print --png p01.png --size-in 0.25 --dpi 600
+./build/ckey print-sheet --out sheet.png   # calibration ladder for your printer and paper
+```
+
 ## Payload conventions
 
 Payloads are bytes. [CKey Payload Conventions](spec/CKey-Payload-Conventions.md) (informative) defines how readers interpret text payloads:

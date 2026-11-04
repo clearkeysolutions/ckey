@@ -1,3 +1,20 @@
+## 0.1.0-dev.58 — 2026-11-04
+
+* **Profile 0.1, a print-robust layout** (Format 0.28.0, byte `1C`).
+  * **Every mark and gap is at least about one module:** equal-arc ring slots (dots at least one module apart on every ring), 0.3-module ring dots, 0.35-module rays at least one module apart, and a compact 8-slot Ring Key.
+  * **Shared with P0:** the same skeleton, 31-version table, framing and correction levels.
+  * **Identification:** the decoder tells the layouts apart by their keys.
+  * **Simulated result:** the same payload decodes at about half Profile 0's printed width. For example, on an old inkjet with plain paper: 30 B at 0.24 in (P0: 0.42), 120 B at 0.32 in (0.68), 1,200 B at 0.91 in (1.47).
+* **ABI 3:** `ckey_scalable_symbol` gains `layout`, and the P0 encode, decode, capacity and logo-radius calls take a layout. `ckey_decode_scalable_gray8` also reports it.
+* **Print output.**
+  * `ckey_render_scalable_print` renders black ink on paper on the printer's dot grid, with no grey for halftoning.
+  * The CLI gains `encode-scalable --png --size-in --dpi --layout` and `print-sheet`, a self-identifying calibration ladder written as a 1-bit PNG that records its dpi.
+  * The CKey Renderer gains a Layout picker and **Export Print PNG…**.
+* **Print simulator** (`tests/print_sim.h`): binary device dots, ink spread, paper blur, then a camera at any resolution.
+  * **Findings for P0:** dark-on-paper prints about 35% smaller than the cream-on-black palette on plain inkjet. Ink-spread compensation does nothing at 600 dpi, because the spread is about one dot. Ring dots fail first.
+  * **Regression test:** a 120-byte payload at 0.42 in on the inkjet model must fail as P0 and decode as P0.1.
+* The reader shows `Profile 0.1 · print · v<N>`. Guides added: `spec/CKey-Printing.md` and `spec/CKey-Format-v0.28.0.md`. The reference rasterizer moved to `src/svg_raster.h`.
+
 ## 0.1.0-dev.57 — 2026-11-04
 
 * **Profile 0 design system** (`spec/CKey-Design-System.md`). Styling changes how a symbol is painted, never where a reader samples.
