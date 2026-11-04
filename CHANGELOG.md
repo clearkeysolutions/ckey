@@ -1,3 +1,7 @@
+## 0.1.0-dev.47 — 2026-11-04
+
+* Added a live reader diagnostic panel: detected border side, candidate count, independent P1/P2/P3 key-fit scores, decode-attempt time, and per-profile integrity outcome refresh while scanning.
+
 ## 0.1.0-dev.46 — 2026-11-04
 
 * Added an independent native Profile 2 calibration-score ABI and reader fit. Profile 2 no longer uses Profile 1 key coordinates before projective sampling.

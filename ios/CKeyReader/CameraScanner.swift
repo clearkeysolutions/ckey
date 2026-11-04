@@ -13,6 +13,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published private(set) var detectionMilliseconds = 0.0
     @Published private(set) var candidateCount = 0
     @Published private(set) var candidateSizes = ""
+    @Published private(set) var scanDetails = "Waiting for a camera frame."
     @Published private(set) var isRunning = false
 
     private let sessionQueue = DispatchQueue(label: "solutions.clearkey.ckey-reader.session")
@@ -152,7 +153,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // The complete locator is measured from the border component, then
         // optimized using the printed Grid, Ring, Ray, and finder keys. No
         // generic rectangle model or fixed distance ladder participates.
-        for quad in borderQuads.prefix(6) {
+        var liveDetails = borderQuads.isEmpty ? "Border: none" : "Border candidates: \(borderQuads.count)"
+        var lastAttemptMilliseconds = 0.0
+        for (candidateIndex, quad) in borderQuads.prefix(6).enumerated() {
             let observed = quadPoints(quad)
             // Compact profiles and Profile 3 have deliberately different
             // calibration fields. Never let a strong P1/P2 score select the
@@ -172,13 +175,29 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                                candidates: borderQuads.count)
                 return
             }
+            lastAttemptMilliseconds = (CACurrentMediaTime() - decodeStarted) * 1000
+            let side = measuredSide(observed)
+            let p1Fit = calibrationScore(gray, width: width, height: height, stride: stride,
+                                         quad: locatorQuad, field: .locator)
+            let p2Fit = calibrationScore(gray, width: width, height: height, stride: stride,
+                                         quad: textQuad, field: .text)
+            let p3Fit = calibrationScore(gray, width: width, height: height, stride: stride,
+                                         quad: extendedQuad, field: .extended)
+            // Keep the leading candidate visible in real time. It is the one
+            // the decoder is most likely to accept and makes a bad border fit
+            // obvious without waiting for a successful scan.
+            if candidateIndex == 0 {
+                liveDetails = "Border \(String(format: \"%.0f\", side)) px · fit P1 \(String(format: \"%.1f\", p1Fit)) · P2 \(String(format: \"%.1f\", p2Fit)) · P3 \(String(format: \"%.1f\", p3Fit))\nAttempt \(String(format: \"%.1f\", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
+            }
         }
-        DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "mathematical border candidates: \(borderQuads.count)" }
+        DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "\(borderQuads.count) measured border component(s)" }
         publishProgress(borderQuads.isEmpty ? "Searching for CKey border and finder keys…" : "Calibrating CKey keys · \(lastDecodeDiagnostic)",
-                        detectionMilliseconds: borderDetectionMilliseconds, candidates: borderQuads.count)
+                        detectionMilliseconds: borderDetectionMilliseconds, candidates: borderQuads.count,
+                        attemptMilliseconds: lastAttemptMilliseconds, details: liveDetails)
     }
 
     private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int,
+                                 attemptMilliseconds: Double = 0, details: String = "",
                                  force: Bool = false) {
         let now = CACurrentMediaTime()
         guard force || now - lastProgressTime >= 0.5 else { return }
@@ -186,8 +205,16 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         DispatchQueue.main.async {
             self.status = text
             self.detectionMilliseconds = detectionMilliseconds
+            self.decodeMilliseconds = attemptMilliseconds
             self.candidateCount = candidates
+            if !details.isEmpty { self.scanDetails = details }
         }
+    }
+
+    private func measuredSide(_ quad: [CGPoint]) -> Double {
+        guard quad.count == 4 else { return 0 }
+        return Double((hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y) +
+                       hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)) * 0.5)
     }
 
     private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double,
