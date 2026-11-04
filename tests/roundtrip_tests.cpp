@@ -155,6 +155,30 @@ int main() {
         expect_decodes(profile, blurred, payload, "3x3 box blur");
         std::printf("profile %d: round trips passed at %d px/unit\n", profile, density[profile]);
     }
+    // Blur across densities (dense profiles): one 3x3 blur from 12 px/unit,
+    // two from 12 (P3) or 14 (P2). Before ring-context thresholds, every P3
+    // case here failed: blurred isolated ring dots fell below the arc-
+    // dominated class threshold.
+    for (int profile = 2; profile <= 3; ++profile) {
+        const size_t length = profile == 2 ? CKEY_TEXT_PAYLOAD_MAX_BYTES : CKEY_EXTENDED_PAYLOAD_MAX_BYTES;
+        const auto payload = pseudo_random(length, 4242u + profile);
+        const std::string svg = render(profile, payload);
+        Image once = raster(profile, svg, 12); box_blur(once);
+        expect_decodes(profile, once, payload, "one blur at 12 px/unit");
+        Image twice = raster(profile, svg, profile == 2 ? 14 : 12); box_blur(twice); box_blur(twice);
+        expect_decodes(profile, twice, payload, "two blurs");
+    }
+    std::printf("dense profiles: blur sweep passed\n");
+
+    // Noise is rejected by every decoder (and the dense key gate rejects it
+    // before full-site sampling).
+    {
+        Image noise; noise.side = 31 * 16; noise.px = pseudo_random(static_cast<size_t>(noise.side) * noise.side, 77);
+        const double q[8] = {16, 16, 480, 16, 480, 480, 16, 480};
+        std::vector<uint8_t> out;
+        for (int profile = 1; profile <= 3; ++profile) CKEY_CHECK(decode(profile, noise.px, noise.side, q, out) != CKEY_OK);
+    }
+
     // Profile 1 near its clean-render floor: 24 random locators at 6 px/unit.
     // (Dev.48 failed about half of these: its empty reference was a payload module.)
     for (uint32_t t = 0; t < 24; ++t) {

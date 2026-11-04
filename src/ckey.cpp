@@ -703,6 +703,10 @@ constexpr double kLocatorRaySpread = kLocatorSampleSpread;
 // never printed, unlike the former (1.5, 11.5) reference, which is a
 // Cartesian payload module.
 constexpr double kLocatorApertureRadius = 6.9;
+// A dense decoder samples every site only for orientations whose fixed keys
+// agree: at least this fraction of key samples must match the expected print
+// pattern. Wrong orientations and non-symbols are rejected cheaply.
+constexpr double kDenseKeyGate = 0.8;
 constexpr double kModuleSpread = 0.06;   // 0.34-unit dense Cartesian modules
 constexpr double kDotSpread = 0.025;     // 0.15-0.20-unit ring dots and arcs
 constexpr double kRaySpread = 0.02;      // 0.10-0.16-unit radial strokes
@@ -741,25 +745,71 @@ double polar_sample_slots(const uint8_t *gray, size_t width, size_t height, size
     return gray_sample(gray,width,height,stride,h,center+radius*std::sin(a),center-radius*std::cos(a),spread);
 }
 
-// Two-cluster threshold over normalized samples (0 = unprinted reference,
-// 1 = printed reference). Whitening makes every feature class roughly half
-// printed, so a class's own samples calibrate its threshold; this absorbs
-// the lower peak contrast of sub-pixel dots and strokes. The result is
-// bounded so a degenerate class falls back toward the global midpoint.
-double class_threshold(const std::vector<double> &values) {
+// Two-cluster (two-means) split of normalized samples (0 = unprinted
+// reference, 1 = printed reference). Whitening makes every feature class
+// roughly half printed, so a class's own samples calibrate its threshold;
+// this absorbs the lower peak contrast of sub-pixel dots and strokes. The
+// cut is bounded to [0.05, 0.95]: P3 width coverage legitimately separates
+// near 0.85, so a tighter bound would misplace it. `separation` reports the
+// distance between the two cluster means.
+double two_means_cut(const std::vector<double> &values, double &separation) {
+    separation = 0;
     if (values.size() < 16) return 0.5;
     const auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
-    double lo = 0.0, hi = 1.0, threshold = std::clamp((*min_it + *max_it) * 0.5, 0.2, 0.8);
-    for (int iteration = 0; iteration < 16; ++iteration) {
+    double threshold = std::clamp((*min_it + *max_it) * 0.5, 0.05, 0.95);
+    for (int iteration = 0; iteration < 32; ++iteration) {
         double sum_lo = 0, sum_hi = 0; size_t n_lo = 0, n_hi = 0;
         for (double v : values) { if (v > threshold) { sum_hi += v; ++n_hi; } else { sum_lo += v; ++n_lo; } }
-        if (!n_lo || !n_hi) break;
-        lo = sum_lo / n_lo; hi = sum_hi / n_hi;
-        const double next = std::clamp((lo + hi) * 0.5, 0.2, 0.8);
+        if (!n_lo || !n_hi) { separation = 0; break; }
+        const double lo = sum_lo / n_lo, hi = sum_hi / n_hi;
+        separation = hi - lo;
+        const double next = std::clamp((lo + hi) * 0.5, 0.05, 0.95);
         if (std::abs(next - threshold) < 1e-6) break;
         threshold = next;
     }
     return threshold;
+}
+
+double class_threshold(const std::vector<double> &values) {
+    double separation = 0;
+    return two_means_cut(values, separation);
+}
+
+// Ring sites join into arcs, so under blur an isolated dot peaks far lower
+// than a dot inside a run, and a gap between two runs rises. Refine each data
+// ring site's decision by its neighbour context (0, 1, or 2 printed ring
+// neighbours), with a separate two-means cut per context. Fill sites'
+// printed values are known exactly (whitening only), which anchors the
+// context. A context keeps the class cut unless its own two clusters are
+// clearly separated, so a one-sided context is never split spuriously.
+// `grid` maps ring * slots + slot to a site index (-1 for reserved slots).
+void refine_ring_context(const std::vector<int> &grid, int rings, int slots, size_t data_sites,
+                         const std::vector<uint8_t> &white, const std::vector<double> &level,
+                         double class_cut, std::vector<uint8_t> &printed) {
+    constexpr double kMinSeparation = 0.2;
+    const auto value_at = [&](int ring, int slot) -> int {
+        const int index = grid[static_cast<size_t>(ring) * slots + static_cast<size_t>((slot + slots) % slots)];
+        return index < 0 ? 0 : printed[static_cast<size_t>(index)];
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        std::array<std::vector<double>, 3> by_context;
+        std::vector<std::pair<size_t, int>> sites;
+        for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
+            const int index = grid[static_cast<size_t>(ring) * slots + slot];
+            if (index < 0 || static_cast<size_t>(index) >= data_sites) continue;
+            const int context = value_at(ring, slot - 1) + value_at(ring, slot + 1);
+            by_context[context].push_back(level[static_cast<size_t>(index)]);
+            sites.push_back({static_cast<size_t>(index), context});
+        }
+        std::array<double, 3> cut{class_cut, class_cut, class_cut};
+        for (int context = 0; context < 3; ++context) {
+            double separation = 0;
+            const double candidate = two_means_cut(by_context[context], separation);
+            if (separation >= kMinSeparation) cut[context] = candidate;
+        }
+        for (const auto &[index, context] : sites) printed[index] = level[index] > cut[context] ? 1 : 0;
+    }
+    (void)white;
 }
 
 bool is_tiered_extended_format(uint8_t format) {
@@ -795,6 +845,84 @@ bool valid_quad(const double q[8]) {
     }
     return std::abs(area)>4.0;
 }
+}
+
+namespace {
+// Fixed-key evidence for one candidate homography: contrast between printed
+// and never-printed key samples, and the fraction of key samples that agree
+// with the expected print pattern. Used by the calibration scores and as a
+// cheap per-orientation gate before a dense decoder samples ~2k-21k sites.
+struct KeyFit { bool valid = false; double contrast = 0, evidence = 0; };
+
+KeyFit text_key_fit(const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
+        std::vector<double> marks, empty;
+        for (int r : {11,12}) for (int c : {2,3})
+            marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
+        for (int slot : {36,38,42})
+            marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,slot,144.0,kDotSpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,47.5,144.0,kDotSpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,0.0,144.0,kRaySpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.4,108.0,144.0,kRaySpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,110.0,144.0,kRaySpread));
+        constexpr double finder_inset=4.0, finder_radius=2.3;
+        const double diagonal=kTau/8.0;
+        for (const auto &[cx,cy,a] : {std::tuple{25.0,4.0,kTau*315.0/360.0},
+                                      std::tuple{4.0,25.0,kTau*135.0/360.0},
+                                      std::tuple{25.0,25.0,kTau*45.0/360.0}})
+            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
+        for (double a : {kTau*198.0/360.0,kTau*252.0/360.0})
+            marks.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(a),finder_inset+finder_radius*std::sin(a)));
+        // The top-left finder's split gap (225 deg) is never printed. (The 45 deg
+        // point used by Profile 1 is a payload site under Profile 2's safe area.)
+        empty.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(5.0*diagonal),finder_inset+finder_radius*std::sin(5.0*diagonal)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,40.0,144.0,kDotSpread));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,108.0,144.0,kRaySpread));
+        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) return {};
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
+        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
+        const double contrast=std::abs(mark_mean-empty_mean), threshold=(mark_mean+empty_mean)*.5;
+        const bool dark=mark_mean<empty_mean;
+        const auto marked=[&](double value){return dark ? value<threshold : value>threshold;};
+        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
+            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
+        return {true, contrast, static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size())};
+}
+
+KeyFit extended_key_fit(const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
+        std::vector<double> marks, empty;
+        // Grid Key, Ring Key, and Ray Key are all fixed in physical modules.
+        for (int r=0;r<2;++r) for (int c=0;c<2;++c) marks.push_back(gray_sample(gray,width,height,stride,h,8.25+c*.5,45.25+r*.5,kModuleSpread));
+        for (int slot : {72,73,75}) marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,slot,288.0,kDotSpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,77.5,288.0,kDotSpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.0,0.0,576.0,kRaySpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,27.9,432.0,576.0,kRaySpread));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.4,440.0,576.0,kRaySpread));
+        // Three whole finder arcs plus both halves of the split orientation
+        // arc. These are measured on the actual *outer* corner quadrants: a
+        // finder mouth faces the polar field but its ink follows the frame.
+        constexpr double finder_radius=9.2;
+        for (const auto &[cx,cy,a] : {std::tuple{100.0,16.0,kTau*315.0/360.0},
+                                      std::tuple{16.0,100.0,kTau*135.0/360.0},
+                                      std::tuple{100.0,100.0,kTau*45.0/360.0}})
+            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
+        for (double a : {kTau*195.0/360.0,kTau*255.0/360.0})
+            marks.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(a),16.0+finder_radius*std::sin(a)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(kTau*225.0/360.0),16.0+finder_radius*std::sin(kTau*225.0/360.0)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,kExtendedGridClearX,kExtendedGridClearY,kModuleSpread));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,74.0,288.0,kDotSpread));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedPolarGapRadius,216.0,576.0,kRaySpread));
+        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) return {};
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
+        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
+        const double contrast=std::abs(mark_mean-empty_mean); const bool dark=mark_mean<empty_mean;
+        const double threshold=(mark_mean+empty_mean)*.5;
+        const auto marked=[&](double value){ return dark ? value<threshold : value>threshold; };
+        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
+            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
+        return {true, contrast, static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size())};
+}
+
 }
 
 extern "C" {
@@ -1090,36 +1218,8 @@ double ckey_calibration_score_text_gray8(const uint8_t *gray, size_t width, size
             dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1];
         }
         double h[8]; if (!solve_homography(canonical,dst,h)) continue;
-        std::vector<double> marks, empty;
-        for (int r : {11,12}) for (int c : {2,3})
-            marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
-        for (int slot : {36,38,42})
-            marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,slot,144.0,kDotSpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,47.5,144.0,kDotSpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,0.0,144.0,kRaySpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.4,108.0,144.0,kRaySpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,110.0,144.0,kRaySpread));
-        constexpr double finder_inset=4.0, finder_radius=2.3;
-        const double diagonal=kTau/8.0;
-        for (const auto &[cx,cy,a] : {std::tuple{25.0,4.0,kTau*315.0/360.0},
-                                      std::tuple{4.0,25.0,kTau*135.0/360.0},
-                                      std::tuple{25.0,25.0,kTau*45.0/360.0}})
-            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
-        for (double a : {kTau*198.0/360.0,kTau*252.0/360.0})
-            marks.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(a),finder_inset+finder_radius*std::sin(a)));
-        empty.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(diagonal),finder_inset+finder_radius*std::sin(diagonal)));
-        empty.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
-        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,40.0,144.0,kDotSpread));
-        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,108.0,144.0,kRaySpread));
-        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) continue;
-        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
-        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
-        const double contrast=std::abs(mark_mean-empty_mean), threshold=(mark_mean+empty_mean)*.5;
-        const bool dark=mark_mean<empty_mean;
-        const auto marked=[&](double value){return dark ? value<threshold : value>threshold;};
-        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
-            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
-        best=std::max(best,contrast*static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size()));
+        const KeyFit fit=text_key_fit(gray,width,height,stride,h);
+        if (fit.valid) best=std::max(best,fit.contrast*fit.evidence);
     }
     return best;
 }
@@ -1133,37 +1233,8 @@ double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_t width, 
         double dst[8];
         for (int i=0; i<4; ++i) { const int q=(start+(reverse ? -i : i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
         double h[8]; if (!solve_homography(canonical,dst,h)) continue;
-        std::vector<double> marks, empty;
-        // Grid Key, Ring Key, and Ray Key are all fixed in physical modules.
-        for (int r=0;r<2;++r) for (int c=0;c<2;++c) marks.push_back(gray_sample(gray,width,height,stride,h,8.25+c*.5,45.25+r*.5,kModuleSpread));
-        for (int slot : {72,73,75}) marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,slot,288.0,kDotSpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,77.5,288.0,kDotSpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.0,0.0,576.0,kRaySpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,27.9,432.0,576.0,kRaySpread));
-        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.4,440.0,576.0,kRaySpread));
-        // Three whole finder arcs plus both halves of the split orientation
-        // arc. These are measured on the actual *outer* corner quadrants: a
-        // finder mouth faces the polar field but its ink follows the frame.
-        constexpr double finder_radius=9.2;
-        for (const auto &[cx,cy,a] : {std::tuple{100.0,16.0,kTau*315.0/360.0},
-                                      std::tuple{16.0,100.0,kTau*135.0/360.0},
-                                      std::tuple{100.0,100.0,kTau*45.0/360.0}})
-            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
-        for (double a : {kTau*195.0/360.0,kTau*255.0/360.0})
-            marks.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(a),16.0+finder_radius*std::sin(a)));
-        empty.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(kTau*225.0/360.0),16.0+finder_radius*std::sin(kTau*225.0/360.0)));
-        empty.push_back(gray_sample(gray,width,height,stride,h,kExtendedGridClearX,kExtendedGridClearY,kModuleSpread));
-        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedRingKeyRadius,74.0,288.0,kDotSpread));
-        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,kExtendedPolarGapRadius,216.0,576.0,kRaySpread));
-        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) continue;
-        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
-        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
-        const double contrast=std::abs(mark_mean-empty_mean); const bool dark=mark_mean<empty_mean;
-        const double threshold=(mark_mean+empty_mean)*.5;
-        const auto marked=[&](double value){ return dark ? value<threshold : value>threshold; };
-        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
-            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
-        best=std::max(best,contrast*static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size()));
+        const KeyFit fit=extended_key_fit(gray,width,height,stride,h);
+        if (fit.valid) best=std::max(best,fit.contrast*fit.evidence);
     }
     return best;
 }
@@ -1272,6 +1343,7 @@ ckey_status ckey_decode_text_gray8(const uint8_t *gray, size_t width, size_t hei
         double dst[8],h[8];
         for (int i=0;i<4;++i) { const int q=(start+(reverse?-i:i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
         if (!solve_homography(canonical,dst,h)) continue;
+        { const KeyFit fit=text_key_fit(gray,width,height,stride,h); if (!fit.valid || fit.evidence<kDenseKeyGate) continue; }
         std::vector<double> marks, empties;
         for (int r:{11,12}) for(int c:{2,3}) marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
         // Both points lie inside declared clearances, so they are never printed.
@@ -1298,9 +1370,17 @@ ckey_status ckey_decode_text_gray8(const uint8_t *gray, size_t width, size_t hei
         }
         if (!usable) continue;
         const std::array<double,3> cut={class_threshold(classes[0]),class_threshold(classes[1]),class_threshold(classes[2])};
+        // printed[i]: estimated printed value of site i. Fill sites are known.
+        std::vector<uint8_t> printed(nodes.size());
+        for (size_t i=0;i<nodes.size();++i) printed[i]=i<bits ? (level[i]>cut[feature(nodes[i])]) : white[i];
+        static const std::vector<int> ring_grid=[]{
+            std::vector<int> grid(kTextRings*kTextSlots,-1); const auto &all=text_nodes();
+            for (size_t i=0;i<all.size();++i) if (!all[i].cart && !all[i].dial) grid[static_cast<size_t>(all[i].ring)*kTextSlots+all[i].slot]=static_cast<int>(i);
+            return grid; }();
+        refine_ring_context(ring_grid,kTextRings,kTextSlots,bits,white,level,cut[2],printed);
         std::array<uint8_t,kTextCodewordBytes> cw{};
         for (size_t bit=0;bit<bits;++bit)
-            if ((level[bit]>cut[feature(nodes[bit])]) != (white[bit]!=0)) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8)));
+            if ((printed[bit]!=0) != (white[bit]!=0)) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8)));
         std::array<uint8_t,CKEY_TEXT_PAYLOAD_MAX_BYTES> candidate{}; size_t candidate_len=0; ckey_diagnostics local{};
         if (ckey_decode_text(cw.data(),cw.size(),candidate.data(),candidate.size(),&candidate_len,&local)!=CKEY_OK) continue;
         const std::vector<uint8_t> result(candidate.begin(),candidate.begin()+static_cast<std::ptrdiff_t>(candidate_len));
@@ -1328,6 +1408,7 @@ ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t width, size_t
         double dst[8],h[8];
         for (int i=0;i<4;++i) { const int q=(start+(reverse?-i:i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
         if (!solve_homography(canonical,dst,h)) continue;
+        { const KeyFit fit=extended_key_fit(gray,width,height,stride,h); if (!fit.valid || fit.evidence<kDenseKeyGate) continue; }
         std::vector<double> marks, empties;
         for (int r=0;r<2;++r) for (int c=0;c<2;++c) marks.push_back(gray_sample(gray,width,height,stride,h,8.25+c*.5,45.25+r*.5,kModuleSpread));
         empties.push_back(gray_sample(gray,width,height,stride,h,kExtendedGridClearX,kExtendedGridClearY,kModuleSpread));
@@ -1376,12 +1457,20 @@ ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t width, size_t
         if (!usable) continue;
         const double cart_cut=class_threshold(cart_values), ring_cut=class_threshold(ring_values);
         const double probe_cut=class_threshold(probe_values), width_cut=class_threshold(width_values);
+        std::vector<uint8_t> ring_printed(nodes.size());
+        for (size_t i=0;i<nodes.size();++i)
+            ring_printed[i]=i<kExtendedBits ? (nodes[i].kind==ExtendedKind::ring && level[i]>ring_cut) : white[i];
+        static const std::vector<int> ring_grid=[]{
+            std::vector<int> grid(kExtendedRings*kExtendedRingSlots,-1); const auto &all=extended_nodes();
+            for (size_t i=0;i<all.size();++i) if (all[i].kind==ExtendedKind::ring) grid[static_cast<size_t>(all[i].ring)*kExtendedRingSlots+all[i].slot]=static_cast<int>(i);
+            return grid; }();
+        refine_ring_context(ring_grid,kExtendedRings,kExtendedRingSlots,kExtendedBits,white,level,ring_cut,ring_printed);
         std::array<uint8_t,kExtendedCodewordBytes> cw{};
         for (size_t bit=0;bit<kExtendedBits;++bit) {
             const auto &n=nodes[bit];
             bool printed;
             if (n.kind==ExtendedKind::cart) printed=level[bit]>cart_cut;
-            else if (n.kind==ExtendedKind::ring) printed=level[bit]>ring_cut;
+            else if (n.kind==ExtendedKind::ring) printed=ring_printed[bit]!=0;
             else if (n.component==2) printed=coverage[n.slot]>width_cut;
             else {
                 int length=0;
@@ -1391,7 +1480,6 @@ ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t width, size_t
             }
             if (printed != (white[bit]!=0)) cw[bit/8]|=static_cast<uint8_t>(1u<<(7-(bit%8)));
         }
-        if (!usable) continue;
         std::array<uint8_t,CKEY_EXTENDED_PAYLOAD_MAX_BYTES> candidate{}; size_t candidate_len=0; ckey_diagnostics local{};
         if (ckey_decode_extended(cw.data(),cw.size(),candidate.data(),candidate.size(),&candidate_len,&local)!=CKEY_OK) continue;
         const std::vector<uint8_t> result(candidate.begin(),candidate.begin()+static_cast<std::ptrdiff_t>(candidate_len));
@@ -1410,6 +1498,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     const auto &nodes = data_nodes();
     if (nodes.size() < kBits) return CKEY_INTERNAL_ERROR;
     std::ostringstream o; o << std::fixed << std::setprecision(4);
+    std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<g class=\"ckey-frame\"><rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/></g>"
@@ -1436,7 +1525,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     const double a1 = kTau * 25.5 / 72.0 - cap_angle;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
       << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"round\"/>";
-    o << "</g><g class=\"ckey-data\">";
+    o << "</g><g class=\"ckey-data-polar\">";
     for (size_t i = 0; i < kBits; ++i) {
         const Node &n = nodes[i];
         if (n.dial) {
@@ -1450,9 +1539,9 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
         }
         if (!code_bit(s, i)) continue;
         if (n.polar) svg_circle(o, n.x, n.y, polar_dot_radius());
-        else o << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
+        else c << "<rect x=\"" << n.col + .13 << "\" y=\"" << n.row + .13 << "\" width=\"0.74\" height=\"0.74\" rx=\"0.16\" stroke=\"none\"/>";
     }
-    o << "</g></g></svg>";
+    o << "</g><g class=\"ckey-data-cartesian\">" << c.str() << "</g></g></svg>";
     const std::string text = o.str(); *required = text.size() + 1;
     if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out, text.c_str(), *required);
@@ -1466,6 +1555,7 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     const auto &nodes = text_nodes();
     if (nodes.size() < kTextCodewordBytes * 8) return CKEY_INTERNAL_ERROR;
     std::ostringstream o; o << std::fixed << std::setprecision(4);
+    std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey text symbol profile 2\">"
       << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<g class=\"ckey-frame\"><rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/></g>"
@@ -1481,11 +1571,11 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     constexpr double key_radius=6.41, dot_radius=.10;
     for (int slot : {36,38,42}) { const double a=kTau*slot/144.0; svg_circle(o,kCenter+key_radius*std::sin(a),kCenter-key_radius*std::cos(a),dot_radius); }
     svg_ring_run(o,kCenter,key_radius,43.5,51.5,144.0,dot_radius,"0.2000");
-    o << "</g><g class=\"ckey-data\">";
+    o << "</g><g class=\"ckey-data-polar\">";
     std::array<std::array<bool,kTextSlots>,kTextRings> ring_bits{};
     for (size_t i=0;i<nodes.size();++i) {
         const auto &n=nodes[i]; const bool bit=text_site_value(s,i);
-        if (n.cart) { if (bit) o << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\"0.34\" height=\"0.34\" rx=\"0.08\" stroke=\"none\"/>"; }
+        if (n.cart) { if (bit) c << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\"0.34\" height=\"0.34\" rx=\"0.08\" stroke=\"none\"/>"; }
         else if (n.dial) { const double a=kTau*n.slot/144.0, length=bit?1.20:.52; o << "<path d=\"M " << kCenter+7.6*std::sin(a) << ' ' << kCenter-7.6*std::cos(a) << " L " << kCenter+(7.6+length)*std::sin(a) << ' ' << kCenter-(7.6+length)*std::cos(a) << "\" fill=\"none\" stroke-width=\"0.1000\" stroke-linecap=\"round\"/>"; }
         else ring_bits[n.ring][n.slot]=bit;
     }
@@ -1499,7 +1589,7 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
             slot=end;
         }
     }
-    o << "</g></g></svg>";
+    o << "</g><g class=\"ckey-data-cartesian\">" << c.str() << "</g></g></svg>";
     const std::string text=o.str(); *required=text.size()+1;
     if (!out || cap<*required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out,text.c_str(),*required); return CKEY_OK;
@@ -1511,6 +1601,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     const auto &nodes=extended_nodes(); if (nodes.size()<kExtendedBits) return CKEY_INTERNAL_ERROR;
     constexpr double center=58.0, dot_radius=.075;
     std::ostringstream o; o << std::fixed << std::setprecision(4);
+    std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
       << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
       << "<g class=\"ckey-frame\"><rect x=\"2\" y=\"2\" width=\"112\" height=\"112\" rx=\"14\" fill=\"none\" stroke-width=\"2.6\"/></g>"
@@ -1531,11 +1622,11 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     constexpr double key_r=kExtendedRingKeyRadius;
     for (int slot : {72,73,75}) { const double a=kTau*slot/kExtendedRingSlots; svg_circle(o,center+key_r*std::sin(a),center-key_r*std::cos(a),dot_radius); }
     svg_ring_run(o,center,key_r,75.5,79.5,kExtendedRingSlots,dot_radius,".1500");
-    o << "</g><g class=\"ckey-data\">";
+    o << "</g><g class=\"ckey-data-polar\">";
     std::array<std::array<bool,kExtendedRingSlots>,kExtendedRings> ring_bits{}; std::array<std::array<bool,3>,kExtendedRaySlots> ray_bits{};
     for (size_t i=0;i<nodes.size();++i) {
         const auto &n=nodes[i]; const bool bit=extended_site_value(s,i);
-        if (n.kind==ExtendedKind::cart) { if (bit) o << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\".34\" height=\".34\" rx=\".08\" stroke=\"none\"/>"; }
+        if (n.kind==ExtendedKind::cart) { if (bit) c << "<rect x=\"" << n.x-.17 << "\" y=\"" << n.y-.17 << "\" width=\".34\" height=\".34\" rx=\".08\" stroke=\"none\"/>"; }
         else if (n.kind==ExtendedKind::ring) ring_bits[n.ring][n.slot]=bit;
         else ray_bits[n.slot][n.component]=bit;
     }
@@ -1557,7 +1648,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
             slot=end;
         }
     }
-    o << "</g></g></svg>"; const std::string text=o.str(); *required=text.size()+1;
+    o << "</g><g class=\"ckey-data-cartesian\">" << c.str() << "</g></g></svg>"; const std::string text=o.str(); *required=text.size()+1;
     if (!out || cap<*required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out,text.c_str(),*required);
     return CKEY_OK;

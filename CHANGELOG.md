@@ -1,3 +1,20 @@
+## 0.1.0-dev.50 — 2026-11-04
+
+An independent second review of dev.49 was run under rule 7 and every verified finding is resolved. Formats 0.25 and 0.26 are unchanged on the wire; their specifications gain clarifications only.
+
+* **P3 isolated ring dots under blur.** Each 3×3 blur turned every isolated P3 ring dot into a 0. The reviewer measured 608/608 failing at 12 px/unit, and P3 failed with two blurs at every density. Ring sites are now re-thresholded by neighbour context, with fill sites' known values as the anchor. P3 now decodes 3/3 at 10–16 px/unit through two blurs. P2 now survives one blur at 10 px/unit and two blurs at 12.
+* **Threshold bound.** The two-means cut bound widened from [0.2, 0.8] to [0.05, 0.95]. P3 width coverage separates near 0.85.
+* **P2 calibration reference.** One "empty" reference, at (5.626, 5.626), was a payload site under the new safe area. It now samples the finder's split gap at 225°.
+* **Faster dense decoders.** They gate each orientation on fixed-key agreement (≥ 80%) before sampling every site. On a 1080p noise frame, P3 decode fell from 18 ms to 0.42 ms per call and P2 from 0.34 ms to 0.05 ms. Calibration scores are value-identical.
+* **Specification clarifications.** v0.25/v0.26 now give full render geometry, the explicit SplitMix32 definition and whitening bit order, the P3 Gray component order, the gap measurement basis, the reason for the ring-33 Ring Key clear field, and an integer-only conformance vector.
+* **Tests.**
+  * The layout tests now check known-answer vectors.
+  * They measure the Cartesian-to-radial-alphabet ink gap; it is 0.58 in both profiles.
+  * They enforce the documented boundary slack.
+  * The round-trip tests add blur across densities and noise rejection.
+  * The SVG payload layer is split into `ckey-data-cartesian` and `ckey-data-polar`.
+  * A dead branch was removed.
+
 ## 0.1.0-dev.49 — 2026-11-04
 
 * **Profile 2/3 image decoding fixed.** At HEAD, neither profile could decode its own clean renders at any resolution. The sampler's fixed ±0.12-unit support, sized for P1's one-unit modules, averaged P2/P3's 0.10–0.20-unit dots and rays below threshold. Each feature class now uses a support matched to its width and a threshold calibrated from its own samples (two-means). P3 ray width is read as integrated coverage.
