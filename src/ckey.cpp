@@ -363,6 +363,10 @@ std::vector<TextNode> text_nodes() {
     std::vector<TextNode> cart, polar, out;
     for (int row = 1; row < grid - 1; ++row) for (int col = 1; col < grid - 1; ++col) {
         const double x = (col + .5) * pitch, y = (row + .5) * pitch;
+        // Keep a measured clear moat around the frame.  Marks in the
+        // anti-aliasing fringe of the border are neither useful capacity nor
+        // reliably separable from the frame by a camera.
+        if (x < 1.35 || x > 27.65 || y < 1.35 || y > 27.65) continue;
         const bool finder = (x < 6.1 && y < 6.1) || (x > 22.9 && y < 6.1) ||
                             (x < 6.1 && y > 22.9) || (x > 22.9 && y > 22.9);
         const bool grid_reference = x > 1.8 && x < 4.2 && y > 10.8 && y < 13.2;
@@ -397,7 +401,7 @@ enum class ExtendedKind : uint8_t { cart, ring, ray };
 struct ExtendedNode { ExtendedKind kind; double x, y; int ring, slot, component; };
 
 std::vector<ExtendedNode> extended_nodes() {
-    constexpr int grid = 232, slots = 288, rings = 24;
+    constexpr int grid = 232, slots = 288, rings = 34;
     constexpr double pitch = .5, center = 58.0;
     std::vector<ExtendedNode> cart, polar, out;
     // Profile 3 keeps the same visual finder proportion as Profile 1/2 but
@@ -406,7 +410,10 @@ std::vector<ExtendedNode> extended_nodes() {
     for (int row = 1; row < grid - 1; ++row) for (int col = 1; col < grid - 1; ++col) {
         const double x = (col + .5) * pitch, y = (row + .5) * pitch;
         // Structural boundary plus its anti-alias/blur guard is never payload.
-        if (x < 4.0 || x > 112.0 || y < 4.0 || y > 112.0) continue;
+        // The P3 border is 2.6 units wide.  A 5-unit moat gives the same
+        // black clear-space ratio as P1/P2 and stops Cartesian marks from
+        // visually spilling into the frame after rasterization or blur.
+        if (x < 5.0 || x > 111.0 || y < 5.0 || y > 111.0) continue;
         // Reserve only the actual finder strokes plus a measurable guard,
         // not the entire square corner envelope. This keeps data in the
         // useful regions beside and between the curves.
@@ -426,9 +433,9 @@ std::vector<ExtendedNode> extended_nodes() {
         if (finder || grid_reference || dx * dx + dy * dy <= 31.3 * 31.3) continue;
         cart.push_back({ExtendedKind::cart, x, y, -1, -1, -1});
     }
-    // Twenty-four rings are laterally denser than Profile 2, but their 0.65-unit
-    // centre spacing remains more than four dot diameters. The dot is not
-    // made smaller to fabricate capacity.
+    // Thirty-four rings occupy the central field from r=3.5 through r=23.96.
+    // The pitch is 0.62 units, over four diameters, so the added capacity uses
+    // empty radial space rather than reducing a resolvable dot into noise.
     // A deterministic two-dimensional permutation distributes the finite
     // codeword through the full Cartesian annulus. Row-major and pure radial
     // traversals both leave large, misleading empty regions at this profile.
@@ -440,7 +447,7 @@ std::vector<ExtendedNode> extended_nodes() {
     for (int ring = 0; ring < rings; ++ring) for (int slot = 0; slot < slots; ++slot) {
         if (slot == 0 || slot == 216 || slot == 224 ||
             (ring == rings - 1 && slot >= 72 && slot <= 79)) continue;
-        const double radius = 9.50 + .65 * ring;
+        const double radius = 3.50 + .62 * ring;
         const double a = kTau * slot / slots;
         polar.push_back({ExtendedKind::ring, center + radius * std::sin(a), center - radius * std::cos(a), ring, slot, -1});
     }
@@ -684,7 +691,7 @@ ckey_status ckey_decode_text(const uint8_t *codeword, size_t codeword_len,
     uint32_t corrections = 0;
     if (!rs_correct_generic(corrected, kTextParityBytes, corrections)) { set_status(diag, CKEY_UNCORRECTABLE, "text Reed-Solomon correction failed"); return CKEY_UNCORRECTABLE; }
     if (corrected[0] != 0xc7 || corrected[1] != 0x4b ||
-        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
+        (corrected[2] != 9u && corrected[2] != 15u && corrected[2] != 18u && corrected[2] != CKEY_TEXT_FORMAT_VERSION) || corrected[3] != 2) {
         set_status(diag, CKEY_INTEGRITY_FAILURE, "text frame has invalid magic, format, or profile"); return CKEY_INTEGRITY_FAILURE;
     }
     const size_t length = (static_cast<size_t>(corrected[4]) << 8) | corrected[5];
@@ -765,7 +772,7 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
         if (framed[0]!=0xc7 || framed[1]!=0x4b || framed[3]!=3) return CKEY_INTEGRITY_FAILURE;
         size_t length=0, payload_offset=0, crc_index=0;
         if (tiered) {
-            if (framed[2] != CKEY_EXTENDED_FORMAT_VERSION || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
+            if ((framed[2] != 17u && framed[2] != CKEY_EXTENDED_FORMAT_VERSION) || framed[4] == 0 || framed[4] > kExtendedTierCapacities.size()) return CKEY_INTEGRITY_FAILURE;
             const size_t selected = framed[4]-1;
             if (data_bytes != (11+kExtendedTierCapacities[selected]+kExtendedBlocks-1)/kExtendedBlocks) return CKEY_INTEGRITY_FAILURE;
             length=(static_cast<size_t>(framed[5])<<8)|framed[6]; payload_offset=7; crc_index=payload_offset+length;
@@ -793,9 +800,9 @@ ckey_status ckey_decode_extended(const uint8_t *codeword, size_t codeword_len,
     // them before trying every new parity split avoids doing eight full RS
     // decodes for an unrelated square candidate in the live camera path.
     const bool tier_hint_valid = codeword[40] > 0 && codeword[40] <= kExtendedTierCapacities.size();
-    const bool likely_tiered = codeword[20]==CKEY_EXTENDED_FORMAT_VERSION ||
+    const bool likely_tiered = (codeword[20]==17u || codeword[20]==CKEY_EXTENDED_FORMAT_VERSION) ||
                                (codeword[30]==3 && tier_hint_valid);
-    if (codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
+    if (codeword[20] != 17u && codeword[20] != CKEY_EXTENDED_FORMAT_VERSION) {
         const ckey_status legacy=attempt(kExtendedDataBytes,kExtendedParityBytes,false);
         if (legacy==CKEY_OK || legacy==CKEY_INSUFFICIENT_BUFFER) return legacy;
     }
@@ -875,6 +882,51 @@ double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t he
         // Contrast supplies a continuous hill for sub-pixel geometry search;
         // expected key evidence prevents a bright non-CKey rectangle winning.
         best = std::max(best, contrast * static_cast<double>(evidence) / static_cast<double>(marks.size() + empty.size()));
+    }
+    return best;
+}
+
+double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_t width, size_t height,
+                                             size_t stride, const double quad_xy[8]) {
+    if (!gray || !quad_xy || width < 2 || height < 2 || stride < width ||
+        height > std::numeric_limits<size_t>::max() / stride || !valid_quad(quad_xy)) return -1.0;
+    constexpr double canonical[8] = {0,0,116,0,116,116,0,116};
+    double best = 0.0;
+    for (int reverse=0; reverse<2; ++reverse) for (int start=0; start<4; ++start) {
+        double dst[8];
+        for (int i=0; i<4; ++i) { const int q=(start+(reverse ? -i : i)+8)%4; dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1]; }
+        double h[8]; if (!solve_homography(canonical,dst,h)) continue;
+        std::vector<double> marks, empty;
+        // Grid Key, Ring Key, and Ray Key are all fixed in physical modules.
+        for (int r=0;r<2;++r) for (int c=0;c<2;++c) marks.push_back(gray_sample(gray,width,height,stride,h,8.25+c*.5,45.25+r*.5));
+        for (int slot : {72,73,75}) marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,24.45,slot,288.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,24.45,77.5,288.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.0,0.0,576.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,27.9,432.0,576.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.4,440.0,576.0));
+        // Three whole finder arcs plus both halves of the split orientation
+        // arc. These are measured on the actual *outer* corner quadrants: a
+        // finder mouth faces the polar field but its ink follows the frame.
+        constexpr double finder_radius=9.2;
+        for (const auto &[cx,cy,a] : {std::tuple{100.0,16.0,kTau*315.0/360.0},
+                                      std::tuple{16.0,100.0,kTau*135.0/360.0},
+                                      std::tuple{100.0,100.0,kTau*45.0/360.0}})
+            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
+        for (double a : {kTau*195.0/360.0,kTau*255.0/360.0})
+            marks.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(a),16.0+finder_radius*std::sin(a)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,16.0+finder_radius*std::cos(kTau*225.0/360.0),16.0+finder_radius*std::sin(kTau*225.0/360.0)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,6.5,45.25));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,24.45,74.0,288.0));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,58.0,28.0,216.0,576.0));
+        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) continue;
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
+        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
+        const double contrast=std::abs(mark_mean-empty_mean); const bool dark=mark_mean<empty_mean;
+        const double threshold=(mark_mean+empty_mean)*.5;
+        const auto marked=[&](double value){ return dark ? value<threshold : value>threshold; };
+        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
+            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
+        best=std::max(best,contrast*static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size()));
     }
     return best;
 }
@@ -1149,7 +1201,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
                                       size_t cap, size_t *required) {
     if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION || s->side != kExtendedSide || s->payload_length == 0 || s->payload_length > CKEY_EXTENDED_PAYLOAD_MAX_BYTES) return CKEY_INVALID_ARGUMENT;
     const auto nodes=extended_nodes(); if (nodes.size()<kExtendedBits) return CKEY_INTERNAL_ERROR;
-    constexpr int slots=288, rings=24; constexpr double center=58.0, dot_radius=.075;
+    constexpr int slots=288, rings=34; constexpr double center=58.0, dot_radius=.075;
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
       << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
@@ -1187,7 +1239,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
         o << "<path d=\"M " << center+r0*std::sin(a) << ' ' << center-r0*std::cos(a) << " L " << center+(r0+length)*std::sin(a) << ' ' << center-(r0+length)*std::cos(a) << "\" fill=\"none\" stroke-width=\"" << width << "\" stroke-linecap=\"round\"/>";
     }
     for (int ring=0;ring<rings;++ring) {
-        const double radius=9.50+.65*ring;
+        const double radius=3.50+.62*ring;
         for (int slot=0;slot<slots;) {
             if (!ring_bits[ring][slot]) { ++slot; continue; }
             int end=slot+1; while(end<slots && ring_bits[ring][end]) ++end;

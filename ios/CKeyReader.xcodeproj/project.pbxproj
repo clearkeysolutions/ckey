@@ -9,6 +9,7 @@
 		A10000000000000000000001 /* CKeyReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* CKeyReaderApp.swift */; };
 		A10000000000000000000002 /* CameraScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* CameraScanner.swift */; };
 		A10000000000000000000003 /* ckey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ckey.cpp */; };
+		A10000000000000000000004 /* LocatorRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* LocatorRanker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +18,7 @@
 		A20000000000000000000003 /* ckey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../src/ckey.cpp; sourceTree = "<group>"; };
 		A20000000000000000000004 /* CKeyReader-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CKeyReader/CKeyReader-Bridging-Header.h; sourceTree = "<group>"; };
 		A20000000000000000000005 /* CKeyReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CKeyReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000006 /* LocatorRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CKeyReader/LocatorRanker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -29,6 +31,7 @@
 			A20000000000000000000002 /* CameraScanner.swift */,
 			A20000000000000000000003 /* ckey.cpp */,
 			A20000000000000000000004 /* CKeyReader-Bridging-Header.h */,
+			A20000000000000000000006 /* LocatorRanker.swift */,
 			A40000000000000000000002 /* Products */,
 		); sourceTree = "<group>"; };
 		A40000000000000000000002 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000005 /* CKeyReader.app */,); name = Products; sourceTree = "<group>"; };
@@ -55,6 +58,7 @@
 			A10000000000000000000001 /* CKeyReaderApp.swift in Sources */,
 			A10000000000000000000002 /* CameraScanner.swift in Sources */,
 			A10000000000000000000003 /* ckey.cpp in Sources */,
+			A10000000000000000000004 /* LocatorRanker.swift in Sources */,
 		); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
