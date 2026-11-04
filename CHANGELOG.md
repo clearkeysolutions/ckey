@@ -1,3 +1,7 @@
+## 0.1.0-dev.46 — 2026-11-04
+
+* Added an independent native Profile 2 calibration-score ABI and reader fit. Profile 2 no longer uses Profile 1 key coordinates before projective sampling.
+
 ## 0.1.0-dev.45 — 2026-11-04
 
 * Added Profile 2 Format 0.22, correcting its Cartesian finder clearance from four square reservations to the actual curved finder quadrants.

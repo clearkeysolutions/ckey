@@ -905,6 +905,53 @@ double ckey_calibration_score_gray8(const uint8_t *gray, size_t width, size_t he
     return best;
 }
 
+double ckey_calibration_score_text_gray8(const uint8_t *gray, size_t width, size_t height,
+                                         size_t stride, const double quad_xy[8]) {
+    if (!gray || !quad_xy || width < 2 || height < 2 || stride < width ||
+        height > std::numeric_limits<size_t>::max() / stride || !valid_quad(quad_xy)) return -1.0;
+    constexpr double canonical[8] = {0,0,29,0,29,29,0,29};
+    double best = 0.0;
+    for (int reverse=0; reverse<2; ++reverse) for (int start=0; start<4; ++start) {
+        double dst[8];
+        for (int i=0; i<4; ++i) {
+            const int q=(start+(reverse ? -i : i)+8)%4;
+            dst[2*i]=quad_xy[2*q]; dst[2*i+1]=quad_xy[2*q+1];
+        }
+        double h[8]; if (!solve_homography(canonical,dst,h)) continue;
+        std::vector<double> marks, empty;
+        for (int r : {11,12}) for (int c : {2,3})
+            marks.push_back(gray_sample(gray,width,height,stride,h,c+.5,r+.5));
+        for (int slot : {36,38,42})
+            marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,slot,144.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,47.5,144.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,0.0,144.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.4,108.0,144.0));
+        marks.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,110.0,144.0));
+        constexpr double finder_inset=4.0, finder_radius=2.3;
+        const double diagonal=kTau/8.0;
+        for (const auto &[cx,cy,a] : {std::tuple{25.0,4.0,kTau*315.0/360.0},
+                                      std::tuple{4.0,25.0,kTau*135.0/360.0},
+                                      std::tuple{25.0,25.0,kTau*45.0/360.0}})
+            marks.push_back(gray_sample(gray,width,height,stride,h,cx+finder_radius*std::cos(a),cy+finder_radius*std::sin(a)));
+        for (double a : {kTau*198.0/360.0,kTau*252.0/360.0})
+            marks.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(a),finder_inset+finder_radius*std::sin(a)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,finder_inset+finder_radius*std::cos(diagonal),finder_inset+finder_radius*std::sin(diagonal)));
+        empty.push_back(gray_sample(gray,width,height,stride,h,1.5,11.5));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,6.41,40.0,144.0));
+        empty.push_back(polar_sample_slots(gray,width,height,stride,h,kCenter,8.8,108.0,144.0));
+        if (std::any_of(marks.begin(),marks.end(),[](double v){return v<0;}) || std::any_of(empty.begin(),empty.end(),[](double v){return v<0;})) continue;
+        const double mark_mean=std::accumulate(marks.begin(),marks.end(),0.0)/marks.size();
+        const double empty_mean=std::accumulate(empty.begin(),empty.end(),0.0)/empty.size();
+        const double contrast=std::abs(mark_mean-empty_mean), threshold=(mark_mean+empty_mean)*.5;
+        const bool dark=mark_mean<empty_mean;
+        const auto marked=[&](double value){return dark ? value<threshold : value>threshold;};
+        const size_t evidence=std::count_if(marks.begin(),marks.end(),marked)+
+            std::count_if(empty.begin(),empty.end(),[&](double value){return !marked(value);});
+        best=std::max(best,contrast*static_cast<double>(evidence)/static_cast<double>(marks.size()+empty.size()));
+    }
+    return best;
+}
+
 double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_t width, size_t height,
                                              size_t stride, const double quad_xy[8]) {
     if (!gray || !quad_xy || width < 2 || height < 2 || stride < width ||

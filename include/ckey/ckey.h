@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.45"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.46"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 22u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -165,6 +165,12 @@ CKEY_API ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t widt
 CKEY_API double ckey_calibration_score_gray8(const uint8_t *gray, size_t width,
                                               size_t height, size_t stride,
                                               const double quad_xy[8]);
+/* Equivalent continuous key-fit score for Profile 2's 29-unit dense field.
+ * It samples Profile 2's own Grid, Ring, and Ray keys and must not be
+ * substituted with the Profile 1 score. */
+CKEY_API double ckey_calibration_score_text_gray8(const uint8_t *gray, size_t width,
+                                                   size_t height, size_t stride,
+                                                   const double quad_xy[8]);
 /* Equivalent continuous key-fit score for Profile 3's 116-unit field.  The
  * locator uses this during projective geometry refinement; it never accepts a
  * payload and does not depend on a fixed pixel size. */
