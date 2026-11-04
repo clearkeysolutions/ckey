@@ -15,14 +15,19 @@ namespace {
 
 struct Rng { uint32_t s; uint32_t next() { s = s * 1664525u + 1013904223u; return s; } double unit() { return (next() >> 8) / 16777216.0; } };
 
+// Profile 0 symbols are encoded at this version (set per case).
+uint32_t g_scalable_version = 1;
+
 std::vector<uint8_t> payload_for(int profile, uint32_t seed) {
-    const size_t n = profile == 1 ? 16 : profile == 2 ? 120 : 1200;
+    const size_t n = profile == 0 ? ckey_scalable_capacity(g_scalable_version, CKEY_ECC_M)
+                   : profile == 1 ? 16 : profile == 2 ? 120 : 1200;
     std::vector<uint8_t> p(n); Rng r{seed}; for (auto &b : p) b = static_cast<uint8_t>(r.next() >> 24); return p;
 }
 
 std::string render(int profile, const std::vector<uint8_t> &payload) {
     ckey_diagnostics d{}; size_t n = 0; std::string svg;
-    if (profile == 1) { ckey_symbol s{}; ckey_encode_locator(payload.data(), payload.size(), &s, &d); ckey_render_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_svg(&s, 8, svg.data(), n, &n); }
+    if (profile == 0) { ckey_scalable_symbol s{}; ckey_encode_scalable(payload.data(), payload.size(), g_scalable_version, CKEY_ECC_M, &s, &d); ckey_render_scalable_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_scalable_svg(&s, 8, svg.data(), n, &n); }
+    else if (profile == 1) { ckey_symbol s{}; ckey_encode_locator(payload.data(), payload.size(), &s, &d); ckey_render_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_svg(&s, 8, svg.data(), n, &n); }
     else if (profile == 2) { ckey_text_symbol s{}; ckey_encode_text(payload.data(), payload.size(), &s, &d); ckey_render_text_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_text_svg(&s, 8, svg.data(), n, &n); }
     else { ckey_extended_symbol s{}; ckey_encode_extended(payload.data(), payload.size(), &s, &d); ckey_render_extended_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_extended_svg(&s, 8, svg.data(), n, &n); }
     svg.resize(n - 1); return svg;
@@ -101,9 +106,12 @@ int scan(const std::vector<uint8_t> &frame, int w, int h, const std::vector<uint
     double borders[6 * 8];
     const size_t n = ckey_find_borders_gray8(frame.data(), w, h, w, borders, 6);
     if (borders_found) *borders_found = n;
-    std::vector<uint8_t> out(CKEY_EXTENDED_PAYLOAD_MAX_BYTES); size_t len = 0; ckey_diagnostics d{};
+    std::vector<uint8_t> out(65535); size_t len = 0; ckey_diagnostics d{};  // P0 payloads exceed 2,048 bytes
     for (size_t i = 0; i < n; ++i) {
-        double q[8];
+        double q[8]; uint32_t version = 0;
+        if (ckey_refine_quad_gray8(frame.data(), w, h, w, borders + 8 * i, CKEY_FIELD_SCALABLE, q) > 0 &&
+            ckey_decode_scalable_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &len, &version, &d) == CKEY_OK &&
+            len == expected.size() && std::equal(expected.begin(), expected.end(), out.begin())) return 0;
         if (ckey_refine_quad_gray8(frame.data(), w, h, w, borders + 8 * i, CKEY_FIELD_LOCATOR, q) > 0 &&
             ckey_decode_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &d) == CKEY_OK &&
             expected.size() == 16 && std::equal(expected.begin(), expected.end(), out.begin())) return 1;
@@ -114,20 +122,24 @@ int scan(const std::vector<uint8_t> &frame, int w, int h, const std::vector<uint
             ckey_decode_extended_gray8(frame.data(), w, h, w, q, out.data(), out.size(), &len, &d) == CKEY_OK &&
             len == expected.size() && std::equal(expected.begin(), expected.end(), out.begin())) return 3;
     }
-    return 0;
+    return -1;
 }
 
 }  // namespace
 
 int main() {
-    struct Case { int profile, frame_w, frame_h; double px_per_unit; };
+    struct Case { int profile, frame_w, frame_h; double px_per_unit; uint32_t version; };
     // Field width in pixels = px/unit x field units; frame sizes match the
     // reader's portrait capture (1080p and 4K).
-    const Case cases[] = {{1, 1080, 1920, 10}, {1, 1080, 1920, 14}, {2, 1080, 1920, 14}, {2, 1080, 1920, 20},
-                          {3, 2160, 3840, 13}, {3, 2160, 3840, 16}};
+    // Profile 0 cases give px/unit as 8 px per module (px/unit = 8 / pitch).
+    const Case cases[] = {{1, 1080, 1920, 10, 0}, {1, 1080, 1920, 14, 0}, {2, 1080, 1920, 14, 0}, {2, 1080, 1920, 20, 0},
+                          {3, 2160, 3840, 13, 0}, {3, 2160, 3840, 16, 0},
+                          {0, 1080, 1920, 8.0 * 29 / 29, 1}, {0, 1080, 1920, 8.0 * 31 / 29, 2}, {0, 1080, 1920, 8.0 * 58 / 29, 11},
+                          {0, 1080, 1920, 8.0 * 108 / 29, 20}, {0, 2160, 3840, 7.0 * 232 / 29, 31}};
     const double rotations[] = {0, 7, 18, 33};
     int total = 0, passed = 0, skipped = 0;
     for (const auto &c : cases) {
+        g_scalable_version = c.version;
         int ok = 0, n = 0;
         for (double rotation : rotations) for (double keystone : {0.0, 0.08}) for (int variant = 0; variant < 2; ++variant) {
             const Scene sc{c.profile, c.frame_w, c.frame_h, c.px_per_unit * (c.profile == 3 ? 116 : 29), rotation, keystone,
@@ -146,7 +158,8 @@ int main() {
                 std::printf("  miss: P%d %.0f px/unit rot %.0f keystone %.2f %s%s (borders found %zu)\n", c.profile, c.px_per_unit, rotation,
                             keystone, variant ? "blur" : "sharp", sc.dark_on_light ? " dark-on-light" : "", borders);
         }
-        std::printf("P%d %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.profile, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
+        if (c.profile == 0) std::printf("P0 v%u %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.version, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
+        else std::printf("P%d %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.profile, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
         total += n; passed += ok;
     }
     std::printf("simulated reader: %d/%d scenes decoded (%d impossible scenes skipped)\n", passed, total, skipped);

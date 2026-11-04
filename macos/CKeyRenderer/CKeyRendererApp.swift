@@ -14,6 +14,7 @@ struct CKeyRendererApp: App {
 }
 
 private enum RenderProfile: String, CaseIterable, Identifiable {
+    case scalable = "Profile 0 · Scalable"
     case locator = "Profile 1 · Locator"
     case text = "Profile 2 · Text"
     case extended = "Profile 3 · Extended"
@@ -21,7 +22,13 @@ private enum RenderProfile: String, CaseIterable, Identifiable {
 }
 
 private final class RendererModel: ObservableObject {
-    @Published var profile: RenderProfile = .locator { didSet { scheduleRegenerate() } }
+    @Published var profile: RenderProfile = .scalable { didSet { scheduleRegenerate() } }
+    /// Profile 0: 0 = smallest version that fits; otherwise 1...31.
+    @Published var scalableVersion = 0 { didSet { scheduleRegenerate() } }
+    /// Profile 0 correction level: 0 L, 1 M, 2 Q, 3 H.
+    @Published var scalableLevel = 1 { didSet { scheduleRegenerate() } }
+    /// Module pitch of the current symbol in canonical units (29-unit field).
+    @Published private(set) var modulePitch = 1.0
     @Published var payload = "CKeyDemoPayload!" { didSet { scheduleRegenerate() } }
     @Published var extendedTier = 0 { didSet { scheduleRegenerate() } }
     @Published var foreground = Color(red: 0.95, green: 0.94, blue: 0.88) { didSet { scheduleRegenerate() } }
@@ -52,6 +59,16 @@ private final class RendererModel: ObservableObject {
         let rendered: String?
         var detail = ""
         switch profile {
+        case .scalable:
+            let symbol = UnsafeMutablePointer<ckey_scalable_symbol>.allocate(capacity: 1)
+            defer { symbol.deallocate() }
+            let level = ckey_ecc_level(rawValue: UInt32(scalableLevel))
+            guard ckey_encode_scalable(input, input.count, UInt32(scalableVersion), level, symbol, &diag) == CKEY_OK else { svg = ""; return fail(diag) }
+            rendered = renderScalable(symbol)
+            let version = symbol.pointee.version
+            let modules = ckey_scalable_modules_across(version)
+            modulePitch = 29.0 / Double(max(modules, 1))
+            detail = "\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level)) B"
         case .locator:
             guard input.count == Int(CKEY_LOCATOR_PAYLOAD_BYTES) else {
                 svg = ""; status = "Profile 1 requires exactly 16 UTF-8 bytes; entered \(input.count)."; return
@@ -114,6 +131,19 @@ private final class RendererModel: ObservableObject {
             return String(cString: baseAddress.assumingMemoryBound(to: CChar.self))
         }
     }
+    private func renderScalable(_ symbol: UnsafeMutablePointer<ckey_scalable_symbol>) -> String? {
+        var needed = 0
+        guard ckey_render_scalable_svg(symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
+        var chars = [CChar](repeating: 0, count: needed)
+        let result = chars.withUnsafeMutableBufferPointer { buffer in
+            ckey_render_scalable_svg(symbol, 24, buffer.baseAddress, buffer.count, &needed)
+        }
+        guard result == CKEY_OK else { return nil }
+        return chars.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            return String(cString: baseAddress)
+        }
+    }
     private func renderLocator(_ symbol: inout ckey_symbol) -> String? {
         var needed = 0
         guard ckey_render_svg(&symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
@@ -163,6 +193,17 @@ private struct RendererView: View {
                 Text("CKey Renderer").font(.largeTitle.bold())
                 Text("Native C++ encoder · non-normative visual stress laboratory").foregroundStyle(.secondary)
                 Picker("Profile", selection: $model.profile) { ForEach(RenderProfile.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+                if model.profile == .scalable {
+                    Picker("Version", selection: $model.scalableVersion) {
+                        Text("Auto · smallest that fits").tag(0)
+                        ForEach(1...31, id: \.self) { version in
+                            Text("v\(version) · \(ckey_scalable_modules_across(UInt32(version))) modules").tag(version)
+                        }
+                    }
+                    Picker("Correction", selection: $model.scalableLevel) {
+                        Text("L · ~7%").tag(0); Text("M · ~14%").tag(1); Text("Q · ~22%").tag(2); Text("H · ~30%").tag(3)
+                    }.pickerStyle(.segmented)
+                }
                 if model.profile == .extended {
                     Picker("Capacity / ECC", selection: $model.extendedTier) {
                         Text("Auto · strongest that fits").tag(0)
@@ -185,7 +226,7 @@ private struct RendererView: View {
                 Text("The read check uses the displayed raster and the same native decoder as CKeyReader.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
             }.padding(22).frame(minWidth: 360, idealWidth: 410)
-            SymbolPreview(svg: model.svg, profile: model.profile, expectedPayload: Array(model.payload.utf8),
+            SymbolPreview(svg: model.svg, profile: model.profile, modulePitch: model.modulePitch, expectedPayload: Array(model.payload.utf8),
                           backgroundHex: model.background.hex, blur: model.blur, damage: model.damage, noise: model.noise,
                           rotation: model.rotation, resolution: model.resolution,
                           onRead: model.recordPreviewRead)
@@ -202,6 +243,8 @@ private struct LabSlider: View {
 private struct SymbolPreview: NSViewRepresentable {
     let svg: String
     let profile: RenderProfile
+    /// Profile 0 module pitch in canonical units; unused by other profiles.
+    let modulePitch: Double
     let expectedPayload: [UInt8]
     let backgroundHex: String
     let blur: Double; let damage: Double; let noise: Double; let rotation: Double
@@ -246,7 +289,7 @@ private struct SymbolPreview: NSViewRepresentable {
     private func moduleSizeInCSSPixels(_ webView: WKWebView) -> Double {
         let side = min(min(Double(webView.bounds.width), Double(webView.bounds.height)) * 0.84, 780.0)
         let viewBoxSide = profile == .extended ? 124.0 : 31.0
-        let markWidth = profile == .locator ? 0.74 : 0.34
+        let markWidth = profile == .scalable ? 0.68 * modulePitch : profile == .locator ? 0.74 : 0.34
         return side / viewBoxSide * markWidth
     }
 
@@ -304,13 +347,17 @@ private struct SymbolPreview: NSViewRepresentable {
                 quad.append((cx + dx * cos(angle) - dy * sin(angle)) * sx)
                 quad.append((cy + dx * sin(angle) + dy * cos(angle)) * sy)
             }
-            var output = [UInt8](repeating: 0, count: Int(CKEY_EXTENDED_PAYLOAD_MAX_BYTES))
+            var output = [UInt8](repeating: 0, count: 65535)  // Profile 0 payloads exceed 2,048 bytes
+            var scalableVersion: UInt32 = 0
             var outputLength = 0
             var diagnostic = ckey_diagnostics()
             let result: ckey_status = gray.withUnsafeBufferPointer { pixels in
                 quad.withUnsafeBufferPointer { q in
                     output.withUnsafeMutableBufferPointer { decoded in
                         switch profile {
+                        case .scalable:
+                            return ckey_decode_scalable_gray8(pixels.baseAddress, width, height, width, q.baseAddress,
+                                                              decoded.baseAddress, decoded.count, &outputLength, &scalableVersion, &diagnostic)
                         case .locator:
                             return ckey_decode_gray8(pixels.baseAddress, width, height, width, q.baseAddress,
                                                      decoded.baseAddress, Int(CKEY_LOCATOR_PAYLOAD_BYTES), &diagnostic)
@@ -329,8 +376,16 @@ private struct SymbolPreview: NSViewRepresentable {
             // Clean-render floors are about 6 (P1), 10 (P2), and 11 (P3);
             // below them a FAIL reflects the window/resolution, not the symbol.
             let pixelsPerUnit = moduleScale * sx
-            let decodeFloor = profile == .locator ? 6.0 : profile == .text ? 10.0 : 11.0
-            let density = String(format: "%.1f px/unit", pixelsPerUnit) + (pixelsPerUnit < decodeFloor ? " (below the ~\(Int(decodeFloor)) px/unit decode floor — enlarge the window or raise Resolution)" : "")
+            let density: String
+            if profile == .scalable {
+                // Profile 0 needs about 6 px per module at every version.
+                let pixelsPerModule = pixelsPerUnit * modulePitch
+                density = "v\(scalableVersion) · " + String(format: "%.1f px/module", pixelsPerModule) +
+                    (pixelsPerModule < 6.0 ? " (below the ~6 px/module decode floor — enlarge the window or raise Resolution)" : "")
+            } else {
+                let decodeFloor = profile == .locator ? 6.0 : profile == .text ? 10.0 : 11.0
+                density = String(format: "%.1f px/unit", pixelsPerUnit) + (pixelsPerUnit < decodeFloor ? " (below the ~\(Int(decodeFloor)) px/unit decode floor — enlarge the window or raise Resolution)" : "")
+            }
             let expected = expectedPayload
             let matches = result == CKEY_OK && decodedCount == expected.count &&
                           Array(output.prefix(decodedCount)) == expected

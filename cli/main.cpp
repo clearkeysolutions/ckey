@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -34,12 +35,47 @@ static bool write_svg(const std::string &path, const std::string &svg) {
     return static_cast<bool>(file);
 }
 
+// ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg>
+//                      [--version <1-31>] [--level L|M|Q|H]
+static int encode_scalable(int argc, char **argv) {
+    std::string mode, value, output; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    for (int i = 2; i + 1 < argc; i += 2) {
+        const std::string flag = argv[i], arg = argv[i + 1];
+        if (flag == "--utf8" || flag == "--hex") { mode = flag; value = arg; }
+        else if (flag == "--out") output = arg;
+        else if (flag == "--version") {
+            char *end = nullptr; const long v = std::strtol(arg.c_str(), &end, 10);
+            if (!end || *end || v < 1 || v > static_cast<long>(CKEY_SCALABLE_VERSION_COUNT)) { std::cerr << "--version must be 1 to " << CKEY_SCALABLE_VERSION_COUNT << '\n'; return 2; }
+            version = static_cast<uint32_t>(v);
+        } else if (flag == "--level") {
+            if (arg == "L") level = CKEY_ECC_L; else if (arg == "M") level = CKEY_ECC_M; else if (arg == "Q") level = CKEY_ECC_Q; else if (arg == "H") level = CKEY_ECC_H;
+            else { std::cerr << "--level must be L, M, Q, or H\n"; return 2; }
+        } else { std::cerr << "unknown option " << flag << '\n'; return 2; }
+    }
+    if ((argc % 2) != 0 || mode.empty() || output.empty()) {
+        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"; return 2;
+    }
+    std::vector<uint8_t> payload;
+    if (mode == "--hex") { if (!from_hex(value, payload)) { std::cerr << "hex input must be an even number of hexadecimal digits\n"; return 2; } }
+    else payload.assign(value.begin(), value.end());
+    auto symbol = std::make_unique<ckey_scalable_symbol>(); ckey_diagnostics diag{};
+    if (ckey_encode_scalable(payload.data(), payload.size(), version, level, symbol.get(), &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
+    size_t needed = 0; ckey_render_scalable_svg(symbol.get(), 16, nullptr, 0, &needed);
+    std::string svg(needed, '\0');
+    if (ckey_render_scalable_svg(symbol.get(), 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
+    std::cout << diag.message << "; profile=0; format=0." << CKEY_SCALABLE_FORMAT_VERSION << ".0; version=" << symbol->version
+              << "; payload-bytes=" << payload.size() << "; capacity=" << ckey_scalable_capacity(symbol->version, level) << "; svg=" << output << '\n';
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && std::string(argv[1]) == "encode-scalable") return encode_scalable(argc, argv);
     const bool tierOption = argc == 8 && std::string(argv[2]) == "--tier";
     const int modeIndex = tierOption ? 4 : 2;
     const int outIndex = tierOption ? 6 : 4;
     if ((argc != 6 && !tierOption) || (std::string(argv[modeIndex]) != "--hex" && std::string(argv[modeIndex]) != "--utf8") || std::string(argv[outIndex]) != "--out") {
         std::cerr << "usage:\n"
+                  << "  ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"
                   << "  ckey encode --hex <32-hex-chars> --out <locator.svg>\n"
                   << "  ckey encode-text --utf8 <up-to-200-byte-text> --out <text.svg>\n"
                   << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n"

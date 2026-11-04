@@ -15,6 +15,7 @@ format_doc = root / "spec/CKey-Format-v0.14.0.md"
 format_text = format_doc.read_text()
 text_format_text = (root / "spec/CKey-Format-v0.25.0.md").read_text()
 extended_format_text = (root / "spec/CKey-Format-v0.26.0.md").read_text()
+scalable_format_text = (root / "spec/CKey-Format-v0.27.0.md").read_text()
 
 software_checks = {
     "public C ABI header": re.search(r'#define CKEY_SOFTWARE_VERSION "([^"]+)"', header).group(1),
@@ -30,14 +31,17 @@ format_checks = {
     # The context must not describe an older dense format as current.
     "living context has no stale current-format claim": not re.search(r"current Format 0\.(1\d|2[0-4])\.0", context),
     "fixture format": fixture["format_version"] == "0.14.0",
-    "current README links": all(f"spec/CKey-Format-v{v}.md" in readme for v in ("0.14.0", "0.25.0", "0.26.0")),
+    "current README links": all(f"spec/CKey-Format-v{v}.md" in readme for v in ("0.14.0", "0.25.0", "0.26.0", "0.27.0")),
     "text format specification": "decimal 25" in text_format_text and "profile byte `0x02`" in text_format_text,
     "extended format specification": "decimal 26" in extended_format_text and "profile byte `0x03`" in extended_format_text,
     "public text format byte": re.search(r"#define CKEY_TEXT_FORMAT_VERSION (\d+)u", header).group(1) == "25",
     "public extended format byte": re.search(r"#define CKEY_EXTENDED_FORMAT_VERSION (\d+)u", header).group(1) == "26",
+    "scalable format specification": "decimal 27" in scalable_format_text and "profile byte `0x00`" in scalable_format_text,
+    "public scalable format byte": re.search(r"#define CKEY_SCALABLE_FORMAT_VERSION (\d+)u", header).group(1) == "27",
+    "living context scalable format": "0.27.0" in context,
 }
 if not all(format_checks.values()):
     raise SystemExit(f"Current format nodes are inconsistent: {format_checks}")
 if stale:
     raise SystemExit(f"VERSION is {version}; stale version references: {stale}")
-print(f"Software and format version nodes are synchronized: {version} / 0.14.0, 0.25.0, 0.26.0")
+print(f"Software and format version nodes are synchronized: {version} / 0.14.0, 0.25.0, 0.26.0, 0.27.0")

@@ -1,3 +1,24 @@
+## 0.1.0-dev.56 — 2026-11-04
+
+* **Profile 0, the scalable family (Format 0.27.0, byte `1B`, profile `00`).** Added alongside Profiles 1–3, which are unchanged.
+  * **One skeleton at 31 sizes.** Every version shares Profile 2's frame, finders, rings and dial in the 29-unit field. Only the module pitch changes, from 29 to 232 modules across (normative integer tables), about 7% finer per step.
+  * **No appearance jumps.** Capacity at level M rises smoothly from 27 to 4,619 bytes, with no step above 1.6×. A 33-character URL is v2, which looks like a locator, not Profile 2.
+  * **No filler waste.** Every site carries a codeword bit. Four correction levels are available: L/M/Q/H.
+  * **The keys identify the version.** The Grid, Ring and Ray Keys are drawn at each version's own module and slot pitch, so the decoder recognizes the version from them. The frame's version byte, RS and CRC confirm.
+* **New core API:** `ckey_encode_scalable`, `ckey_decode_scalable`, `ckey_decode_scalable_gray8`, `ckey_calibration_score_scalable_gray8`, `ckey_render_scalable_svg`, `ckey_scalable_capacity`, `ckey_scalable_modules_across`, and `CKEY_FIELD_SCALABLE` for `ckey_refine_quad_gray8`.
+* **Localization improvements (all profiles):**
+  * Border candidates are ranked by how well the shared skeleton fits, so a dense symbol's interior components can't crowd out its border.
+  * Per-corner refinement iterates down to sub-pixel steps.
+  * P0 aligns on the frame stroke's two edges with coarse-to-fine sample spacing. At v31 the corners resolve to 0.06–0.22 modules, from 2–5.5 px before.
+* **Tests and tools.**
+  * New `ckey_scalable_profile0` suite.
+  * The simulated reader covers P0 v1/v2/v11/v20/v31 and now decodes 144/144 scenes.
+  * New CLI command: `ckey encode-scalable [--version 1-31] [--level L|M|Q|H]`.
+* **Apps.**
+  * The iOS reader tries P0 first and shows `Profile 0 · v<N>`.
+  * The CKey Renderer defaults to P0, with version and correction pickers, and its read check reports `px/module`.
+  * Both use 64 KB output buffers, because P0 payloads exceed P3's 2,048 bytes.
+
 ## 0.1.0-dev.55 — 2026-11-04
 
 * **Payload conventions.** New informative document, `spec/CKey-Payload-Conventions.md`. It defines how readers interpret text payloads:

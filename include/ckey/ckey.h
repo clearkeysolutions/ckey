@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.55"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.56"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -190,6 +190,7 @@ CKEY_API double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_
  * ckey_decode_*_gray8 call. Neither function accepts a payload.
  */
 typedef enum ckey_field {
+    CKEY_FIELD_SCALABLE = 0,  /* Profile 0: any version, identified by its keys */
     CKEY_FIELD_LOCATOR = 1,
     CKEY_FIELD_TEXT = 2,
     CKEY_FIELD_EXTENDED = 3
@@ -199,6 +200,62 @@ CKEY_API size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_
 CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height,
                                        size_t stride, const double border_quad[8],
                                        ckey_field field, double out_quad[8]);
+/*
+ * Profile 0: the scalable family (Format 0.27). One skeleton (frame, finders,
+ * polar centre) at every size; version 1..31 sets the module pitch, from
+ * Profile 1-like modules (v1, 29 across) to Profile 3 density (v31, 232
+ * across), about 7% finer per step. The Grid, Ring, and Ray Keys are drawn at
+ * each version's own module and slot pitch, so a reader identifies the
+ * version from them; the error-corrected frame repeats it. Every optical site
+ * carries a codeword bit at one of four correction levels.
+ */
+#define CKEY_SCALABLE_FORMAT_VERSION 27u
+#define CKEY_SCALABLE_VERSION_COUNT 31u
+#define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u
+typedef enum ckey_ecc_level {
+    CKEY_ECC_L = 0,  /* ~7% of each block correctable */
+    CKEY_ECC_M = 1,  /* ~14% */
+    CKEY_ECC_Q = 2,  /* ~22% */
+    CKEY_ECC_H = 3   /* ~30% */
+} ckey_ecc_level;
+typedef struct ckey_scalable_symbol {
+    uint32_t abi_version;
+    uint32_t version;          /* 1..CKEY_SCALABLE_VERSION_COUNT */
+    uint32_t ecc_level;        /* ckey_ecc_level */
+    uint32_t payload_length;
+    uint32_t codeword_length;  /* bytes used in codeword[] */
+    uint8_t codeword[CKEY_SCALABLE_MAX_CODEWORD_BYTES];
+} ckey_scalable_symbol;
+/* Modules across the field for a version (29..232); 0 if invalid. The
+ * module pitch in the 29-unit canonical field is 29 / modules. */
+CKEY_API uint32_t ckey_scalable_modules_across(uint32_t version);
+/* Maximum payload bytes for a version and level; 0 if either is invalid. */
+CKEY_API size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level);
+/* version 0 selects the smallest version whose capacity fits the payload. */
+CKEY_API ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len,
+                                           uint32_t version, ckey_ecc_level level,
+                                           ckey_scalable_symbol *out_symbol,
+                                           ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len,
+                                           uint32_t version, uint8_t *out_payload,
+                                           size_t out_capacity, size_t *out_payload_len,
+                                           ckey_diagnostics *out_diagnostics);
+/* Identifies the version from the keys, then decodes. out_version may be NULL. */
+CKEY_API ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width,
+                                                 size_t height, size_t stride,
+                                                 const double quad_xy[8],
+                                                 uint8_t *out_payload, size_t out_capacity,
+                                                 size_t *out_payload_len, uint32_t *out_version,
+                                                 ckey_diagnostics *out_diagnostics);
+/* Best key fit over all versions for a proposed quadrilateral (negative for
+ * invalid arguments); out_version (may be NULL) receives that version. */
+CKEY_API double ckey_calibration_score_scalable_gray8(const uint8_t *gray, size_t width,
+                                                       size_t height, size_t stride,
+                                                       const double quad_xy[8],
+                                                       uint32_t *out_version);
+CKEY_API ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *symbol, uint32_t scale,
+                                               char *out_utf8, size_t out_capacity,
+                                               size_t *out_required);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

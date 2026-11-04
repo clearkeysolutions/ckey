@@ -52,4 +52,4 @@ The reader hands the address text to the platform's map application, which geoco
 
 ## Capacity
 
-Profile 1 carries exactly 16 bytes and is a locator, not a text carrier. Use Profile 2 (up to 200 bytes) or Profile 3 (up to 2,048 bytes) for these forms. The scheme prefix costs about as much as any custom prefix would: `tel:` is 4 bytes, `address:` 8, `https://` 8.
+Profile 1 carries exactly 16 bytes and is a locator, not a text carrier. Use Profile 0, which picks the smallest of 31 sizes that fits (27 bytes to 4,619 bytes at level M), or Profile 2 (up to 200 bytes) or Profile 3 (up to 2,048 bytes) for these forms. The scheme prefix costs about as much as any custom prefix would: `tel:` is 4 bytes, `address:` 8, `https://` 8.

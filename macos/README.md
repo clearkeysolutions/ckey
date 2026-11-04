@@ -15,10 +15,11 @@ smallest feature; the lab should be used to establish their real capture limits.
 
 ## Verify the build has the current core
 
-The status line ends with the compiled core version, which must be **`0.1.0-dev.55`**. If it shows an older version, run **Product → Clean Build Folder** (⇧⌘K) and rebuild.
+The status line ends with the compiled core version, which must be **`0.1.0-dev.56`**. If it shows an older version, run **Product → Clean Build Folder** (⇧⌘K) and rebuild.
 
 With current code you should see:
 
 - **P2 and P3 previews have no empty band.** The square grid is evenly filled, every P3 ray around the dial varies, and there is a clear moat around each finder, including on its inner side.
-- **The preview read check shows `PASS` for all three profiles** with effects at zero. The check reports the raster density it decoded at (`px/unit`).
+- **Profile 0 is the default.** Its version picker defaults to Auto (the smallest version that fits), and Correction sets L/M/Q/H. The read check reports the detected version and `px/module`; P0 needs about 6 px/module.
+- **The preview read check shows `PASS` for all profiles** with effects at zero. The check reports the raster density it decoded at (`px/unit`).
 - **The P3 read check depends on window size.** P3 needs about 11 px/unit, and the preview is at most 780 points wide (about 12.6 px/unit on a Retina display at full size). A `FAIL` that is flagged as below the decode floor reflects the window or the Resolution slider, not the symbol.
