@@ -1,3 +1,18 @@
+## 0.1.0-dev.53 — 2026-11-04
+
+* **The iPhone reader started almost every decode from the wrong orientation, so P1 never scanned and P2 rarely did.** Its border detector oriented each candidate from the border's second moments (principal axes). A square outline's second moments are the same in every direction, so that fit cannot orient a square, and the angle came from pixel noise.
+  * On rendered P1/P2 symbols, an upright symbol was fitted at −45°, a diamond around the square. Rotations from 0° to 30° gave orientation errors of 11–45°.
+  * The refinement that followed could only scale, shift and nudge corners. It could not recover.
+* **Full-frame localization moved into the shared C++ core**, so it is tested here and identical on every platform.
+  * `ckey_find_borders_gray8` orients each border from its convex hull's minimum-area rectangle, which is exact for a square. It then line-fits each side's straight middle for a perspective-correct quadrilateral.
+  * It requires the whole border in view, instead of capping the border at 90% of the frame. That cap rejected large rotated P3 symbols.
+  * `ckey_refine_quad_gray8` starts from the known border-to-field scale (29/28.65). Its descent covers scale, **rotation** and offset, then per-corner moves.
+  * The iPhone reader now calls both functions. Its Swift border finder, threshold, and principal-axis fit are deleted.
+* **New simulated-reader test** (`ckey_simulated_reader`). Rendered symbols are composited into full 1080×1920 (P1/P2) and 2160×3840 (P3) camera frames with background clutter, rotation 0–33°, 8% keystone, 3×3 blur, noise, and dark-on-light polarity. The test then runs the reader's exact pipeline.
+  * Result: 80/80 scenes decode, with 16 skipped because the rotated symbol cannot fit in the frame.
+  * Restoring the principal-axis orientation drops this to 51/80.
+* Measured cost per frame on the CI-class CPU: about 28 ms (1080p) or 42 ms (4K) to find borders, plus about 11 ms per candidate to refine all three profiles.
+
 ## 0.1.0-dev.52 — 2026-11-04
 
 * Ignore `macos/build/` and `macos/DerivedData/`. A command-line `xcodebuild` of the renderer writes there; only `/build/` and `/ios/build/` were ignored.
