@@ -1,3 +1,15 @@
+## 0.1.0-dev.55 — 2026-11-04
+
+* **Payload conventions.** New informative document, `spec/CKey-Payload-Conventions.md`. It defines how readers interpret text payloads:
+  * Standard URI forms: `https:`/`http:`, `mailto:`, `tel:` (E.164), `sms:`, `geo:` (RFC 5870), and vCard.
+  * One CKey convention: `address:` followed by a free-text street address, handed to the platform map app.
+  * Safety rules: never act automatically, allowlist only, keep the payload visible, and validate before offering an action.
+  * No wire format changes.
+* **iPhone reader actions.**
+  * The reader offers one tappable action per recognized payload: Open, Email, Call, Message, Show in Maps (`geo:` and `address:`, through `maps.apple.com`, which iOS routes to Maps), or Add to Contacts (vCard, through the share sheet).
+  * `javascript:`, `data:`, `file:` and unknown schemes are shown as text only.
+  * Text detection now accepts CR, which vCard line endings use.
+
 ## 0.1.0-dev.54 — 2026-11-04
 
 * **The iPhone reader shows decoded payloads as text.** A payload that is valid UTF-8 without control characters (other than tab and newline) is displayed as text. An `http`/`https` URL gets an explicit "Open host" button and never opens automatically. The hex stays underneath for checking, and binary payloads still show hex.
