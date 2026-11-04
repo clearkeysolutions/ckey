@@ -61,9 +61,16 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             guard let self else { return }
             if !self.hasConfigured {
                 self.session.beginConfiguration()
-                // A distant CKey must retain several camera pixels per module.
-                // `.high` may negotiate a smaller stream on some devices.
-                self.session.sessionPreset = self.session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high
+                // A CKey must retain enough camera pixels per symbol unit:
+                // the core decoders need about 6 (P1), 10 (P2), and 11 (P3)
+                // px/unit. Profile 3's 116-unit field therefore needs about
+                // 1,280 px across, which a 1080-line frame cannot supply, so
+                // prefer 4K. `.high` may negotiate a smaller stream.
+                if self.session.canSetSessionPreset(.hd4K3840x2160) {
+                    self.session.sessionPreset = .hd4K3840x2160
+                } else {
+                    self.session.sessionPreset = self.session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high
+                }
                 // Choose the physical wide device explicitly. Selecting a
                 // virtual dual/triple device lets iOS swap focal lengths while
                 // we are estimating a projective measurement, which invalidates
@@ -394,9 +401,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     private func borderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
                              stride: Int, marksAreDark: Bool) -> [[Double]] {
-        // Work at half resolution: distant locator borders remain several
-        // samples thick, while this keeps the connected-component pass small.
-        let step = 2
+        // Sample about 960 x 540 points regardless of capture size (step 2 at
+        // 1080p, 4 at 4K): the same angular resolution, so a distant border
+        // stays several samples thick, at constant connected-component cost.
+        let step = max(2, 2 * max(width, height) / 1920)
         let sampledWidth = (width + step - 1) / step
         let sampledHeight = (height + step - 1) / step
         var visited = [UInt8](repeating: 0, count: sampledWidth * sampledHeight)
@@ -455,7 +463,10 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 let boxWidth = (maxX - minX + 1) * step
                 let boxHeight = (maxY - minY + 1) * step
                 let side = min(boxWidth, boxHeight)
-                guard count >= 24, side >= 40, side < Int(Double(minFrameSide) * 0.78) else { continue }
+                // Size limits scale with the sampling step. The upper bound
+                // admits a border filling 90% of the short frame side, since
+                // Profile 3 needs its symbol large in the frame.
+                guard count >= 24, side >= 20 * step, side < Int(Double(minFrameSide) * 0.90) else { continue }
                 let aspect = Double(boxWidth) / Double(boxHeight)
                 guard aspect > 0.72, aspect < 1.38 else { continue }
                 // Prefer square outlines over large filled bright UI panels.

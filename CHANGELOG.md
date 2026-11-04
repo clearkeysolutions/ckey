@@ -1,3 +1,13 @@
+## 0.1.0-dev.51 — 2026-11-04
+
+* **The iPhone reader could not decode Profile 3 at all.** It captured 1920×1080, but P3 needs about 11 px per symbol unit, about 1,280 px across its 116-unit field, which is more than the frame's height. Its border detector also capped candidates at 78% of the short frame side.
+  * The reader now prefers 4K capture, falling back to 1080p.
+  * The border search scales its sampling step with frame size, so it keeps about 960 × 540 points and the same angular resolution at constant cost.
+  * The size limits scale with that step, and the upper bound is now 90% of the short side.
+  * Not yet compiled or run on a device in this environment.
+* **The CKey Renderer's preview read check now reports the raster density it decoded at.** It flags results below each profile's decode floor, so a P3 `FAIL` caused by a small window or the Resolution slider is distinguishable from a symbol fault.
+* The app READMEs now describe how to confirm a rebuild picked up the current core, and what correct P2/P3 output looks like.
+
 ## 0.1.0-dev.50 — 2026-11-04
 
 An independent second review of dev.49 was run under rule 7 and every verified finding is resolved. Formats 0.25 and 0.26 are unchanged on the wire; their specifications gain clarifications only.
