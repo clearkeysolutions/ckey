@@ -1,3 +1,8 @@
+## 0.1.0-dev.48 — 2026-11-04
+
+* Enlarged the radial safety moat surrounding the actual P2/P3 finder arcs and closed the unnecessary annular gap between each radial alphabet and Cartesian field. P2 emits Format 0.23; P3 emits Format 0.24.
+* Corrected the dev.47 real-time diagnostic string so the iOS reader builds.
+
 ## 0.1.0-dev.47 — 2026-11-04
 
 * Added a live reader diagnostic panel: detected border side, candidate count, independent P1/P2/P3 key-fit scores, decode-attempt time, and per-profile integrity outcome refresh while scanning.
