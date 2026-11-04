@@ -49,6 +49,21 @@ The Grid, Ring and Ray Keys are drawn at each version's own pitch, so the reader
 ./build/ckey encode-scalable --utf8 "a longer message" --version 12 --level Q --out p0-v12.svg
 ```
 
+## Design system
+
+Profile 0 symbols can be branded without breaking scanning; see the [CKey Design System](spec/CKey-Design-System.md):
+
+- **Mark shapes:** modules rounded, square, circle or diamond; rings joined or dotted; rays round or flat.
+- **Paint:** metallic sheen, vignette, accent colours, bevel, depth and grain.
+- **Logo:** in the centre.
+- **Fixed:** the frame, finders and keys.
+
+A built-in check enforces contrast and effect limits and the logo's error-correction budget.
+
+```sh
+./build/ckey encode-scalable --utf8 "https://citeory.com/tour" --preset concept --modules circle --logo logo.png --out branded.svg
+```
+
 ## Payload conventions
 
 Payloads are bytes. [CKey Payload Conventions](spec/CKey-Payload-Conventions.md) (informative) defines how readers interpret text payloads:

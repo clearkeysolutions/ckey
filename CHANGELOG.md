@@ -1,3 +1,18 @@
+## 0.1.0-dev.57 — 2026-11-04
+
+* **Profile 0 design system** (`spec/CKey-Design-System.md`). Styling changes how a symbol is painted, never where a reader samples.
+  * **Fixed:** the frame, finders and keys keep their geometry.
+  * **Mark shapes:** payload modules can be rounded, square, circle or diamond; ring marks joined or dotted; rays round or flat.
+  * **Paint:** colour is free within checks: metallic sheen, radial vignette, up to four accent colours, bevel, depth and grain.
+  * **Logo:** sits in the empty centre, or larger on a plate within an error-correction budget.
+  * **API:** `ckey_style`, `ckey_check_scalable_style` (contrast ≥ 3:1, one polarity, effect limits, logo budget ≤ 50% of the worst block), `ckey_render_scalable_styled_svg`, `ckey_scalable_logo_max_radius`, `ckey_scalable_logo_load`. The plain P0 renderer is now the default style.
+* **P0 decoding no longer depends on the finders' split or the empty centre.** Its skeleton is the frame stroke plus all eight finder arm ends, against the moat and quiet margin, so it is symmetric by design. Orientation comes from the Grid, Ring and Ray Keys. A logo in the centre therefore costs no calibration evidence. No wire change.
+* **Tests.** All 16 mark-shape combinations decode at v2 and v20. The concept palette passes the checker. Low-contrast, mixed-polarity and heavy-shadow-on-light styles are refused. At every level, the largest logo the checker allows still decodes. The test rasterizer gained polygons, `<defs>`, background detection and painter's-order logo plates.
+* **Real-browser check.** The concept look rendered in Chromium (champagne sheen, navy vignette, sage/grey accents, bevel, depth, grain, PNG logo) decodes exactly at v6, v11 and v20, sharp and blurred.
+* **CKey Renderer:** a Profile 0 **Design** panel (shapes, sheen, vignette, accents, bevel, depth, grain, logo picker, size, plate, Concept preset), with the style check shown live.
+* **CLI:** `encode-scalable` gains `--preset plain|concept`, `--modules`, `--rings`, `--rays`, `--logo <file>` and `--logo-radius`.
+* **Known limit:** Profile 0 scatters each byte's bits across the symbol. That keeps stripes and smudges cheap but makes covered area expensive, so logos currently fill the empty centre (about 22% of the width) with little room beyond. Byte-grouped placement would be a future wire-format change.
+
 ## 0.1.0-dev.56 — 2026-11-04
 
 * **Profile 0, the scalable family (Format 0.27.0, byte `1B`, profile `00`).** Added alongside Profiles 1–3, which are unchanged.

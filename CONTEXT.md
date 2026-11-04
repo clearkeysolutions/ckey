@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.56`
+**Current software version:** `0.1.0-dev.57`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`)
 **Branch:** `main`
 **Context updated:** 2026-11-04
@@ -62,6 +62,13 @@ Next engineering gates: (1) compile and validate the iPhone reader on physical d
   * `ckey_simulated_reader` decodes P0 v1, v2, v11, v20 and v31 in full 1080p/4K camera frames with clutter, rotation, keystone, blur and inverted polarity; overall it is 144/144.
   * P0 localization added an edge-based frame objective with coarse-to-fine sample spacing (v31 corners to 0.06–0.22 modules), skeleton ranking of border candidates, and iterated per-corner refinement.
   * The iOS reader tries P0 first and the CKey Renderer can generate P0 (version auto or 1–31, level L/M/Q/H). Their Swift changes are unverified until built in Xcode.
+* Dev.57 design system:
+  * **Scope:** `ckey_style` styling for Profile 0 (shapes of payload marks, colours, materials, logo). The frame, finders and keys stay fixed, as the maintainer specified.
+  * **Skeleton:** the P0 skeleton is now style-invariant and symmetric, with orientation from the keys.
+  * **Tests:** all 16 shape combinations decode; the checker's refusals are tested; and the largest logo accepted at each level decodes.
+  * **Browser:** concept-styled renders in Chromium decode exactly, sharp and blurred.
+  * **Logo limit:** logos fit the empty centre (radius about 3.2). A larger logo would need byte-grouped placement, a wire-format change.
+  * **Unbuilt:** the Mac Design panel has not been compiled yet.
 * Xcode build/run and live camera performance remain pending physical-device validation; they are unavailable in this environment.
 
 ## Research references and provenance
