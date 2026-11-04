@@ -35,10 +35,27 @@ static bool write_svg(const std::string &path, const std::string &svg) {
     return static_cast<bool>(file);
 }
 
+static std::string base64(const std::string &in) {
+    static const char *t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out; size_t i = 0;
+    for (; i + 2 < in.size(); i += 3) {
+        const uint32_t v = (uint8_t(in[i]) << 16) | (uint8_t(in[i + 1]) << 8) | uint8_t(in[i + 2]);
+        out += t[v >> 18]; out += t[(v >> 12) & 63]; out += t[(v >> 6) & 63]; out += t[v & 63];
+    }
+    if (i < in.size()) {
+        const uint32_t v = (uint8_t(in[i]) << 16) | (i + 1 < in.size() ? uint8_t(in[i + 1]) << 8 : 0);
+        out += t[v >> 18]; out += t[(v >> 12) & 63]; out += i + 1 < in.size() ? t[(v >> 6) & 63] : '='; out += '=';
+    }
+    return out;
+}
+
 // ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg>
-//                      [--version <1-31>] [--level L|M|Q|H]
+//   [--version 1-31] [--level L|M|Q|H] [--preset plain|concept]
+//   [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]
+//   [--logo <png|jpg|svg file>] [--logo-radius <units>]
 static int encode_scalable(int argc, char **argv) {
-    std::string mode, value, output; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    std::string mode, value, output, logo_href; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    ckey_style style; ckey_style_default(&style);
     for (int i = 2; i + 1 < argc; i += 2) {
         const std::string flag = argv[i], arg = argv[i + 1];
         if (flag == "--utf8" || flag == "--hex") { mode = flag; value = arg; }
@@ -50,19 +67,51 @@ static int encode_scalable(int argc, char **argv) {
         } else if (flag == "--level") {
             if (arg == "L") level = CKEY_ECC_L; else if (arg == "M") level = CKEY_ECC_M; else if (arg == "Q") level = CKEY_ECC_Q; else if (arg == "H") level = CKEY_ECC_H;
             else { std::cerr << "--level must be L, M, Q, or H\n"; return 2; }
+        } else if (flag == "--preset") {
+            if (arg == "concept") {
+                style.background = {0x14, 0x16, 0x1e}; style.background_edge = {0x07, 0x08, 0x0c};
+                style.ink = {0xf6, 0xee, 0xe0}; style.ink_shade = {0xc8, 0xb6, 0x9a};
+                style.accents[0] = {0xa9, 0xb8, 0x96}; style.accents[1] = {0x9e, 0xa1, 0xa6}; style.accent_count = 2; style.accent_percent = 18;
+                style.bevel = 0.6; style.shadow = 0.5; style.texture = 0.4;
+            } else if (arg != "plain") { std::cerr << "--preset must be plain or concept\n"; return 2; }
+        } else if (flag == "--modules") {
+            if (arg == "rounded") style.modules = CKEY_MODULE_ROUNDED; else if (arg == "square") style.modules = CKEY_MODULE_SQUARE;
+            else if (arg == "circle") style.modules = CKEY_MODULE_CIRCLE; else if (arg == "diamond") style.modules = CKEY_MODULE_DIAMOND;
+            else { std::cerr << "--modules must be rounded, square, circle, or diamond\n"; return 2; }
+        } else if (flag == "--rings") {
+            if (arg == "joined") style.rings = CKEY_RING_JOINED; else if (arg == "dots") style.rings = CKEY_RING_DOTS;
+            else { std::cerr << "--rings must be joined or dots\n"; return 2; }
+        } else if (flag == "--rays") {
+            if (arg == "round") style.rays = CKEY_RAY_ROUND; else if (arg == "flat") style.rays = CKEY_RAY_FLAT;
+            else { std::cerr << "--rays must be round or flat\n"; return 2; }
+        } else if (flag == "--logo") {
+            std::ifstream file(arg, std::ios::binary);
+            if (!file) { std::cerr << "cannot read logo " << arg << '\n'; return 2; }
+            const std::string bytes((std::istreambuf_iterator<char>(file)), {});
+            const std::string ext = arg.size() > 4 ? arg.substr(arg.size() - 4) : "";
+            const std::string type = ext == ".svg" ? "image/svg+xml" : ext == ".png" ? "image/png" : "image/jpeg";
+            logo_href = "data:" + type + ";base64," + base64(bytes); style.logo_plate = 1;
+        } else if (flag == "--logo-radius") {
+            char *end = nullptr; style.logo_radius = std::strtod(arg.c_str(), &end);
+            if (!end || *end || !(style.logo_radius >= 0)) { std::cerr << "--logo-radius must be a non-negative number\n"; return 2; }
         } else { std::cerr << "unknown option " << flag << '\n'; return 2; }
     }
+    if (!logo_href.empty()) style.logo_href = logo_href.c_str();
     if ((argc % 2) != 0 || mode.empty() || output.empty()) {
-        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"; return 2;
+        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"
+                     "         [--preset plain|concept] [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]\n"
+                     "         [--logo <file>] [--logo-radius <units>]\n"; return 2;
     }
     std::vector<uint8_t> payload;
     if (mode == "--hex") { if (!from_hex(value, payload)) { std::cerr << "hex input must be an even number of hexadecimal digits\n"; return 2; } }
     else payload.assign(value.begin(), value.end());
     auto symbol = std::make_unique<ckey_scalable_symbol>(); ckey_diagnostics diag{};
     if (ckey_encode_scalable(payload.data(), payload.size(), version, level, symbol.get(), &diag) != CKEY_OK) { std::cerr << diag.message << '\n'; return 1; }
-    size_t needed = 0; ckey_render_scalable_svg(symbol.get(), 16, nullptr, 0, &needed);
+    ckey_diagnostics check{};
+    if (ckey_check_scalable_style(symbol.get(), &style, &check) != CKEY_OK) { std::cerr << "design refused: " << check.message << '\n'; return 1; }
+    size_t needed = 0; ckey_render_scalable_styled_svg(symbol.get(), &style, 16, nullptr, 0, &needed);
     std::string svg(needed, '\0');
-    if (ckey_render_scalable_svg(symbol.get(), 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
+    if (ckey_render_scalable_styled_svg(symbol.get(), &style, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
     std::cout << diag.message << "; profile=0; format=0." << CKEY_SCALABLE_FORMAT_VERSION << ".0; version=" << symbol->version
               << "; payload-bytes=" << payload.size() << "; capacity=" << ckey_scalable_capacity(symbol->version, level) << "; svg=" << output << '\n';
     return 0;

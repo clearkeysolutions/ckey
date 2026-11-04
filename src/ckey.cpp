@@ -1792,23 +1792,27 @@ KeyFit sample_fit(const std::vector<double> &marks, const std::vector<double> &e
     return {true, std::abs(mark_mean - empty_mean), static_cast<double>(evidence) / static_cast<double>(marks.size() + empty.size())};
 }
 
-// Version-independent skeleton: frame stroke, finder arcs, the orientation
-// split, frame moat, and the empty centre. Aligns any P0 symbol at any size.
+// Version- and style-independent skeleton: the frame stroke and both arms of
+// all four finders, sampled near the arm ends (common to every finder style:
+// arc, pill, squircle, bracket), against the frame moat and the outer quiet
+// margin. It is symmetric under the 8 orientations on purpose: finder styles
+// change the top-left split's shape, and a logo may occupy the centre, so
+// orientation comes from the asymmetric Grid, Ring, and Ray Keys instead.
 KeyFit scalable_skeleton_fit(const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
     std::vector<double> marks, empty;
     for (const auto &[x, y] : {std::pair{14.5, 0.5}, {28.5, 14.5}, {14.5, 28.5}, {0.5, 14.5}, {8.0, 0.5}, {21.0, 0.5}, {0.5, 21.0}, {28.5, 8.0}})
         marks.push_back(gray_sample(gray, width, height, stride, h, x, y));
-    constexpr double fr = 2.3;
-    for (const auto &[cx, cy, a] : {std::tuple{25.0, 4.0, kTau * 315.0 / 360.0}, std::tuple{4.0, 25.0, kTau * 135.0 / 360.0}, std::tuple{25.0, 25.0, kTau * 45.0 / 360.0}})
-        marks.push_back(gray_sample(gray, width, height, stride, h, cx + fr * std::cos(a), cy + fr * std::sin(a)));
-    for (double a : {kTau * 198.0 / 360.0, kTau * 252.0 / 360.0})
-        marks.push_back(gray_sample(gray, width, height, stride, h, 4.0 + fr * std::cos(a), 4.0 + fr * std::sin(a)));
-    empty.push_back(gray_sample(gray, width, height, stride, h, 4.0 + fr * std::cos(kTau * 5 / 8), 4.0 + fr * std::sin(kTau * 5 / 8)));
-    // Frame moat: payload ink starts at least 0.825 + 0.375 from each edge.
-    for (const auto &[x, y] : {std::pair{14.5, 1.0}, {28.0, 14.5}, {14.5, 28.0}, {1.0, 14.5}})
+    // Arm points at 198 and 252 degrees of the canonical arc (radius 2.3 about
+    // the corner inset 4), mirrored into each corner.
+    const double arm[2][2] = {{2.3 * std::cos(kTau * 198.0 / 360.0), 2.3 * std::sin(kTau * 198.0 / 360.0)},
+                              {2.3 * std::cos(kTau * 252.0 / 360.0), 2.3 * std::sin(kTau * 252.0 / 360.0)}};
+    for (const auto &[cx, cy, mx, my] : {std::tuple{4.0, 4.0, 1.0, 1.0}, {25.0, 4.0, -1.0, 1.0}, {4.0, 25.0, 1.0, -1.0}, {25.0, 25.0, -1.0, -1.0}})
+        for (const auto &o : arm) marks.push_back(gray_sample(gray, width, height, stride, h, cx + mx * o[0], cy + my * o[1]));
+    // Frame moat (payload ink starts at least 0.825 + 0.375 from each edge)
+    // and the mandatory outer quiet margin (-1..0).
+    for (const auto &[x, y] : {std::pair{14.5, 1.0}, {28.0, 14.5}, {14.5, 28.0}, {1.0, 14.5},
+                               {14.5, -0.4}, {29.4, 14.5}, {14.5, 29.4}, {-0.4, 14.5}})
         empty.push_back(gray_sample(gray, width, height, stride, h, x, y, 0.05));
-    for (const auto &[x, y] : {std::pair{14.5, 14.5}, {12.3, 14.5}, {16.7, 14.5}})
-        empty.push_back(gray_sample(gray, width, height, stride, h, x, y));
     return sample_fit(marks, empty);
 }
 
@@ -2068,54 +2072,251 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
     return CKEY_UNCORRECTABLE;
 }
 
+}  // extern "C"
+
+namespace {
+
+std::string hex_colour(ckey_rgb c) { char b[8]; std::snprintf(b, sizeof(b), "#%02x%02x%02x", c.r, c.g, c.b); return b; }
+bool same_colour(ckey_rgb a, ckey_rgb b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+
+// WCAG relative luminance and contrast ratio: the reader decodes luminance,
+// so every ink colour must stand clear of every background colour.
+double relative_luminance(ckey_rgb c) {
+    const auto channel = [](uint8_t v) { const double x = v / 255.0; return x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4); };
+    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+}
+double contrast_ratio(ckey_rgb a, ckey_rgb b) {
+    const double la = relative_luminance(a), lb = relative_luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+std::string xml_escape(const char *text) {
+    std::string out;
+    for (const char *c = text; *c; ++c) {
+        if (*c == '&') out += "&amp;"; else if (*c == '<') out += "&lt;"; else if (*c == '>') out += "&gt;";
+        else if (*c == '"') out += "&quot;"; else out += *c;
+    }
+    return out;
+}
+
+// The empty centre (inside ring 0's ink) holds a logo without hiding marks.
+double logo_quiet_radius(const ScalableLayout &L) { return kScalableRingInner - 0.2 * L.pitch - 0.15; }
+// Keep the outermost ring (which carries the Ring Key) fully visible.
+double logo_max_radius(const ScalableLayout &L) { return L.ring_radius(L.rings - 1) - 0.2 * L.pitch - 0.25; }
+
+double logo_load(const ScalableLayout &L, int level, double radius) {
+    if (radius <= logo_quiet_radius(L)) return 0.0;
+    const auto blocks = scalable_blocks(L.codeword_bytes, level);
+    std::vector<size_t> block_of(L.codeword_bytes); size_t pos = 0;
+    for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) block_of[pos++] = b;
+    std::vector<uint8_t> hidden(L.codeword_bytes, 0);
+    for (size_t i = 0; i < L.codeword_bytes * 8; ++i) {
+        const auto &n = L.nodes[i];
+        if (n.kind != 2) continue;  // only ring marks can lie under an allowed logo
+        if (std::hypot(n.x - kCenter, n.y - kCenter) - 0.2 * L.pitch <= radius + 0.05) hidden[i / 8] = 1;
+    }
+    std::vector<size_t> per_block(blocks.size(), 0);
+    for (size_t byte = 0; byte < hidden.size(); ++byte) per_block[block_of[byte]] += hidden[byte];
+    double worst = 0;
+    for (size_t b = 0; b < blocks.size(); ++b) worst = std::max(worst, per_block[b] / std::max(1.0, (blocks[b].n - blocks[b].k) / 2.0));
+    return worst;
+}
+
+std::string check_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st, double &min_contrast, double &load) {
+    min_contrast = 0; load = 0;
+    const auto finite01 = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
+    if (st.modules < CKEY_MODULE_ROUNDED || st.modules > CKEY_MODULE_DIAMOND) return "unknown module shape";
+    if (st.rings < CKEY_RING_JOINED || st.rings > CKEY_RING_DOTS) return "unknown ring style";
+    if (st.rays < CKEY_RAY_ROUND || st.rays > CKEY_RAY_FLAT) return "unknown ray cap";
+    if (st.accent_count > 4 || st.accent_percent > 100) return "accents: at most 4 colours and 100%";
+    if (!finite01(st.bevel) || !finite01(st.shadow) || !finite01(st.texture)) return "bevel, shadow, and texture must be 0..1";
+    std::vector<ckey_rgb> inks = {st.ink, st.ink_shade};
+    if (st.accent_percent > 0) for (uint32_t i = 0; i < st.accent_count; ++i) inks.push_back(st.accents[i]);
+    const ckey_rgb backgrounds[2] = {st.background, st.background_edge};
+    min_contrast = 1e9; int polarity = 0;
+    for (const auto &bg : backgrounds) for (const auto &ink : inks) {
+        const double ratio = contrast_ratio(ink, bg);
+        min_contrast = std::min(min_contrast, ratio);
+        char why[96];
+        if (ratio < 3.0) { std::snprintf(why, sizeof(why), "ink %s on background %s is %.1f:1; need 3:1", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio); return why; }
+        const int side = relative_luminance(ink) > relative_luminance(bg) ? 1 : -1;
+        if (polarity && side != polarity) return "all inks must be lighter than the background, or all darker";
+        polarity = side;
+    }
+    // Dark ink on a light ground: shadows darken the gaps and highlights
+    // lighten the marks, both eating into contrast.
+    if (polarity < 0 && st.shadow > 0.4) return "dark-on-light symbols allow shadow up to 0.4";
+    if (polarity < 0 && st.bevel > 0.5) return "dark-on-light symbols allow bevel up to 0.5";
+    const bool has_logo = st.logo_href && *st.logo_href;
+    if (!std::isfinite(st.logo_radius) || st.logo_radius < 0) return "logo radius must be 0 or positive";
+    if (has_logo) {
+        const double radius = st.logo_radius > 0 ? st.logo_radius : logo_quiet_radius(L);
+        char why[96];
+        if (radius > logo_max_radius(L)) { std::snprintf(why, sizeof(why), "logo radius %.2f exceeds %.2f (it would hide the Ring Key)", radius, logo_max_radius(L)); return why; }
+        if (radius > logo_quiet_radius(L) && !st.logo_plate) return "a logo larger than the empty centre needs a plate";
+        load = logo_load(L, static_cast<int>(sym.ecc_level), radius);
+        if (load > 0.5) { std::snprintf(why, sizeof(why), "logo hides %.0f%% of a block's correction (max 50%%); raise the level or shrink it", 100 * load); return why; }
+    }
+    return {};
+}
+
+void emit_module(std::ostringstream &o, double cx, double cy, double p, ckey_module_shape shape, const std::string &colour) {
+    const std::string fill = colour.empty() ? "" : " fill=\"" + colour + "\"";
+    const double h = 0.34 * p;
+    switch (shape) {
+    case CKEY_MODULE_CIRCLE: o << "<circle cx=\"" << cx << "\" cy=\"" << cy << "\" r=\"" << h << "\" stroke=\"none\"" << fill << "/>"; break;
+    case CKEY_MODULE_DIAMOND: {
+        const double d = 0.40 * p;  // inscribed radius 0.28p covers the sample support
+        o << "<polygon points=\"" << cx << ',' << cy - d << ' ' << cx + d << ',' << cy << ' ' << cx << ',' << cy + d << ' ' << cx - d << ',' << cy << "\" stroke=\"none\"" << fill << "/>"; break;
+    }
+    default:
+        o << "<rect x=\"" << cx - h << "\" y=\"" << cy - h << "\" width=\"" << 2 * h << "\" height=\"" << 2 * h << "\" rx=\""
+          << (shape == CKEY_MODULE_SQUARE ? 0.0 : 0.16 * p) << "\" stroke=\"none\"" << fill << "/>";
+    }
+}
+
+// Deterministic accent choice per site (decorative; luminance is checked).
+int accent_of(uint32_t id, const ckey_style &st) {
+    if (!st.accent_count || !st.accent_percent) return -1;
+    const uint32_t h = site_hash(id ^ 0x41434345u);  // "ACCE"
+    return (h % 100) < st.accent_percent ? static_cast<int>((h / 100) % st.accent_count) : -1;
+}
+
+}  // namespace
+
+extern "C" {
+
+void ckey_style_default(ckey_style *st) {
+    if (!st) return;
+    std::memset(st, 0, sizeof(*st));
+    st->background = st->background_edge = {5, 5, 5};
+    st->ink = st->ink_shade = {0xf4, 0xf1, 0xe8};
+    st->modules = CKEY_MODULE_ROUNDED; st->rings = CKEY_RING_JOINED; st->rays = CKEY_RAY_ROUND;
+}
+
+double ckey_scalable_logo_max_radius(uint32_t version) {
+    return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT ? logo_max_radius(scalable_layout(static_cast<int>(version))) : -1.0;
+}
+
+double ckey_scalable_logo_load(const ckey_scalable_symbol *s, double radius) {
+    if (!s || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || !std::isfinite(radius) || radius < 0) return -1.0;
+    return logo_load(scalable_layout(static_cast<int>(s->version)), static_cast<int>(s->ecc_level), radius);
+}
+
+ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_style *st, ckey_diagnostics *diag) {
+    if (!s || !st || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3) {
+        set_status(diag, CKEY_INVALID_ARGUMENT, "style check needs a Profile 0 symbol and a style"); return CKEY_INVALID_ARGUMENT;
+    }
+    double contrast = 0, load = 0;
+    const std::string problem = check_style(scalable_layout(static_cast<int>(s->version)), *s, *st, contrast, load);
+    if (!problem.empty()) { set_status(diag, CKEY_INVALID_ARGUMENT, problem.c_str()); return CKEY_INVALID_ARGUMENT; }
+    char message[96]; std::snprintf(message, sizeof(message), "style OK: contrast >= %.1f:1; logo uses %.0f%% of block correction", contrast, 100 * load);
+    set_status(diag, CKEY_OK, message);
+    return CKEY_OK;
+}
+
 ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *s, uint32_t scale, char *out, size_t cap, size_t *required) {
-    if (!s || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
+    ckey_style st; ckey_style_default(&st);
+    return ckey_render_scalable_styled_svg(s, &st, scale, out, cap, required);
+}
+
+ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const ckey_style *st, uint32_t scale,
+                                            char *out, size_t cap, size_t *required) {
+    if (!s || !st || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
         s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT) return CKEY_INVALID_ARGUMENT;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version));
     if (s->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
+    double contrast = 0, load = 0;
+    if (!check_style(L, *s, *st, contrast, load).empty()) return CKEY_INVALID_ARGUMENT;
     const double p = L.pitch, dot = 0.2 * p;
-    const std::string module = fixed4(0.68 * p), corner = fixed4(0.16 * p), dot_stroke = fixed4(2 * dot);
+    const std::string dot_stroke = fixed4(2 * dot), cap_style = st->rays == CKEY_RAY_FLAT ? "butt" : "round";
+    const bool sheen = !same_colour(st->ink, st->ink_shade), vignette = !same_colour(st->background, st->background_edge);
+    const bool depth = st->bevel > 0 || st->shadow > 0;
+    const std::string ink = sheen ? "url(#ckey-ink)" : hex_colour(st->ink);
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);
-    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0 version " << s->version << "\">"
-      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0 version " << s->version << "\">";
+    // ---- Materials ----
+    if (sheen || vignette || depth || st->texture > 0 || (st->logo_href && *st->logo_href)) {
+        o << "<defs>";
+        if (sheen) o << "<linearGradient id=\"ckey-ink\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"29\" y2=\"29\"><stop offset=\"0\" stop-color=\"" << hex_colour(st->ink)
+                     << "\"/><stop offset=\"0.55\" stop-color=\"" << hex_colour(st->ink_shade) << "\"/><stop offset=\"1\" stop-color=\"" << hex_colour(st->ink) << "\"/></linearGradient>";
+        if (vignette) o << "<radialGradient id=\"ckey-bg\" gradientUnits=\"userSpaceOnUse\" cx=\"14.5\" cy=\"14.5\" r=\"21\"><stop offset=\"0\" stop-color=\"" << hex_colour(st->background)
+                        << "\"/><stop offset=\"1\" stop-color=\"" << hex_colour(st->background_edge) << "\"/></radialGradient>";
+        if (st->texture > 0) o << "<filter id=\"ckey-grain\" x=\"0\" y=\"0\" width=\"100%\" height=\"100%\"><feTurbulence type=\"fractalNoise\" baseFrequency=\"1.7\" numOctaves=\"2\" seed=\"7\"/><feColorMatrix type=\"saturate\" values=\"0\"/></filter>";
+        if (depth) {
+            o << "<filter id=\"ckey-depth\" x=\"-2%\" y=\"-2%\" width=\"104%\" height=\"104%\" color-interpolation-filters=\"sRGB\">";
+            std::string base = "SourceGraphic";
+            if (st->shadow > 0) { o << "<feDropShadow dx=\"0.05\" dy=\"0.09\" stdDeviation=\"0.07\" flood-color=\"#000000\" flood-opacity=\"" << 0.75 * st->shadow << "\" result=\"shadowed\"/>"; base = "shadowed"; }
+            if (st->bevel > 0)
+                o << "<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"0.045\" result=\"bump\"/><feSpecularLighting in=\"bump\" surfaceScale=\"3\" specularConstant=\"" << 1.1 * st->bevel
+                  << "\" specularExponent=\"16\" lighting-color=\"#ffffff\" result=\"spec\"><feDistantLight azimuth=\"225\" elevation=\"40\"/></feSpecularLighting>"
+                  << "<feComposite in=\"spec\" in2=\"SourceAlpha\" operator=\"in\" result=\"shine\"/><feComposite in=\"shine\" in2=\"" << base << "\" operator=\"arithmetic\" k1=\"0\" k2=\"1\" k3=\"1\" k4=\"0\"/>";
+            o << "</filter>";
+        }
+        if (st->logo_href && *st->logo_href) {
+            const double r = st->logo_radius > 0 ? st->logo_radius : logo_quiet_radius(L);
+            o << "<clipPath id=\"ckey-logo-clip\"><circle cx=\"14.5\" cy=\"14.5\" r=\"" << r << "\"/></clipPath>";
+        }
+        o << "</defs>";
+    }
+    o << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"" << (vignette ? "url(#ckey-bg)" : hex_colour(st->background)) << "\"/>";
+    if (st->texture > 0) o << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" filter=\"url(#ckey-grain)\" opacity=\"" << 0.18 * st->texture << "\"/>";
+    o << "<g fill=\"" << ink << "\" stroke=\"" << ink << "\"" << (depth ? " filter=\"url(#ckey-depth)\"" : "") << ">"
       << "<g class=\"ckey-frame\"><rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/></g>"
       << "<g class=\"ckey-finders\">";
     svg_corner_finders(o, 29.0, 4.0, {2.30, 0.0, 0.0}, .80, .95);
     o << "</g><g class=\"ckey-grid-key\">";
-    for (int r = 0; r < 2; ++r) for (int cc = 0; cc < 2; ++cc)
-        o << "<rect x=\"" << (L.col0 + cc) * p + 0.16 * p << "\" y=\"" << (L.row0 + r) * p + 0.16 * p << "\" width=\"" << module << "\" height=\"" << module << "\" rx=\"" << corner << "\" stroke=\"none\"/>";
+    for (int r = 0; r < 2; ++r) for (int cc = 0; cc < 2; ++cc) emit_module(o, (L.col0 + cc + .5) * p, (L.row0 + r + .5) * p, p, st->modules, "");
     o << "</g><g class=\"ckey-polar-keys\">";
     for (const auto &[slot, fraction] : {std::pair{0, 1.0}, std::pair{L.ray_key_half(), 0.5}, std::pair{L.ray_key_three(), 0.75}}) {
         const double a = kTau * slot / L.slots, r0 = kScalableDialInner, r1 = r0 + L.key_ray() * fraction;
         o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
-          << "\" fill=\"none\" stroke-width=\"" << 0.44 * p << "\" stroke-linecap=\"round\"/>";
+          << "\" fill=\"none\" stroke-width=\"" << 0.44 * p << "\" stroke-linecap=\"" << cap_style << "\"/>";
     }
+    // The Ring Key keeps its dot/gap/run pattern in every style: it is a key.
     const double rk = L.ring_radius(L.rings - 1); const int k = L.ring_key_slot();
     for (int slot : {k, k + 2, k + 6}) { const double a = kTau * slot / L.slots; svg_circle(o, kCenter + rk * std::sin(a), kCenter - rk * std::cos(a), dot); }
     svg_ring_run(o, kCenter, rk, k + 7.5, k + 15.5, L.slots, dot, dot_stroke.c_str());
     o << "</g><g class=\"ckey-data-polar\">";
     std::vector<uint8_t> ring_bits(static_cast<size_t>(L.rings) * L.slots, 0);
+    std::vector<int> ring_accent(static_cast<size_t>(L.rings) * L.slots, -1);
     for (size_t i = 0; i < L.nodes.size(); ++i) {
         const auto &n = L.nodes[i]; const bool bit = scalable_site_value(L, s, i);
-        if (n.kind == 0) { if (bit) c << "<rect x=\"" << n.x - 0.34 * p << "\" y=\"" << n.y - 0.34 * p << "\" width=\"" << module << "\" height=\"" << module << "\" rx=\"" << corner << "\" stroke=\"none\"/>"; }
+        const int accent = accent_of(n.id, *st);
+        if (n.kind == 0) { if (bit) emit_module(c, n.x, n.y, p, st->modules, accent >= 0 ? hex_colour(st->accents[accent]) : ""); }
         else if (n.kind == 1) {
             const double a = kTau * n.slot / L.slots, r0 = kScalableDialInner, r1 = r0 + (bit ? L.long_ray() : L.short_ray());
             o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
-              << "\" fill=\"none\" stroke-width=\"" << 0.2 * p << "\" stroke-linecap=\"round\"/>";
-        } else ring_bits[static_cast<size_t>(n.ring) * L.slots + n.slot] = bit;
+              << "\" fill=\"none\" stroke-width=\"" << 0.2 * p << "\" stroke-linecap=\"" << cap_style << "\"/>";
+        } else { ring_bits[static_cast<size_t>(n.ring) * L.slots + n.slot] = bit; ring_accent[static_cast<size_t>(n.ring) * L.slots + n.slot] = accent; }
     }
     for (int ring = 0; ring < L.rings; ++ring) {
         const double radius = L.ring_radius(ring);
         for (int slot = 0; slot < L.slots;) {
-            if (!ring_bits[static_cast<size_t>(ring) * L.slots + slot]) { ++slot; continue; }
-            int end = slot + 1; while (end < L.slots && ring_bits[static_cast<size_t>(ring) * L.slots + end]) ++end;
-            if (end - slot == 1) { const double a = kTau * slot / L.slots; svg_circle(o, kCenter + radius * std::sin(a), kCenter - radius * std::cos(a), dot); }
-            else svg_ring_run(o, kCenter, radius, slot - .5, end - .5, L.slots, dot, dot_stroke.c_str());
+            const size_t at = static_cast<size_t>(ring) * L.slots + slot;
+            if (!ring_bits[at]) { ++slot; continue; }
+            int end = slot + 1;
+            if (st->rings == CKEY_RING_JOINED) while (end < L.slots && ring_bits[static_cast<size_t>(ring) * L.slots + end]) ++end;
+            const int accent = ring_accent[at];
+            const std::string colour = accent >= 0 ? hex_colour(st->accents[accent]) : "";
+            if (end - slot == 1) {
+                const double a = kTau * slot / L.slots;
+                o << "<circle cx=\"" << kCenter + radius * std::sin(a) << "\" cy=\"" << kCenter - radius * std::cos(a) << "\" r=\"" << dot << "\" stroke=\"none\""
+                  << (colour.empty() ? "" : " fill=\"" + colour + "\"") << "/>";
+            } else if (colour.empty()) svg_ring_run(o, kCenter, radius, slot - .5, end - .5, L.slots, dot, dot_stroke.c_str());
+            else { o << "<g stroke=\"" << colour << "\">"; svg_ring_run(o, kCenter, radius, slot - .5, end - .5, L.slots, dot, dot_stroke.c_str()); o << "</g>"; }
             slot = end;
         }
     }
-    o << "</g><g class=\"ckey-data-cartesian\">" << c.str() << "</g></g></svg>";
+    o << "</g><g class=\"ckey-data-cartesian\">" << c.str() << "</g></g>";
+    if (st->logo_href && *st->logo_href) {
+        const double r = st->logo_radius > 0 ? st->logo_radius : logo_quiet_radius(L);
+        if (st->logo_plate) o << "<g class=\"ckey-logo-plate\"><circle cx=\"14.5\" cy=\"14.5\" r=\"" << r + 0.1 << "\" fill=\"" << hex_colour(st->background) << "\"/></g>";
+        o << "<image href=\"" << xml_escape(st->logo_href) << "\" x=\"" << 14.5 - r << "\" y=\"" << 14.5 - r << "\" width=\"" << 2 * r << "\" height=\"" << 2 * r
+          << "\" preserveAspectRatio=\"xMidYMid meet\" clip-path=\"url(#ckey-logo-clip)\"/>";
+    }
+    o << "</svg>";
     const std::string text = o.str(); *required = text.size() + 1;
     if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
     std::memcpy(out, text.c_str(), *required);

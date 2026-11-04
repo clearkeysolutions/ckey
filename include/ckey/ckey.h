@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.56"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.57"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -256,6 +256,61 @@ CKEY_API double ckey_calibration_score_scalable_gray8(const uint8_t *gray, size_
 CKEY_API ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *symbol, uint32_t scale,
                                                char *out_utf8, size_t out_capacity,
                                                size_t *out_required);
+/*
+ * Profile 0 design system. Styling changes how a symbol is painted, never
+ * where a reader samples: site geometry, the frame, finders, keys, and the
+ * quiet margin are fixed. Payload marks may change shape within their own
+ * cells; colour, materials, and a logo are free within checked limits.
+ * ckey_check_scalable_style validates a style against a symbol (contrast,
+ * effect limits, logo error budget) and explains any refusal; the styled
+ * renderer refuses any style that fails the check.
+ */
+typedef struct ckey_rgb { uint8_t r, g, b; } ckey_rgb;
+typedef enum ckey_module_shape {
+    CKEY_MODULE_ROUNDED = 0,   /* default rounded square */
+    CKEY_MODULE_SQUARE = 1,
+    CKEY_MODULE_CIRCLE = 2,
+    CKEY_MODULE_DIAMOND = 3
+} ckey_module_shape;
+typedef enum ckey_ring_style {
+    CKEY_RING_JOINED = 0,      /* default: adjacent dots join into arcs */
+    CKEY_RING_DOTS = 1         /* every ring mark a separate dot */
+} ckey_ring_style;
+typedef enum ckey_ray_cap {
+    CKEY_RAY_ROUND = 0,        /* default */
+    CKEY_RAY_FLAT = 1
+} ckey_ray_cap;
+typedef struct ckey_style {
+    ckey_rgb background;       /* centre of the background */
+    ckey_rgb background_edge;  /* edge colour (radial vignette); equal = solid */
+    ckey_rgb ink;              /* marks; light side of a metallic sheen */
+    ckey_rgb ink_shade;        /* sheen shade across the symbol; equal = flat ink */
+    ckey_rgb accents[4];       /* optional accent colours for payload marks */
+    uint32_t accent_count;     /* 0..4 */
+    uint32_t accent_percent;   /* 0..100: share of payload marks drawn in accents */
+    ckey_module_shape modules;
+    ckey_ring_style rings;
+    ckey_ray_cap rays;
+    double bevel;              /* 0..1 embossed highlight */
+    double shadow;             /* 0..1 drop-shadow depth */
+    double texture;            /* 0..1 background grain */
+    const char *logo_href;     /* image URL or data: URI; NULL or "" for none */
+    double logo_radius;        /* canonical units; 0 = the empty centre's size */
+    uint32_t logo_plate;       /* 1: background disc behind the logo */
+} ckey_style;
+/* Fills the default style (the plain Profile 0 look). */
+CKEY_API void ckey_style_default(ckey_style *style);
+/* Largest logo radius for a version (keeps the Ring Key and outer ring). */
+CKEY_API double ckey_scalable_logo_max_radius(uint32_t version);
+/* Share (0..) of the worst RS block's correction capacity consumed by marks
+ * hidden under a logo of this radius; negative for invalid arguments. A
+ * style is accepted up to 0.5, leaving half the correction for damage. */
+CKEY_API double ckey_scalable_logo_load(const ckey_scalable_symbol *symbol, double logo_radius);
+CKEY_API ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                ckey_diagnostics *out_diagnostics);
+CKEY_API ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                      uint32_t scale, char *out_utf8, size_t out_capacity,
+                                                      size_t *out_required);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

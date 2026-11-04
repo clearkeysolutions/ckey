@@ -1,7 +1,9 @@
 // Minimal rasterizer for the SVG subset emitted by CKey's renderers: <g>
 // with translate/scale transforms and inherited fill/stroke/linecap/class,
-// <rect> (filled or stroked, rounded), <circle>, and stroked <path> made of
-// M/L/A commands. It consumes the rendered SVG text, not the encoder's
+// <rect> (filled or stroked, rounded), <circle>, <polygon>, and stroked
+// <path> made of M/L/A commands. Styled output: <defs> are skipped, gradient
+// fills count as ink, full-canvas rects are background, <image> is not
+// drawn, and the "ckey-logo-plate" layer erases (painter's order). It consumes the rendered SVG text, not the encoder's
 // internal geometry, so round-trip tests check what is actually printed.
 #ifndef CKEY_TESTS_SVG_RASTER_H
 #define CKEY_TESTS_SVG_RASTER_H
@@ -28,8 +30,10 @@ struct Segment {
 };
 
 struct Prim {
-    enum Kind { FillRect, StrokeRect, Circle, Stroke } kind = FillRect;
+    enum Kind { FillRect, StrokeRect, Circle, Stroke, Polygon } kind = FillRect;
     std::string layer;
+    bool erase = false;
+    std::vector<std::pair<double, double>> points;  // polygon vertices
     Affine xf;
     double x = 0, y = 0, w = 0, h = 0, rx = 0;  // rects; circle uses x,y,rx
     double half_width = 0; bool round_cap = false;
@@ -89,6 +93,14 @@ inline bool prim_hit(const Prim &p, double ux, double uy) {
     case Prim::Stroke:
         for (const auto &s : p.segments) if (stroke_hit(s, x, y, p.half_width, p.round_cap)) return true;
         return false;
+    case Prim::Polygon: {
+        bool inside = false;
+        for (size_t i = 0, j = p.points.size() - 1; i < p.points.size(); j = i++) {
+            const auto &a = p.points[i], &b = p.points[j];
+            if ((a.second > y) != (b.second > y) && x < (b.first - a.first) * (y - a.second) / (b.second - a.second) + a.first) inside = !inside;
+        }
+        return inside;
+    }
     }
     return false;
 }
@@ -98,6 +110,7 @@ inline void finish_bbox(Prim &p) {
     const auto add = [&](double x, double y, double pad) { x0 = std::min(x0, x - pad); y0 = std::min(y0, y - pad); x1 = std::max(x1, x + pad); y1 = std::max(y1, y + pad); };
     if (p.kind == Prim::FillRect || p.kind == Prim::StrokeRect) { add(p.x, p.y, p.half_width); add(p.x + p.w, p.y + p.h, p.half_width); }
     else if (p.kind == Prim::Circle) add(p.x, p.y, p.rx);
+    else if (p.kind == Prim::Polygon) for (const auto &[x, y] : p.points) add(x, y, 0);
     else for (const auto &s : p.segments) {
         if (s.arc) {
             // Tight bound: the sweep's endpoints plus every axis extreme it crosses.
@@ -141,6 +154,7 @@ inline Svg parse(const std::string &text) {
         const size_t j = text.find('>', i);
         std::string tag = text.substr(i + 1, j - i - 1);
         i = j + 1;
+        if (tag.rfind("defs", 0) == 0) { const size_t end = text.find("</defs>", i); i = end == std::string::npos ? text.size() : end + 7; continue; }
         if (tag.rfind("/g", 0) == 0) { stack.pop_back(); continue; }
         if (tag[0] == '/') continue;
         const bool self_close = !tag.empty() && tag.back() == '/';
@@ -170,8 +184,13 @@ inline Svg parse(const std::string &text) {
             continue;
         }
         if (ctx.fill == "#050505") continue;  // background, not ink
-        Prim p; p.layer = ctx.layer; p.xf = ctx.xf;
-        if (name == "rect") {
+        Prim p; p.layer = ctx.layer; p.xf = ctx.xf; p.erase = ctx.layer == "ckey-logo-plate";
+        if (name == "rect" && std::stod(a["x"]) == svg.vx && std::stod(a["width"]) == svg.vw) continue;  // background / texture
+        if (name == "polygon") {
+            p.kind = Prim::Polygon;
+            std::string pts = a["points"]; for (char &ch : pts) if (ch == ',') ch = ' ';
+            std::istringstream in(pts); double px, py; while (in >> px >> py) p.points.push_back({px, py});
+        } else if (name == "rect") {
             p.x = std::stod(a["x"]); p.y = std::stod(a["y"]); p.w = std::stod(a["width"]); p.h = std::stod(a["height"]);
             p.rx = a.count("rx") ? std::stod(a["rx"]) : 0.0;
             if (ctx.fill == "none") { p.kind = Prim::StrokeRect; p.half_width = std::stod(a["stroke-width"]) / 2; }
@@ -212,7 +231,8 @@ inline std::vector<uint8_t> rasterize(const Svg &svg, int width, int height, int
         const int y1 = std::min(H - 1, static_cast<int>(std::ceil((p.by1 - svg.vy) / ky)) + 1);
         for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
             uint8_t &cell = hit[static_cast<size_t>(y) * W + x];
-            if (!cell && prim_hit(p, svg.vx + (x + .5) * kx, svg.vy + (y + .5) * ky)) cell = 1;
+            if (p.erase) { if (cell && prim_hit(p, svg.vx + (x + .5) * kx, svg.vy + (y + .5) * ky)) cell = 0; }
+            else if (!cell && prim_hit(p, svg.vx + (x + .5) * kx, svg.vy + (y + .5) * ky)) cell = 1;
         }
     }
     std::vector<uint8_t> out(static_cast<size_t>(width) * height);

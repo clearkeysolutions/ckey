@@ -29,6 +29,28 @@ private final class RendererModel: ObservableObject {
     @Published var scalableLevel = 1 { didSet { scheduleRegenerate() } }
     /// Module pitch of the current symbol in canonical units (29-unit field).
     @Published private(set) var modulePitch = 1.0
+    // Profile 0 design system (ckey_style). Foreground/Background below are
+    // the ink and background-centre colours.
+    @Published var moduleShape = 0 { didSet { scheduleRegenerate() } }   // rounded, square, circle, diamond
+    @Published var ringStyle = 0 { didSet { scheduleRegenerate() } }     // joined arcs, dots
+    @Published var rayCap = 0 { didSet { scheduleRegenerate() } }        // round, flat
+    @Published var sheen = false { didSet { scheduleRegenerate() } }
+    @Published var inkShade = Color(red: 0.784, green: 0.714, blue: 0.604) { didSet { scheduleRegenerate() } }
+    @Published var vignette = false { didSet { scheduleRegenerate() } }
+    @Published var backgroundEdge = Color(red: 0.027, green: 0.031, blue: 0.047) { didSet { scheduleRegenerate() } }
+    @Published var accentsOn = false { didSet { scheduleRegenerate() } }
+    @Published var accent1 = Color(red: 0.663, green: 0.722, blue: 0.588) { didSet { scheduleRegenerate() } }
+    @Published var accent2 = Color(red: 0.620, green: 0.631, blue: 0.651) { didSet { scheduleRegenerate() } }
+    @Published var accentPercent = 18.0 { didSet { scheduleRegenerate() } }
+    @Published var bevel = 0.0 { didSet { scheduleRegenerate() } }
+    @Published var depth = 0.0 { didSet { scheduleRegenerate() } }
+    @Published var grain = 0.0 { didSet { scheduleRegenerate() } }
+    @Published private(set) var logoDataURI: String? = nil { didSet { scheduleRegenerate() } }
+    @Published private(set) var logoName = ""
+    /// 0 = the empty centre; 1 = the largest radius the version allows.
+    @Published var logoSize = 0.0 { didSet { scheduleRegenerate() } }
+    @Published var logoPlate = true { didSet { scheduleRegenerate() } }
+    @Published private(set) var styleStatus = ""
     @Published var payload = "CKeyDemoPayload!" { didSet { scheduleRegenerate() } }
     @Published var extendedTier = 0 { didSet { scheduleRegenerate() } }
     @Published var foreground = Color(red: 0.95, green: 0.94, blue: 0.88) { didSet { scheduleRegenerate() } }
@@ -64,8 +86,33 @@ private final class RendererModel: ObservableObject {
             defer { symbol.deallocate() }
             let level = ckey_ecc_level(rawValue: UInt32(scalableLevel))
             guard ckey_encode_scalable(input, input.count, UInt32(scalableVersion), level, symbol, &diag) == CKEY_OK else { svg = ""; return fail(diag) }
-            rendered = renderScalable(symbol)
             let version = symbol.pointee.version
+            var style = ckey_style()
+            ckey_style_default(&style)
+            style.background = rgb(background)
+            style.background_edge = vignette ? rgb(backgroundEdge) : style.background
+            style.ink = rgb(foreground)
+            style.ink_shade = sheen ? rgb(inkShade) : style.ink
+            if accentsOn {
+                style.accents.0 = rgb(accent1); style.accents.1 = rgb(accent2)
+                style.accent_count = 2; style.accent_percent = UInt32(accentPercent.rounded())
+            }
+            style.modules = ckey_module_shape(rawValue: UInt32(moduleShape))
+            style.rings = ckey_ring_style(rawValue: UInt32(ringStyle))
+            style.rays = ckey_ray_cap(rawValue: UInt32(rayCap))
+            style.bevel = bevel; style.shadow = depth; style.texture = grain
+            style.logo_plate = logoPlate ? 1 : 0
+            let maxRadius = ckey_scalable_logo_max_radius(version)
+            style.logo_radius = logoSize <= 0 ? 0 : 3.0 + (maxRadius - 3.0) * logoSize
+            var checkDiag = ckey_diagnostics()
+            var checked = CKEY_OK
+            rendered = (logoDataURI ?? "").withCString { href -> String? in
+                style.logo_href = logoDataURI == nil ? nil : href
+                checked = ckey_check_scalable_style(symbol, &style, &checkDiag)
+                return checked == CKEY_OK ? renderScalable(symbol, style: &style) : nil
+            }
+            styleStatus = diagnosticString(checkDiag)
+            guard checked == CKEY_OK else { svg = ""; status = "Design refused: \(styleStatus)"; return }
             let modules = ckey_scalable_modules_across(version)
             modulePitch = 29.0 / Double(max(modules, 1))
             detail = "\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level)) B"
@@ -105,8 +152,10 @@ private final class RendererModel: ObservableObject {
             detail = "\(extendedTier == 0 ? "auto" : "selected") tier \(tier) B · RS(255,\(dataBytes)) × 10"
         }
         guard var next = rendered else { svg = ""; status = "The C++ renderer did not produce SVG."; return }
-        next = next.replacingOccurrences(of: "#050505", with: background.hex)
-        next = next.replacingOccurrences(of: "#f4f1e8", with: foreground.hex)
+        if profile != .scalable {  // Profile 0 colours come from its ckey_style
+            next = next.replacingOccurrences(of: "#050505", with: background.hex)
+            next = next.replacingOccurrences(of: "#f4f1e8", with: foreground.hex)
+        }
         svg = next
         let version = ckey_get_software_version().map { String(cString: $0) } ?? "development"
         status = "\(profile.rawValue) · \(input.count) payload byte(s) · \(detail) · \(version)"
@@ -131,12 +180,48 @@ private final class RendererModel: ObservableObject {
             return String(cString: baseAddress.assumingMemoryBound(to: CChar.self))
         }
     }
-    private func renderScalable(_ symbol: UnsafeMutablePointer<ckey_scalable_symbol>) -> String? {
+    func chooseLogo() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .svg]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+        guard data.count <= 2_000_000 else { styleStatus = "Logo files must be 2 MB or smaller."; return }
+        let ext = url.pathExtension.lowercased()
+        let type = ext == "svg" ? "image/svg+xml" : ext == "png" ? "image/png" : "image/jpeg"
+        logoName = url.lastPathComponent
+        logoDataURI = "data:\(type);base64,\(data.base64EncodedString())"
+    }
+
+    func removeLogo() { logoDataURI = nil; logoName = "" }
+
+    /// The original concept art's look: champagne metal, navy vignette,
+    /// sage and grey accents, embossed depth, and fine grain.
+    func applyConceptPreset() {
+        background = Color(red: 0.078, green: 0.086, blue: 0.118); backgroundEdge = Color(red: 0.027, green: 0.031, blue: 0.047)
+        foreground = Color(red: 0.965, green: 0.933, blue: 0.878); inkShade = Color(red: 0.784, green: 0.714, blue: 0.604)
+        sheen = true; vignette = true; accentsOn = true; accentPercent = 18
+        bevel = 0.6; depth = 0.5; grain = 0.4; moduleShape = 0; ringStyle = 0; rayCap = 0
+    }
+
+    private func rgb(_ colour: Color) -> ckey_rgb {
+        let c = NSColor(colour).usingColorSpace(.deviceRGB) ?? .white
+        let byte = { (v: CGFloat) in UInt8(max(0, min(255, (v * 255).rounded()))) }
+        return ckey_rgb(r: byte(c.redComponent), g: byte(c.greenComponent), b: byte(c.blueComponent))
+    }
+
+    private func diagnosticString(_ diag: ckey_diagnostics) -> String {
+        withUnsafeBytes(of: diag.message) { bytes in
+            guard let base = bytes.baseAddress else { return "" }
+            return String(cString: base.assumingMemoryBound(to: CChar.self))
+        }
+    }
+
+    private func renderScalable(_ symbol: UnsafeMutablePointer<ckey_scalable_symbol>, style: inout ckey_style) -> String? {
         var needed = 0
-        guard ckey_render_scalable_svg(symbol, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
+        guard ckey_render_scalable_styled_svg(symbol, &style, 24, nil, 0, &needed) == CKEY_INSUFFICIENT_BUFFER else { return nil }
         var chars = [CChar](repeating: 0, count: needed)
         let result = chars.withUnsafeMutableBufferPointer { buffer in
-            ckey_render_scalable_svg(symbol, 24, buffer.baseAddress, buffer.count, &needed)
+            ckey_render_scalable_styled_svg(symbol, &style, 24, buffer.baseAddress, buffer.count, &needed)
         }
         guard result == CKEY_OK else { return nil }
         return chars.withUnsafeBufferPointer { buffer in
@@ -189,7 +274,7 @@ private struct RendererView: View {
     @StateObject private var model = RendererModel()
     var body: some View {
         HSplitView {
-            VStack(alignment: .leading, spacing: 16) {
+            ScrollView { VStack(alignment: .leading, spacing: 16) {
                 Text("CKey Renderer").font(.largeTitle.bold())
                 Text("Native C++ encoder · non-normative visual stress laboratory").foregroundStyle(.secondary)
                 Picker("Profile", selection: $model.profile) { ForEach(RenderProfile.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
@@ -203,6 +288,35 @@ private struct RendererView: View {
                     Picker("Correction", selection: $model.scalableLevel) {
                         Text("L · ~7%").tag(0); Text("M · ~14%").tag(1); Text("Q · ~22%").tag(2); Text("H · ~30%").tag(3)
                     }.pickerStyle(.segmented)
+                    DisclosureGroup("Design") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Modules", selection: $model.moduleShape) {
+                                Text("Rounded").tag(0); Text("Square").tag(1); Text("Circle").tag(2); Text("Diamond").tag(3)
+                            }.pickerStyle(.segmented)
+                            Picker("Rings", selection: $model.ringStyle) { Text("Joined arcs").tag(0); Text("Dots").tag(1) }.pickerStyle(.segmented)
+                            Picker("Rays", selection: $model.rayCap) { Text("Round").tag(0); Text("Flat").tag(1) }.pickerStyle(.segmented)
+                            HStack { Toggle("Metal sheen", isOn: $model.sheen); ColorPicker("Shade", selection: $model.inkShade).disabled(!model.sheen) }
+                            HStack { Toggle("Vignette", isOn: $model.vignette); ColorPicker("Edge", selection: $model.backgroundEdge).disabled(!model.vignette) }
+                            HStack {
+                                Toggle("Accents", isOn: $model.accentsOn)
+                                ColorPicker("", selection: $model.accent1).disabled(!model.accentsOn)
+                                ColorPicker("", selection: $model.accent2).disabled(!model.accentsOn)
+                            }
+                            LabSlider(title: "Accent share", value: $model.accentPercent, range: 0...60, suffix: " %")
+                            LabSlider(title: "Bevel", value: $model.bevel, range: 0...1, suffix: "")
+                            LabSlider(title: "Depth", value: $model.depth, range: 0...1, suffix: "")
+                            LabSlider(title: "Grain", value: $model.grain, range: 0...1, suffix: "")
+                            HStack {
+                                Button("Choose Logo…") { model.chooseLogo() }
+                                Button("Remove") { model.removeLogo() }.disabled(model.logoName.isEmpty)
+                                Text(model.logoName).font(.caption).lineLimit(1)
+                            }
+                            LabSlider(title: "Logo size", value: $model.logoSize, range: 0...1, suffix: "")
+                            Toggle("Logo plate", isOn: $model.logoPlate)
+                            Button("Concept preset") { model.applyConceptPreset() }
+                            Text(model.styleStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }.padding(.top, 6)
+                    }
                 }
                 if model.profile == .extended {
                     Picker("Capacity / ECC", selection: $model.extendedTier) {
@@ -225,7 +339,7 @@ private struct RendererView: View {
                 Text(model.previewReadStatus).font(.caption.monospaced()).foregroundStyle(model.previewReadStatus.contains("PASS") ? .green : .secondary).textSelection(.enabled)
                 Text("The read check uses the displayed raster and the same native decoder as CKeyReader.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-            }.padding(22).frame(minWidth: 360, idealWidth: 410)
+            }.padding(22) }.frame(minWidth: 360, idealWidth: 410)
             SymbolPreview(svg: model.svg, profile: model.profile, modulePitch: model.modulePitch, expectedPayload: Array(model.payload.utf8),
                           backgroundHex: model.background.hex, blur: model.blur, damage: model.damage, noise: model.noise,
                           rotation: model.rotation, resolution: model.resolution,

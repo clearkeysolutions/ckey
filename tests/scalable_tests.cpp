@@ -16,6 +16,24 @@ std::vector<uint8_t> pseudo(size_t n, uint32_t seed) {
     return out;
 }
 
+std::string render_styled(const ckey_scalable_symbol &s, const ckey_style &st) {
+    size_t n = 0;
+    if (ckey_render_scalable_styled_svg(&s, &st, 8, nullptr, 0, &n) != CKEY_INSUFFICIENT_BUFFER) return {};
+    std::string svg(n, '\0'); CKEY_CHECK(ckey_render_scalable_styled_svg(&s, &st, 8, svg.data(), n, &n) == CKEY_OK);
+    svg.resize(n - 1); return svg;
+}
+
+// Decodes a rendered SVG with the exact quad; returns the detected version or 0.
+uint32_t decode_svg(const std::string &svg, double unit, const std::vector<uint8_t> &payload) {
+    const int side = static_cast<int>(std::ceil(31 * unit));
+    const auto px = svgtest::rasterize(svgtest::parse(svg), side, side, 3);
+    const double k = static_cast<double>(side) / 31.0, lo = k, hi = 30 * k;
+    const double q[8] = {lo, lo, hi, lo, hi, hi, lo, hi};
+    std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0; ckey_diagnostics d{};
+    if (ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, &d) != CKEY_OK) return 0;
+    return len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()) ? version : 0;
+}
+
 std::string render(const ckey_scalable_symbol &s) {
     size_t n = 0; CKEY_CHECK(ckey_render_scalable_svg(&s, 8, nullptr, 0, &n) == CKEY_INSUFFICIENT_BUFFER);
     std::string svg(n, '\0'); CKEY_CHECK(ckey_render_scalable_svg(&s, 8, svg.data(), n, &n) == CKEY_OK);
@@ -142,6 +160,72 @@ int main() {
             for (size_t i = 0; i < L.nodes.size(); ++i) { for (int k = 0; k < 4; ++k) fnv(static_cast<uint8_t>(L.nodes[i].id >> (8 * k))); fnv(scalable_site_value(L, &s, i) ? 1 : 0); }
             std::printf("Profile 0 v%u conformance hash %016llx\n", version, static_cast<unsigned long long>(hash));
             CKEY_CHECK(hash == expected);
+        }
+    }
+    // ---- Design system ----
+    {
+        ckey_style base; ckey_style_default(&base);
+        const auto payload = pseudo(ckey_scalable_capacity(11, CKEY_ECC_M), 4242);
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, &s, &d) == CKEY_OK);
+        CKEY_CHECK(ckey_check_scalable_style(&s, &base, &d) == CKEY_OK);
+        CKEY_CHECK(render_styled(s, base) == render(s));  // the plain renderer is the default style
+
+        // Every payload-mark shape option decodes, at a coarse and a fine version.
+        for (uint32_t version : {2u, 20u}) {
+            const auto data = pseudo(ckey_scalable_capacity(version, CKEY_ECC_M), 77 + version);
+            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, CKEY_ECC_M, &s, &d) == CKEY_OK);
+            const double unit = 7.0 / (29.0 / ckey_scalable_modules_across(version));
+            for (int shape = 0; shape < 4; ++shape) for (int rings = 0; rings < 2; ++rings) for (int rays = 0; rays < 2; ++rays) {
+                ckey_style st = base;
+                st.modules = static_cast<ckey_module_shape>(shape); st.rings = static_cast<ckey_ring_style>(rings); st.rays = static_cast<ckey_ray_cap>(rays);
+                const uint32_t got = decode_svg(render_styled(s, st), unit, data);
+                if (got != version) std::printf("style shape %d rings %d rays %d failed at v%u\n", shape, rings, rays, version);
+                CKEY_CHECK(got == version);
+            }
+        }
+        std::printf("design system: 16 mark-shape combinations decode at v2 and v20\n");
+
+        // Concept-art look: champagne sheen, navy vignette, sage/grey accents, depth, grain.
+        ckey_style art = base;
+        art.background = {0x14, 0x16, 0x1e}; art.background_edge = {0x07, 0x08, 0x0c};
+        art.ink = {0xf6, 0xee, 0xe0}; art.ink_shade = {0xc8, 0xb6, 0x9a};
+        art.accents[0] = {0xa9, 0xb8, 0x96}; art.accents[1] = {0x9e, 0xa1, 0xa6}; art.accent_count = 2; art.accent_percent = 18;
+        art.bevel = 0.6; art.shadow = 0.5; art.texture = 0.4;
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, &s, &d) == CKEY_OK);
+        CKEY_CHECK(ckey_check_scalable_style(&s, &art, &d) == CKEY_OK);
+        std::printf("concept style: %s\n", d.message);
+        CKEY_CHECK(decode_svg(render_styled(s, art), 7.0 / 0.5, payload) == 11);
+
+        // The checker refuses unscannable styles, with a reason.
+        ckey_style low = base; low.ink = low.ink_shade = {0x44, 0x44, 0x44};
+        CKEY_CHECK(ckey_check_scalable_style(&s, &low, &d) == CKEY_INVALID_ARGUMENT);
+        std::printf("refused: %s\n", d.message);
+        ckey_style mixed = base; mixed.accents[0] = {0x01, 0x01, 0x01}; mixed.accent_count = 1; mixed.accent_percent = 10;
+        CKEY_CHECK(ckey_check_scalable_style(&s, &mixed, &d) == CKEY_INVALID_ARGUMENT);
+        ckey_style light = base; light.background = light.background_edge = {0xf4, 0xf1, 0xe8}; light.ink = light.ink_shade = {0x10, 0x10, 0x10};
+        CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_OK);
+        light.shadow = 0.6; CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_INVALID_ARGUMENT);
+        size_t n = 0; CKEY_CHECK(ckey_render_scalable_styled_svg(&s, &low, 8, nullptr, 0, &n) == CKEY_INVALID_ARGUMENT);
+
+        // Logos: the empty centre costs nothing; a larger logo needs a plate and
+        // must stay within half the worst block's correction. The largest logo
+        // the checker accepts at each level still decodes (hidden marks are
+        // corrected by Reed-Solomon, as with QR).
+        ckey_style logo = base; logo.logo_href = "data:image/png;base64,iVBORw0KGgo=";
+        CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_OK && ckey_scalable_logo_load(&s, 0) == 0);
+        logo.logo_radius = 5.0; CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_INVALID_ARGUMENT);  // no plate
+        logo.logo_plate = 1; logo.logo_radius = ckey_scalable_logo_max_radius(11) + 0.1;
+        CKEY_CHECK(ckey_check_scalable_style(&s, &logo, &d) == CKEY_INVALID_ARGUMENT);  // would hide the Ring Key
+        for (uint32_t version : {6u, 11u, 20u}) for (int level = 0; level < 4; ++level) {
+            const auto data = pseudo(ckey_scalable_capacity(version, static_cast<ckey_ecc_level>(level)), 900 + version * 4 + level);
+            CKEY_CHECK(ckey_encode_scalable(data.data(), data.size(), version, static_cast<ckey_ecc_level>(level), &s, &d) == CKEY_OK);
+            double best = 0;
+            for (double r = 3.0; r <= ckey_scalable_logo_max_radius(version); r += 0.05) { logo.logo_radius = r; if (ckey_check_scalable_style(&s, &logo, &d) == CKEY_OK) best = r; }
+            logo.logo_radius = best;
+            const uint32_t got = best > 0 ? decode_svg(render_styled(s, logo), 7.0 / (29.0 / ckey_scalable_modules_across(version)), data) : version;
+            std::printf("v%u level %c: largest accepted logo radius %.2f (load %.0f%%) -> %s\n", version, "LMQH"[level], best,
+                        100 * ckey_scalable_logo_load(&s, best), got == version ? "decodes" : "FAILS");
+            CKEY_CHECK(got == version);
         }
     }
     std::printf("CKey Profile 0 tests passed\n");
