@@ -21,13 +21,13 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.48"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.49"
 #define CKEY_FORMAT_VERSION 14u
-#define CKEY_TEXT_FORMAT_VERSION 23u
+#define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_TEXT_PAYLOAD_MAX_BYTES 200u
 #define CKEY_TEXT_CODEWORD_BYTES 255u
-#define CKEY_EXTENDED_FORMAT_VERSION 24u
+#define CKEY_EXTENDED_FORMAT_VERSION 26u
 #define CKEY_EXTENDED_PAYLOAD_MAX_BYTES 2048u
 #define CKEY_EXTENDED_BLOCK_COUNT 10u
 #define CKEY_EXTENDED_DATA_BYTES_PER_BLOCK 223u /* legacy Format 0.10/0.16 */
@@ -76,8 +76,9 @@ typedef struct ckey_text_symbol {
     uint8_t codeword[CKEY_TEXT_CODEWORD_BYTES];
 } ckey_text_symbol;
 
-/* Profile 3: ten interleaved systematic RS(255,k) blocks. Format 0.17 selects
- * k from the declared capacity/ECC tier; legacy Format 0.10/0.16 uses k=223.
+/* Profile 3: ten interleaved systematic RS(255,k) blocks. Tiered formats
+ * (0.17 and later) select k from the declared capacity/ECC tier; legacy
+ * Format 0.10/0.16 uses k=223.
  * The public codeword is byte-interleaved by block. */
 typedef struct ckey_extended_symbol {
     uint32_t abi_version;
@@ -139,9 +140,10 @@ CKEY_API ckey_status ckey_decode_gray8(const uint8_t *gray, size_t width,
                                         size_t out_capacity,
                                         ckey_diagnostics *out_diagnostics);
 /* Projective grayscale decoders for the two dense profiles. These use the
- * same caller-supplied quadrilateral contract as ckey_decode_gray8. They are
- * intended for high-resolution captures where the documented feature floor is
- * met; payload acceptance is still gated by RS correction and CRC-32C. */
+ * same caller-supplied quadrilateral contract as ckey_decode_gray8. They read
+ * the current optical layout only (Profile 2 Format 0.25, Profile 3 Format
+ * 0.26); the byte-codeword decoders above also accept legacy frames. Payload
+ * acceptance is gated by RS correction and CRC-32C. */
 CKEY_API ckey_status ckey_decode_text_gray8(const uint8_t *gray, size_t width,
                                              size_t height, size_t stride,
                                              const double quad_xy[8],

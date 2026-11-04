@@ -4,7 +4,7 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read [the current draft format](spec/CKey-Format-v0.14.0.md) before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read the current draft formats — [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) — before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
 
@@ -13,7 +13,7 @@ The authoritative working state is identified by [`VERSION`](VERSION). Read [`CO
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure   # checks are always on, including Release
 ./build/ckey encode --hex 00112233445566778899aabbccddeeff --out locator.svg
 ```
 
@@ -26,7 +26,7 @@ The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes a
 ./build/ckey encode-text --hex 001122334455 --out binary.svg
 ```
 
-It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.19.0](spec/CKey-Format-v0.19.0.md). Short frames use deterministic visual fill, protected by the same RS block. The shared core exposes a projective grayscale sampler for Profile 2, but camera scans still need validation.
+It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.25.0](spec/CKey-Format-v0.25.0.md). Short frames use deterministic visual fill, protected by the same RS block; every optical site carries a whitened value, so no region of the symbol is left empty, and payload modules keep a declared clearance from every structural mark. The projective grayscale decoder reads clean renders from about 10 px per unit (round-trip tested in CI); physical camera scans still need validation.
 
 The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers (256, 384, 512, 768, 1,024, 1,536, and 2,048 bytes) trade payload room for Reed–Solomon parity while keeping the full 2,550-byte symbol populated. It uses ten byte-interleaved tiered RS(255,k) blocks, 34 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
 
@@ -36,7 +36,7 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 ./build/ckey encode-extended --tier 512 --utf8 "payload with a 512-byte ceiling" --out extended-512.svg
 ```
 
-See [Profile 2 Format 0.23.0](spec/CKey-Format-v0.23.0.md) and [Profile 3 Format 0.24.0](spec/CKey-Format-v0.24.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. Projective image sampling is implemented, but physical camera decode is not yet validated.
+See [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md) and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. The projective decoder reads clean renders of the 2,048-byte tier from about 11 px per unit (round-trip tested in CI); physical camera decode is not yet validated.
 
 ## iPhone reader
 
