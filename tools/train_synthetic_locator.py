@@ -28,6 +28,14 @@ from PIL import Image, ImageDraw, ImageFilter, ImageOps
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def inkscape_binary() -> str | None:
+    """Resolve Inkscape on Linux/Homebrew PATH or a standard macOS cask app."""
+    return shutil.which("inkscape") or next((str(path) for path in (
+        Path("/Applications/Inkscape.app/Contents/MacOS/inkscape"),
+        Path.home() / "Applications/Inkscape.app/Contents/MacOS/inkscape",
+    ) if path.exists()), None)
+
+
 def run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
 
@@ -53,10 +61,10 @@ def encode(cli: Path, profile: int, data: bytes, output: Path) -> None:
     run([str(cli), mode, "--hex", data.hex(), "--out", str(output)])
 
 
-def rasterize(svg: Path, png: Path, size: int) -> None:
+def rasterize(inkscape: str, svg: Path, png: Path, size: int) -> None:
     # Inkscape rasterizes the exact SVG emitted by C++, rather than a Python
     # approximation of CKey geometry.
-    run(["inkscape", str(svg), "--export-type=png", f"--export-filename={png}",
+    run([inkscape, str(svg), "--export-type=png", f"--export-filename={png}",
          f"--export-width={size}", f"--export-height={size}"])
 
 
@@ -149,8 +157,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.samples < 100:
         raise SystemExit("use at least 100 captures so every profile/condition is represented")
-    if not shutil.which("inkscape"):
-        raise SystemExit("Inkscape is required to rasterize the C++ SVG artifacts")
+    inkscape = inkscape_binary()
+    if not inkscape:
+        raise SystemExit("Inkscape is required: brew install --cask inkscape")
     cli = ensure_cli()
     out, svg_dir, png_dir = args.out, args.out / "svg", args.out / "png"
     out.mkdir(parents=True, exist_ok=True)
@@ -165,7 +174,7 @@ def main() -> None:
             data = payload(profile, rng)
             svg, png = tmp / f"{index}.svg", tmp / f"{index}.png"
             encode(cli, profile, data, svg)
-            rasterize(svg, png, 1024)
+            rasterize(inkscape, svg, png, 1024)
             capture, corners, polarity = warp_and_degrade(Image.open(png).convert("L"), rng, args.size)
             if args.keep_images:
                 shutil.copy2(svg, svg_dir / f"{index:05d}.svg")
