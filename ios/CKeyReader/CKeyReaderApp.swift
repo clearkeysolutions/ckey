@@ -65,9 +65,16 @@ struct ReaderView: View {
                     Text("Detection: \(String(format: "%.1f", scanner.detectionMilliseconds)) ms · CKey: \(String(format: "%.1f", scanner.decodeMilliseconds)) ms · candidates: \(scanner.candidateCount)")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     if !scanner.candidateSizes.isEmpty {
-                        Text("Largest square candidates: \(scanner.candidateSizes) px")
+                        Text("Border components: \(scanner.candidateSizes)")
                             .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
                     }
+                    Text(scanner.scanDetails)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

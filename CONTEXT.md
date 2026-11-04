@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.46`
+**Current software version:** `0.1.0-dev.47`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.22.0` (byte `16`, text profile `02`), and `0.21.0` (byte `15`, extended profile `03`)
 **Branch:** `main`
 **Context updated:** 2026-11-03
