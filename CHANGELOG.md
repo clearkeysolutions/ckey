@@ -1,3 +1,13 @@
+## 0.1.0-dev.45 — 2026-11-04
+
+* Added Profile 2 Format 0.22, correcting its Cartesian finder clearance from four square reservations to the actual curved finder quadrants.
+
+## 0.1.0-dev.44 — 2026-11-04
+
+* Corrected Profile 3 finder clearance to reserve the finders' true outer corner quadrants. This removes the four false inward wedges and prevents Cartesian payload marks from printing behind the visible finder arcs.
+* Added Profile 3 Format 0.21: all 34 ring rows now occupy the same outer radius while preserving a 7-unit central quiet zone.
+* The iOS reader now fits compact (P1/P2) and extended (P3) candidates against their own calibration fields. A calibration score from one profile can no longer choose the sampling transform for another profile.
+
 ## 0.1.0-dev.43 — 2026-11-03
 
 * Replaced the live reader's generic Vision rectangle path with a measured border-component locator. It fits an oriented quadrilateral from the continuous frame, then independently refines all four corners against the permanent Grid, Ring, Ray, and finder keys before decoding.

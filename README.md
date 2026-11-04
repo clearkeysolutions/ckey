@@ -36,7 +36,7 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 ./build/ckey encode-extended --tier 512 --utf8 "payload with a 512-byte ceiling" --out extended-512.svg
 ```
 
-See [Format 0.20.0](spec/CKey-Format-v0.20.0.md). The encoder automatically chooses the smallest tier that fits, or callers can select a tier explicitly through the C ABI and CLI. Profile 3 projective image sampling is implemented, but physical camera decode is not yet validated.
+See [Profile 2 Format 0.22.0](spec/CKey-Format-v0.22.0.md) and [Profile 3 Format 0.21.0](spec/CKey-Format-v0.21.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. Projective image sampling is implemented, but physical camera decode is not yet validated.
 
 ## iPhone reader
 
