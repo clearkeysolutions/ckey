@@ -9,3 +9,4 @@
 /ios/build/
 *.xcuserstate
 xcuserdata/
+tools/__pycache__/

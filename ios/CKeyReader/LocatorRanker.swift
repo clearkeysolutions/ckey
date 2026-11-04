@@ -3,8 +3,8 @@
 import Foundation
 
 enum LocatorRanker {
-    private static let weights = [-27.99609577, -24.22073301, -7.41589152]
-    private static let bias = 8.30603513
+    private static let weights = [-10.65985208, 0.18755525, -0.55068352]
+    private static let bias = 0.81059192
 
     static func score(aspectError: Double, fillRatio: Double, relativeSide: Double) -> Double {
         let sideError = abs(relativeSide - 0.32)

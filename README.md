@@ -44,6 +44,16 @@ An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKe
 
 The companion Mac laboratory is [`macos/CKeyRenderer.xcodeproj`](macos/CKeyRenderer.xcodeproj). It invokes the same C++ encoders and SVG renderer, then applies non-normative color, blur, damage, noise, rotation, and resolution reduction. The preview runs each rendered raster through the same C++ image decoder and reports pass/fail; this controlled crop test does not replace full-frame camera localization or held-out phone captures.
 
+## Autonomous synthetic-camera training
+
+The candidate ranker can be rebuilt without holding a phone up to a display:
+
+```sh
+python3 tools/train_synthetic_locator.py --samples 1500 --keep-images
+```
+
+The command compiles the current C++ encoder, makes actual Profile 1/2/3 SVG artifacts with varied payload sizes, rasterizes them, applies deterministic perspective, lighting, blur, noise, damage, polarity-adjacent contrast, scale, and clutter variation, records the expected payload/profile/corners, derives candidate measurements from those captures, and emits `ios/CKeyReader/LocatorRanker.swift`. It requires Inkscape for exact SVG rasterization. The result ranks border candidates only; mathematical key fitting plus RS/CRC remains the only payload-acceptance authority.
+
 ## Milestones
 
 1. **Format and deterministic core (current):** frozen-enough draft framing/geometry, reference encoder, SVG, independent test vectors, C ABI.
