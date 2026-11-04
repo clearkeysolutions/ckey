@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-dev.49`
+**Current software version:** `0.1.0-dev.50`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`)
 **Branch:** `main`
 **Context updated:** 2026-11-04
@@ -36,7 +36,15 @@ Next engineering gates: (1) compile and validate the iPhone reader on physical d
 * `tests/layout_tests.cpp` asserts the normative site counts and that no lattice site lies within 1e-6 of a clearance boundary. The closest sites are P2 0.018 and P3 0.0003 units away.
 * The same suite asserts that every quadrant and site kind carries a proportional share of the codeword (within 0.05 for quadrants, 0.03 for P3 site kinds and 0.06 for P2 site kinds). It also checks the rendered gaps. P2: frame 0.775, finders 0.654, grid 0.725. P3: frame 1.812, finders 1.601, grid 0.688.
 * The largest payload-free distance in the field is ≤ 1.10 units in P2, at the Ray Key clearance, and ≤ 1.32 in P3, at ray tips.
-* These checks use synthetic renders only. They do not establish physical-camera robustness, and the dev.49 dense layout and decoder changes have not been independently reviewed, so they are experimental under rule 7.
+* Dev.50: rule-7 review separation is recorded here. A second reviewer (not the dev.49 author) read and ran dev.49 against the v0.25/v0.26 specifications. Verified findings, all resolved in dev.50:
+  * Blurred isolated P3 ring dots all decoded as 0. Fixed with ring-context thresholds. P3 now decodes 3/3 at 10–16 px/unit through two 3×3 blurs, and P2 survives one blur at 10 px/unit and two at 12.
+  * The two-means cut bound was too tight for P3 width coverage.
+  * The P2 calibration-score empty reference was a payload site.
+  * The specifications lacked render geometry, Gray component order, an explicit SplitMix32 definition, and a known-answer vector.
+  * Tests did not check the Cartesian-to-radial gap or the documented boundary slack, and blur was tested at only one density.
+  * The reviewer confirmed spec-vs-code constants, site counts, determinism (site set, ordering, P1 binning), all other empty references, renderer/decoder consistency, and polarity and ambiguity handling.
+* Unverified suspicion: the review raised P2 isolated dots under heavier blur. P2 now fails only at two blurs and 10 px/unit.
+* These checks use synthetic renders only and do not establish physical-camera robustness.
 * `python3 tools/check_version.py`: software and current wire-format nodes are synchronized for dev.49. It also rejects a stale "current Format" claim in this file and missing README format links.
 * Earlier records: C++ core tests pass across error weights 1–25, including 32 distinct 25-byte-error patterns and a 26-error rejection vector. Independent review corrected 1,000 randomized 25-byte-error patterns and 10,000 eight-symbol-error patterns. `tools/rs_reference.py` independently reproduces the committed RS vector. Static and hidden-visibility shared builds exported the public `ckey_*` ABI.
 * Xcode build/run and live camera performance remain pending physical-device validation; they are unavailable in this environment.

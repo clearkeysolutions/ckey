@@ -9,6 +9,9 @@
 
 namespace {
 
+// Filled from the reference implementation; see the format specifications.
+constexpr uint64_t kTextLayoutKat = 0x17a92d978ee7b3cfull, kExtendedLayoutKat = 0x762d03b44db9c502ull;
+
 std::string render_text(const std::vector<uint8_t> &payload) {
     ckey_text_symbol s{}; ckey_diagnostics d{}; size_t n = 0;
     CKEY_CHECK(ckey_encode_text(payload.data(), payload.size(), &s, &d) == CKEY_OK);
@@ -31,12 +34,12 @@ std::vector<uint8_t> pseudo_random(size_t n, uint32_t seed) {
 
 // Every candidate lattice site must be decided with slack: no implementation
 // whose sqrt/sin/cos differ in the last place may derive another site set.
-void check_margin_stability(const DenseGeometry &g, int grid, double pitch, const char *label) {
+void check_margin_stability(const DenseGeometry &g, int grid, double pitch, double documented, const char *label) {
     double closest = 1e9;
     for (int row = 0; row < grid; ++row) for (int col = 0; col < grid; ++col)
         closest = std::min(closest, std::abs(dense_site_margin(g, (col + .5) * pitch, (row + .5) * pitch)));
     std::printf("%s: closest site-to-clearance slack %.6f units\n", label, closest);
-    CKEY_CHECK(closest > 1e-6);
+    CKEY_CHECK(closest > 1e-6 && closest >= documented);  // the spec states this bound
 }
 
 struct Clearances { double frame, finder, grid; double inner_radius, center; int px_per_unit, units, margin; DenseGeometry g; };
@@ -55,9 +58,13 @@ void check_rendered_layout(const std::string &svg_text, const Clearances &c, dou
     const auto finders = svgtest::distance_to_set(mask("ckey-finders"), side, side);
     const auto grid = svgtest::distance_to_set(mask("ckey-grid-key"), side, side);
     const auto to_data = svgtest::distance_to_set(data, side, side);
-    double gap_frame = 1e9, gap_finder = 1e9, gap_grid = 1e9, dead = 0, dead_x = 0, dead_y = 0;
+    const auto cartesian = mask("ckey-data-cartesian");
+    const auto polar_keys = svgtest::distance_to_set(mask("ckey-polar-keys"), side, side);
+    const auto polar_data = svgtest::distance_to_set(mask("ckey-data-polar"), side, side);
+    double gap_frame = 1e9, gap_finder = 1e9, gap_grid = 1e9, gap_polar = 1e9, dead = 0, dead_x = 0, dead_y = 0;
     for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) {
         const size_t i = static_cast<size_t>(y) * side + x;
+        if (cartesian[i]) gap_polar = std::min(gap_polar, std::min(polar_keys[i], polar_data[i]) / unit);
         if (data[i]) {
             gap_frame = std::min(gap_frame, frame[i] / unit);
             gap_finder = std::min(gap_finder, finders[i] / unit);
@@ -77,11 +84,12 @@ void check_rendered_layout(const std::string &svg_text, const Clearances &c, dou
         if (to_data[i] / unit > dead) { dead = to_data[i] / unit; dead_x = ux; dead_y = uy; }
     }
     const double tolerance = 1.5 / unit;  // point-sampled mask quantization
-    std::printf("%s: gaps frame %.3f finders %.3f grid %.3f; largest payload-free distance %.3f units at (%.1f, %.1f)\n",
-                label, gap_frame, gap_finder, gap_grid, dead, dead_x, dead_y);
+    std::printf("%s: gaps frame %.3f finders %.3f grid %.3f radial %.3f; largest payload-free distance %.3f units at (%.1f, %.1f)\n",
+                label, gap_frame, gap_finder, gap_grid, gap_polar, dead, dead_x, dead_y);
     CKEY_CHECK(gap_frame >= c.frame - tolerance);
     CKEY_CHECK(gap_finder >= c.finder - tolerance);
     CKEY_CHECK(gap_grid >= c.grid - tolerance);
+    CKEY_CHECK(gap_polar >= 0.5 - tolerance);  // Cartesian ink vs Ray Keys and the radial alphabet
     CKEY_CHECK(dead <= dead_limit);
 }
 
@@ -120,8 +128,8 @@ int main() {
     CKEY_CHECK(extended.size() == kExtendedSiteCount && ext_cart == kExtendedCartesianSites);
     CKEY_CHECK(ext_ray == 573 * 3 && ext_ring == 9682);
     CKEY_CHECK(text_whitening().size() == text.size() && extended_whitening().size() == extended.size());
-    check_margin_stability(text_geometry(), kTextGrid, 0.5, "Profile 2");
-    check_margin_stability(extended_geometry(), kExtendedGrid, 0.5, "Profile 3");
+    check_margin_stability(text_geometry(), kTextGrid, 0.5, 1.8e-2, "Profile 2");
+    check_margin_stability(extended_geometry(), kExtendedGrid, 0.5, 3e-4, "Profile 3");
     check_spread(text, kTextCodewordBytes * 8, kCenter, [](const TextNode &n) { return n.cart; }, "Profile 2");
     check_spread(extended, kExtendedBits, 58.0, [](const ExtendedNode &n) { return n.kind == ExtendedKind::cart; }, "Profile 3");
 
@@ -155,6 +163,32 @@ int main() {
         {"P3 random", pseudo_random(2048, 2)}, {"P3 all-zero", std::vector<uint8_t>(2048, 0)},
         {"P3 all-0xFF", std::vector<uint8_t>(2048, 0xff)}, {"P3 short", {'C', 'K'}}};
     for (const auto &[label, payload] : p3_payloads) check_rendered_layout(render_extended(payload), p3, 1.4, label);
+
+    // ---- Known-answer vectors for the optical layout (integer-only, so
+    // platform independent): FNV-1a-64 over every site in placement order of
+    // its 32-bit identity (little-endian) followed by its printed value. The
+    // payload is the 18 ASCII bytes "CKey renderer test". Values are also
+    // stated in the format specifications. ----
+    {
+        const std::string text_payload = "CKey renderer test";
+        const std::vector<uint8_t> bytes(text_payload.begin(), text_payload.end());
+        ckey_text_symbol ts{}; ckey_extended_symbol es{}; ckey_diagnostics d{};
+        CKEY_CHECK(ckey_encode_text(bytes.data(), bytes.size(), &ts, &d) == CKEY_OK);
+        CKEY_CHECK(ckey_encode_extended(bytes.data(), bytes.size(), &es, &d) == CKEY_OK);
+        const auto fnv = [](uint64_t h, uint8_t b) { return (h ^ b) * 0x100000001b3ull; };
+        uint64_t text_hash = 0xcbf29ce484222325ull, extended_hash = 0xcbf29ce484222325ull;
+        for (size_t i = 0; i < text.size(); ++i) {
+            for (int k = 0; k < 4; ++k) text_hash = fnv(text_hash, static_cast<uint8_t>(text[i].id >> (8 * k)));
+            text_hash = fnv(text_hash, text_site_value(&ts, i) ? 1 : 0);
+        }
+        for (size_t i = 0; i < extended.size(); ++i) {
+            for (int k = 0; k < 4; ++k) extended_hash = fnv(extended_hash, static_cast<uint8_t>(extended[i].id >> (8 * k)));
+            extended_hash = fnv(extended_hash, extended_site_value(&es, i) ? 1 : 0);
+        }
+        std::printf("Layout KAT: Profile 2 %016llx, Profile 3 %016llx; first P2 site ids %08x %08x %08x\n",
+                    static_cast<unsigned long long>(text_hash), static_cast<unsigned long long>(extended_hash), text[0].id, text[1].id, text[2].id);
+        CKEY_CHECK(text_hash == kTextLayoutKat && extended_hash == kExtendedLayoutKat);
+    }
 
     // ---- Ring runs over half a turn need the SVG large-arc flag ----
     {
