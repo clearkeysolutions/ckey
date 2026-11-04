@@ -26,9 +26,9 @@ The experimental text profile accepts up to 200 UTF-8 bytes or arbitrary bytes a
 ./build/ckey encode-text --hex 001122334455 --out binary.svg
 ```
 
-It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.18.0](spec/CKey-Format-v0.18.0.md). Short frames use deterministic visual fill, protected by the same RS block. The shared core exposes a projective grayscale sampler for Profile 2, but camera scans still need validation.
+It implements a real RS(255,210) frame with 45 parity bytes, a dense Cartesian/polar renderer, connected multi-unit ring arcs, and the canonical one-arc-per-corner finder geometry. See [Format 0.19.0](spec/CKey-Format-v0.19.0.md). Short frames use deterministic visual fill, protected by the same RS block. The shared core exposes a projective grayscale sampler for Profile 2, but camera scans still need validation.
 
-The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers (256, 384, 512, 768, 1,024, 1,536, and 2,048 bytes) trade payload room for Reed–Solomon parity while keeping the full 2,550-byte symbol populated. It uses ten byte-interleaved tiered RS(255,k) blocks, 24 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
+The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers (256, 384, 512, 768, 1,024, 1,536, and 2,048 bytes) trade payload room for Reed–Solomon parity while keeping the full 2,550-byte symbol populated. It uses ten byte-interleaved tiered RS(255,k) blocks, 34 polar rings, and an eight-state ray alphabet (four Gray-coded lengths × two calibrated widths):
 
 ```sh
 ./build/ckey encode-extended --utf8 "large payload" --out extended.svg
@@ -36,11 +36,11 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 ./build/ckey encode-extended --tier 512 --utf8 "payload with a 512-byte ceiling" --out extended-512.svg
 ```
 
-See [Format 0.17.0](spec/CKey-Format-v0.17.0.md). The encoder automatically chooses the smallest tier that fits, or callers can select a tier explicitly through the C ABI and CLI. Profile 3 projective image sampling is implemented, but physical camera decode is not yet validated.
+See [Format 0.20.0](spec/CKey-Format-v0.20.0.md). The encoder automatically chooses the smallest tier that fits, or callers can select a tier explicitly through the C ABI and CLI. Profile 3 projective image sampling is implemented, but physical camera decode is not yet validated.
 
 ## iPhone reader
 
-An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, uses Vision to locate a square candidate, and passes grayscale camera frames and candidate corners to the C ABI. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. The app reports Vision localization time separately from CKey decode time. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.
+An experimental SwiftUI camera reader is in [`ios/CKeyReader.xcodeproj`](ios/CKeyReader.xcodeproj). It compiles the same `src/ckey.cpp` core into the app, locks capture to the physical wide rear camera, ranks thresholded border components, and refines each quadrilateral against the printed Grid, Ring, Ray, and finder keys before passing grayscale samples to the C ABI. Its small generated ranker only prioritizes candidates; key agreement plus Reed–Solomon and CRC remain the acceptance gate. Open the project in Xcode and follow [`ios/README.md`](ios/README.md) to run it on an iPhone. Camera scanning is an early test build; the supported capture envelope and device performance have not been established.
 
 The companion Mac laboratory is [`macos/CKeyRenderer.xcodeproj`](macos/CKeyRenderer.xcodeproj). It invokes the same C++ encoders and SVG renderer, then applies non-normative color, blur, damage, noise, rotation, and resolution reduction. The preview runs each rendered raster through the same C++ image decoder and reports pass/fail; this controlled crop test does not replace full-frame camera localization or held-out phone captures.
 

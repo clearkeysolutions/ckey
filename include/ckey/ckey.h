@@ -21,13 +21,13 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 2u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.42"
+#define CKEY_SOFTWARE_VERSION "0.1.0-dev.43"
 #define CKEY_FORMAT_VERSION 14u
-#define CKEY_TEXT_FORMAT_VERSION 18u
+#define CKEY_TEXT_FORMAT_VERSION 19u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
 #define CKEY_TEXT_PAYLOAD_MAX_BYTES 200u
 #define CKEY_TEXT_CODEWORD_BYTES 255u
-#define CKEY_EXTENDED_FORMAT_VERSION 17u
+#define CKEY_EXTENDED_FORMAT_VERSION 20u
 #define CKEY_EXTENDED_PAYLOAD_MAX_BYTES 2048u
 #define CKEY_EXTENDED_BLOCK_COUNT 10u
 #define CKEY_EXTENDED_DATA_BYTES_PER_BLOCK 223u /* legacy Format 0.10/0.16 */
@@ -165,6 +165,12 @@ CKEY_API ckey_status ckey_decode_extended_gray8(const uint8_t *gray, size_t widt
 CKEY_API double ckey_calibration_score_gray8(const uint8_t *gray, size_t width,
                                               size_t height, size_t stride,
                                               const double quad_xy[8]);
+/* Equivalent continuous key-fit score for Profile 3's 116-unit field.  The
+ * locator uses this during projective geometry refinement; it never accepts a
+ * payload and does not depend on a fixed pixel size. */
+CKEY_API double ckey_calibration_score_extended_gray8(const uint8_t *gray, size_t width,
+                                                       size_t height, size_t stride,
+                                                       const double quad_xy[8]);
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

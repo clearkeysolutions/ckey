@@ -1,3 +1,10 @@
+## 0.1.0-dev.43 — 2026-11-03
+
+* Replaced the live reader's generic Vision rectangle path with a measured border-component locator. It fits an oriented quadrilateral from the continuous frame, then independently refines all four corners against the permanent Grid, Ring, Ray, and finder keys before decoding.
+* Explicitly selects the physical back wide camera, holds 1× zoom, limits focus to the far range, and disables video stabilization so the capture geometry does not switch focal systems mid-scan.
+* Added a reproducible synthetic training script and generated on-device logistic candidate ranker. It only orders measured border components; structural keys plus RS and CRC remain the decode acceptance gate.
+* Added Profile 2 Format 0.19's border safety moat and Profile 3 Format 0.20's 34-ring filled polar field and 5-unit frame moat. These mappings prevent payload marks from spilling into the frame and remove the large unused P3 centre.
+
 ## 0.1.0-dev.42 — 2026-11-03
 
 * Added Profile 3 capacity/ECC tiers at 256, 384, 512, 768, 1,024, 1,536, and 2,048 payload bytes. The fixed optical codeword stays fully populated; each tier changes the RS data/parity split, and automatic encoding selects the smallest tier that fits.

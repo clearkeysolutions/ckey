@@ -3,7 +3,6 @@ import AudioToolbox
 import Foundation
 import QuartzCore
 import SwiftUI
-import Vision
 
 final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     let session = AVCaptureSession()
@@ -21,35 +20,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let output = AVCaptureVideoDataOutput()
     private var lastFrameTime = 0.0
     private var lastProgressTime = 0.0
-    private var frameIndex = 0
     private var hasConfigured = false
     private var didDecode = false
     private var lastDecodeDiagnostic = ""
-    private let rectangleRequest: VNDetectRectanglesRequest = {
-        let request = VNDetectRectanglesRequest()
-        // CKey's rounded border and inset arc finders are less box-like than
-        // a QR finder. Structural calibration below resolves candidates.
-        // Keep localization permissive; the key/ECC/CRC checks reject false quads.
-        request.maximumObservations = 16
-        request.minimumConfidence = 0.2
-        request.minimumSize = 0.06
-        request.minimumAspectRatio = 0.62
-        request.maximumAspectRatio = 1.60
-        request.quadratureTolerance = 45
-        return request
-    }()
-    private let symbolSquareRequest: VNDetectRectanglesRequest = {
-        let request = VNDetectRectanglesRequest()
-        // A distant CKey is often smaller than the surrounding monitor or
-        // laptop. Ask Vision for small, nearly square candidates separately.
-        request.maximumObservations = 64
-        request.minimumConfidence = 0.05
-        request.minimumSize = 0.01
-        request.minimumAspectRatio = 0.82
-        request.maximumAspectRatio = 1.22
-        request.quadratureTolerance = 35
-        return request
-    }()
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -90,7 +63,12 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 // A distant CKey must retain several camera pixels per module.
                 // `.high` may negotiate a smaller stream on some devices.
                 self.session.sessionPreset = self.session.canSetSessionPreset(.hd1920x1080) ? .hd1920x1080 : .high
-                guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                // Choose the physical wide device explicitly. Selecting a
+                // virtual dual/triple device lets iOS swap focal lengths while
+                // we are estimating a projective measurement, which invalidates
+                // the scale model between adjacent frames.
+                let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .back)
+                guard let camera = discovery.devices.first,
                       let input = try? AVCaptureDeviceInput(device: camera),
                       self.session.canAddInput(input) else {
                     self.session.commitConfiguration()
@@ -103,10 +81,14 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     if camera.isFocusModeSupported(.continuousAutoFocus) {
                         camera.focusMode = .continuousAutoFocus
                     }
+                    if camera.isAutoFocusRangeRestrictionSupported {
+                        camera.autoFocusRangeRestriction = .far
+                    }
                     if camera.isExposureModeSupported(.continuousAutoExposure) {
                         camera.exposureMode = .continuousAutoExposure
                     }
-                    camera.isSubjectAreaChangeMonitoringEnabled = true
+                    camera.videoZoomFactor = 1.0
+                    camera.isSubjectAreaChangeMonitoringEnabled = false
                     camera.unlockForConfiguration()
                 } catch { }
                 self.output.videoSettings = [
@@ -123,6 +105,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 if let connection = self.output.connection(with: .video),
                    connection.isVideoRotationAngleSupported(90) {
                     connection.videoRotationAngle = 90
+                    if connection.isVideoStabilizationSupported { connection.preferredVideoStabilizationMode = .off }
                 }
                 self.session.commitConfiguration()
                 self.hasConfigured = true
@@ -140,7 +123,6 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let now = CACurrentMediaTime()
         if now - lastFrameTime < 0.05 { return } // Sample up to 20 frames/s while discarding stale frames.
         lastFrameTime = now
-        frameIndex &+= 1
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               CVPixelBufferGetPlaneCount(pixelBuffer) >= 1 else { return }
 
@@ -152,125 +134,35 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
         let stride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
 
-        do {
-            // A CKey's continuous outer border remains detectable after the
-            // small payload modules have blurred together at distance. Locate
-            // that high-contrast connected component first. This deliberately
-            // does not depend on Vision deciding that a rounded code border is
-            // a document-shaped rectangle.
-            let borderQuads = brightBorderQuads(gray, width: width, height: height, stride: stride)
-            let borderDetectionMilliseconds = (CACurrentMediaTime() - started) * 1000
+        // A CKey's continuous outer border remains detectable after the
+        // small payload modules have blurred together at distance. Locate that
+        // high-contrast connected component first. This deliberately does not
+        // depend on a generic document-rectangle detector.
+        // Symbols may be light-on-dark or dark-on-light. Run the same
+        // geometric component pass at both polarities; the key fit later
+        // resolves the real candidate.
+        let borderQuads = (borderQuads(gray, width: width, height: height, stride: stride, marksAreDark: false) +
+                           borderQuads(gray, width: width, height: height, stride: stride, marksAreDark: true))
+        let borderDetectionMilliseconds = (CACurrentMediaTime() - started) * 1000
 
-            // Test the camera's measured geometry immediately for all profiles.
-            // This avoids running a calibration search on every candidate and
-            // keeps the common locator path responsive at every symbol size.
-            for quad in borderQuads.prefix(4) {
-                // The component detector returns the visible outer stroke
-                // bounds. All current profiles place that stroke slightly
-                // inside their canonical sampling field (about 1.2%). Keep
-                // the raw measurement too for legacy artwork whose boundary
-                // is already aligned to the field.
-                let observed = quadPoints(quad)
-                for scale in [1.0, 1.0123, 1.0357] {
-                    let measured = expandedCKeyQuad(observed, expansion: scale, offsetX: 0, offsetY: 0)
-                    let decodeStarted = CACurrentMediaTime()
-                    if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                      locatorQuad: measured, denseQuad: measured) {
-                        let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                        publishDecoded(decoded.bytes, profile: decoded.profile,
-                                       detectionMilliseconds: borderDetectionMilliseconds,
-                                       decodeMilliseconds: decodeElapsed, candidates: borderQuads.count)
-                        return
-                    }
-                }
-            }
-
-            // Vision's rectangle search is the orientation/perspective fallback.
-            // Running it on alternating sampled frames leaves the direct CKey
-            // border path available at the full 20 fps.
-            guard frameIndex.isMultiple(of: 2) else {
-                // Refine one border candidate on alternate frames only. This
-                // is a continuous key-based search, not a fixed size ladder.
-                if let strongest = borderQuads.first {
-                    let adjusted = refinedCKeyQuad(quadPoints(strongest), gray: gray,
-                                                    width: width, height: height, stride: stride)
-                    let decodeStarted = CACurrentMediaTime()
-                    if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                      locatorQuad: adjusted, denseQuad: adjusted) {
-                        publishDecoded(decoded.bytes, profile: decoded.profile,
-                                       detectionMilliseconds: borderDetectionMilliseconds,
-                                       decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
-                                       candidates: borderQuads.count)
-                        return
-                    }
-                }
-                publishProgress(borderQuads.isEmpty ? "Searching for CKey geometry…" : "Checking CKey · \(lastDecodeDiagnostic)",
-                                detectionMilliseconds: borderDetectionMilliseconds,
-                                candidates: borderQuads.count)
+        // The complete locator is measured from the border component, then
+        // optimized using the printed Grid, Ring, Ray, and finder keys. No
+        // generic rectangle model or fixed distance ladder participates.
+        for quad in borderQuads.prefix(6) {
+            let refined = refinedCKeyQuad(quadPoints(quad), gray: gray, width: width, height: height, stride: stride)
+            let decodeStarted = CACurrentMediaTime()
+            if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
+                                              locatorQuad: refined, denseQuad: refined) {
+                publishDecoded(decoded.bytes, profile: decoded.profile,
+                               detectionMilliseconds: borderDetectionMilliseconds,
+                               decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
+                               candidates: borderQuads.count)
                 return
             }
-
-            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
-            try handler.perform([symbolSquareRequest, rectangleRequest])
-            let squareObservations = symbolSquareRequest.results ?? []
-            let generalObservations = rectangleRequest.results ?? []
-            let observations = (squareObservations + generalObservations).sorted {
-                candidatePriority($0, frameWidth: width, frameHeight: height) <
-                candidatePriority($1, frameWidth: width, frameHeight: height)
-            }
-            let sizeSummary = observations.prefix(3).map { observation in
-                let box = observation.boundingBox
-                return "\(Int(box.width * CGFloat(width)))×\(Int(box.height * CGFloat(height)))"
-            }.joined(separator: ", ")
-            DispatchQueue.main.async {
-                self.candidateSizes = borderQuads.isEmpty ? sizeSummary : "border \(borderQuads.count); \(sizeSummary)"
-            }
-            let detectionElapsed = (CACurrentMediaTime() - started) * 1000
-            publishProgress(observations.isEmpty ? "Searching for CKey geometry…" : "Checking \(observations.count) camera candidates…",
-                            detectionMilliseconds: detectionElapsed, candidates: observations.count)
-            // First decode directly from detector geometry. A handful of the
-            // strongest observations is enough; RS/CRC validate every result.
-            for observation in observations.prefix(8) {
-                // Vision points use normalized lower-left coordinates. CKey images use top-left pixels.
-                let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
-                    .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
-                let decodeStarted = CACurrentMediaTime()
-                let measuredQuad = expandedCKeyQuad(points, expansion: 1.0, offsetX: 0, offsetY: 0)
-                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                  locatorQuad: measuredQuad, denseQuad: measuredQuad) {
-                    let decodeElapsed = (CACurrentMediaTime() - decodeStarted) * 1000
-                    publishDecoded(decoded.bytes, profile: decoded.profile,
-                                   detectionMilliseconds: detectionElapsed,
-                                   decodeMilliseconds: decodeElapsed,
-                                   candidates: observations.count + borderQuads.count)
-                    return
-                }
-            }
-
-            // If direct sampling missed, spend the continuous calibration
-            // search only on the leading Vision candidate.
-            for observation in observations.prefix(1) {
-                let points = [observation.topLeft, observation.topRight, observation.bottomRight, observation.bottomLeft]
-                    .map { CGPoint(x: $0.x * CGFloat(width), y: (1 - $0.y) * CGFloat(height)) }
-                let refined = refinedCKeyQuad(points, gray: gray, width: width, height: height, stride: stride)
-                let decodeStarted = CACurrentMediaTime()
-                if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                                  locatorQuad: refined, denseQuad: refined) {
-                    publishDecoded(decoded.bytes, profile: decoded.profile,
-                                   detectionMilliseconds: detectionElapsed,
-                                   decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
-                                   candidates: observations.count + borderQuads.count)
-                    return
-                }
-            }
-            if !observations.isEmpty {
-                publishProgress("Symbol-like shape found · \(lastDecodeDiagnostic)",
-                                detectionMilliseconds: detectionElapsed, candidates: observations.count + borderQuads.count,
-                                force: true)
-            }
-        } catch {
-            publishProgress("Camera analysis failed: \(error.localizedDescription)", detectionMilliseconds: 0, candidates: 0)
         }
+        DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "mathematical border candidates: \(borderQuads.count)" }
+        publishProgress(borderQuads.isEmpty ? "Searching for CKey border and finder keys…" : "Calibrating CKey keys · \(lastDecodeDiagnostic)",
+                        detectionMilliseconds: borderDetectionMilliseconds, candidates: borderQuads.count)
     }
 
     private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int,
@@ -287,9 +179,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     private func expandedCKeyQuad(_ observed: [CGPoint], expansion scale: Double,
                                   offsetX: Double, offsetY: Double) -> [Double] {
-        // Vision can fit the inner border, outer border, or the SVG canvas.
-        // Keep the hypotheses distinct so each candidate can reach the same
-        // canonical 29×29 sampling field at a different detected boundary.
+        // The continuous border may be measured at its inner or outer stroke.
+        // Keep hypotheses distinct so each candidate can reach the same
+        // canonical field from its measured boundary.
         let centerX = observed.map { Double($0.x) }.reduce(0.0, +) / 4.0
         let centerY = observed.map { Double($0.y) }.reduce(0.0, +) / 4.0
         var quad: [Double] = []
@@ -351,26 +243,36 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             scaleStep *= 0.5
             offsetStep *= 0.5
         }
+        // A tilted display is a projective quadrilateral, not a scaled square.
+        // Move each measured corner independently against the physical key
+        // evidence so keystone error is corrected before any data sample.
+        var cornerStep = Double(side) * 0.035
+        for _ in 0..<3 {
+            for corner in 0..<4 {
+                let baseX = corner * 2
+                let baseY = baseX + 1
+                for (dx, dy) in [(cornerStep, 0.0), (-cornerStep, 0.0), (0.0, cornerStep), (0.0, -cornerStep)] {
+                    var candidate = best
+                    candidate[baseX] += dx
+                    candidate[baseY] += dy
+                    let score = calibrationScore(gray, width: width, height: height, stride: stride, quad: candidate)
+                    if score > bestScore {
+                        best = candidate
+                        bestScore = score
+                    }
+                }
+            }
+            cornerStep *= 0.5
+        }
         return best
     }
 
     private func calibrationScore(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
                                   stride: Int, quad: [Double]) -> Double {
         quad.withUnsafeBufferPointer { buffer in
-            ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
+            max(ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress),
+                ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress))
         }
-    }
-
-    private func candidatePriority(_ observation: VNRectangleObservation,
-                                   frameWidth: Int, frameHeight: Int) -> Double {
-        let box = observation.boundingBox
-        let aspectError = abs(log(Double(box.width / box.height)))
-        let side = sqrt(Double(box.width * box.height * CGFloat(frameWidth * frameHeight)))
-        // The square pass finds small codes; the general pass remains useful
-        // for close or oblique scans. Prefer geometric squareness first, then
-        // avoid taking the full camera frame ahead of a contained symbol.
-        let oversizedPenalty = side > Double(min(frameWidth, frameHeight)) * 0.72 ? 2.0 : 0.0
-        return aspectError * 10.0 + oversizedPenalty
     }
 
     private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
@@ -441,8 +343,8 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    private func brightBorderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                                   stride: Int) -> [[Double]] {
+    private func borderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
+                             stride: Int, marksAreDark: Bool) -> [[Double]] {
         // Work at half resolution: distant locator borders remain several
         // samples thick, while this keeps the connected-component pass small.
         let step = 2
@@ -452,6 +354,13 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         var queue = [Int]()
         var candidates: [(quad: [Double], score: Double)] = []
         let minFrameSide = min(width, height)
+        // Exposure and display brightness vary more than a fixed threshold
+        // can tolerate.  Derive both polarity thresholds from robust image
+        // percentiles; this is intentionally measured per frame rather than
+        // tied to a camera distance or device profile.
+        let threshold = adaptiveThreshold(gray, width: width, height: height, stride: stride,
+                                          marksAreDark: marksAreDark)
+        let isMark: (UInt8) -> Bool = { marksAreDark ? $0 <= threshold : $0 >= threshold }
 
         for sampleY in 0..<sampledHeight {
             for sampleX in 0..<sampledWidth {
@@ -462,7 +371,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 // Allow a blurred or dim display border to remain a candidate;
                 // the calibration keys, RS correction, and CRC are the false-
                 // positive gate rather than this coarse luminance threshold.
-                if gray[sourceY * stride + sourceX] < 180 { continue }
+                if !isMark(gray[sourceY * stride + sourceX]) { continue }
 
                 visited[start] = 1
                 queue.removeAll(keepingCapacity: true)
@@ -486,7 +395,7 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                             if visited[neighbor] != 0 { continue }
                             let px = min(nx * step, width - 1)
                             let py = min(ny * step, height - 1)
-                            if gray[py * stride + px] >= 180 {
+                            if isMark(gray[py * stride + px]) {
                                 visited[neighbor] = 1
                                 queue.append(neighbor)
                             }
@@ -503,14 +412,74 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 // Prefer square outlines over large filled bright UI panels.
                 let fillRatio = Double(count) / Double((maxX - minX + 1) * (maxY - minY + 1))
                 guard fillRatio < 0.38 else { continue }
-                let x0 = Double(minX * step), y0 = Double(minY * step)
-                let x1 = Double(min((maxX + 1) * step, width - 1))
-                let y1 = Double(min((maxY + 1) * step, height - 1))
-                let score = abs(log(aspect)) * 10.0 + fillRatio
-                candidates.append((quad: [x0, y0, x1, y0, x1, y1, x0, y1], score: score))
+                // Fit an oriented quadrilateral to the continuous border
+                // component.  The old bounding box erased rotation before
+                // calibration and made every oblique scan start from the
+                // wrong geometry.
+                let points = queue.map { index -> (Double, Double) in
+                    let x = (index % sampledWidth) * step
+                    let y = (index / sampledWidth) * step
+                    return (Double(min(x, width - 1)), Double(min(y, height - 1)))
+                }
+                let meanX = points.reduce(0.0) { $0 + $1.0 } / Double(points.count)
+                let meanY = points.reduce(0.0) { $0 + $1.1 } / Double(points.count)
+                let xx = points.reduce(0.0) { $0 + ($1.0 - meanX) * ($1.0 - meanX) }
+                let yy = points.reduce(0.0) { $0 + ($1.1 - meanY) * ($1.1 - meanY) }
+                let xy = points.reduce(0.0) { $0 + ($1.0 - meanX) * ($1.1 - meanY) }
+                let angle = 0.5 * atan2(2.0 * xy, xx - yy)
+                let ux = cos(angle), uy = sin(angle), vx = -uy, vy = ux
+                var minU = Double.infinity, maxU = -Double.infinity
+                var minV = Double.infinity, maxV = -Double.infinity
+                for (x, y) in points {
+                    let u = (x - meanX) * ux + (y - meanY) * uy
+                    let v = (x - meanX) * vx + (y - meanY) * vy
+                    minU = min(minU, u); maxU = max(maxU, u)
+                    minV = min(minV, v); maxV = max(maxV, v)
+                }
+                func projected(_ u: Double, _ v: Double) -> Double { meanX + u * ux + v * vx }
+                func projectedY(_ u: Double, _ v: Double) -> Double { meanY + u * uy + v * vy }
+                let quad = [projected(minU, minV), projectedY(minU, minV),
+                            projected(maxU, minV), projectedY(maxU, minV),
+                            projected(maxU, maxV), projectedY(maxU, maxV),
+                            projected(minU, maxV), projectedY(minU, maxV)]
+                // The generated ranker merely orders mathematically measured
+                // components. It cannot accept a symbol; key fit plus ECC/CRC
+                // below are still required before the result is published.
+                let probability = LocatorRanker.score(aspectError: abs(log(aspect)), fillRatio: fillRatio,
+                                                       relativeSide: Double(side) / Double(minFrameSide))
+                let score = 1.0 - probability
+                candidates.append((quad: quad, score: score))
             }
         }
         return candidates.sorted { $0.score < $1.score }.map(\.quad)
+    }
+
+    private func adaptiveThreshold(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
+                                   stride: Int, marksAreDark: Bool) -> UInt8 {
+        var histogram = [Int](repeating: 0, count: 256)
+        var samples = 0
+        for y in stride(from: 0, to: height, by: 8) {
+            for x in stride(from: 0, to: width, by: 8) {
+                histogram[Int(gray[y * stride + x])] += 1
+                samples += 1
+            }
+        }
+        guard samples > 0 else { return marksAreDark ? 92 : 164 }
+        func percentile(_ fraction: Double) -> Int {
+            let target = Int(Double(samples - 1) * fraction)
+            var total = 0
+            for (value, count) in histogram.enumerated() {
+                total += count
+                if total > target { return value }
+            }
+            return 255
+        }
+        let low = percentile(0.10)
+        let high = percentile(0.90)
+        guard high - low >= 32 else { return marksAreDark ? 92 : 164 }
+        let contrast = Double(high - low)
+        let value = marksAreDark ? Double(low) + contrast * 0.32 : Double(high) - contrast * 0.32
+        return UInt8(max(0, min(255, Int(value.rounded()))))
     }
 }
 

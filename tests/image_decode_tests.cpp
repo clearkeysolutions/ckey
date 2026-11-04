@@ -80,5 +80,6 @@ int main() {
 
     const double invalid[8]={1,1,2,2,3,3,4,4};
     assert(ckey_decode_gray8(image.data(),width,height,width,invalid,decoded.data(),decoded.size(),&diag)==CKEY_INVALID_ARGUMENT);
+    assert(ckey_calibration_score_extended_gray8(nullptr,width,height,width,target_quad) < 0.0);
     std::cout << "CKey optical image decode tests passed\n";
 }
