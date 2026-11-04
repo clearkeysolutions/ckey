@@ -7,13 +7,22 @@
 #include <string>
 #include <vector>
 
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// Strict: an even number of hexadecimal digits and nothing else (no sign,
+// whitespace, or 0x prefix).
 static bool from_hex(const std::string &input, std::vector<uint8_t> &out) {
     if (input.size() % 2 != 0) return false;
     out.resize(input.size() / 2);
     for (size_t i = 0; i < out.size(); ++i) {
-        unsigned value = 0;
-        if (std::sscanf(input.c_str() + 2 * i, "%2x", &value) != 1) return false;
-        out[i] = static_cast<uint8_t>(value);
+        const int hi = hex_digit(input[2 * i]), lo = hex_digit(input[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = static_cast<uint8_t>(hi << 4 | lo);
     }
     return true;
 }
@@ -60,7 +69,7 @@ int main(int argc, char **argv) {
     ckey_diagnostics diag{};
     std::vector<uint8_t> payload;
     if (mode == "--hex") {
-        if (!from_hex(value, payload)) { std::cerr << "hex input must contain complete bytes\n"; return 2; }
+        if (!from_hex(value, payload)) { std::cerr << "hex input must be an even number of hexadecimal digits\n"; return 2; }
     } else payload.assign(value.begin(), value.end());
     if (command == "encode") {
         if (mode != "--hex" || payload.size() != CKEY_LOCATOR_PAYLOAD_BYTES) { std::cerr << "locator input must be exactly 16 bytes encoded as 32 hexadecimal characters\n"; return 2; }
@@ -69,7 +78,7 @@ int main(int argc, char **argv) {
         size_t needed = 0; ckey_render_svg(&symbol, 16, nullptr, 0, &needed);
         std::string svg(needed, '\0');
         if (ckey_render_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
-        std::cout << diag.message << "; profile=locator-v1; payload-bytes=16; svg=" << output << '\n';
+        std::cout << diag.message << "; profile=1; format=0." << CKEY_FORMAT_VERSION << ".0; payload-bytes=16; svg=" << output << '\n';
         return 0;
     }
     if (command == "encode-text") {
@@ -79,7 +88,7 @@ int main(int argc, char **argv) {
         size_t needed = 0; ckey_render_text_svg(&symbol, 16, nullptr, 0, &needed);
         std::string svg(needed, '\0');
         if (ckey_render_text_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "SVG rendering failed\n"; return 1; }
-        std::cout << diag.message << "; profile=text-v3; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
+        std::cout << diag.message << "; profile=2; format=0." << CKEY_TEXT_FORMAT_VERSION << ".0; payload-bytes=" << payload.size() << "; codeword-bytes=255; svg=" << output << '\n';
         return 0;
     }
     if (command == "encode-extended") {
@@ -90,7 +99,7 @@ int main(int argc, char **argv) {
         size_t needed = 0; ckey_render_extended_svg(&symbol, 16, nullptr, 0, &needed);
         std::string svg(needed, '\0');
         if (ckey_render_extended_svg(&symbol, 16, svg.data(), svg.size(), &needed) != CKEY_OK || !write_svg(output, svg)) { std::cerr << "extended SVG rendering failed\n"; return 1; }
-        std::cout << diag.message << "; profile=extended-v4; payload-bytes=" << payload.size() << "; codeword-bytes=" << CKEY_EXTENDED_CODEWORD_BYTES << "; svg=" << output << '\n';
+        std::cout << diag.message << "; profile=3; format=0." << CKEY_EXTENDED_FORMAT_VERSION << ".0; payload-bytes=" << payload.size() << "; codeword-bytes=" << CKEY_EXTENDED_CODEWORD_BYTES << "; svg=" << output << '\n';
         return 0;
     }
     std::cerr << "unknown command\n"; return 2;

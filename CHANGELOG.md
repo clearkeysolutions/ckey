@@ -1,3 +1,18 @@
+## 0.1.0-dev.49 — 2026-11-04
+
+* **Profile 2/3 image decoding fixed.** At HEAD, neither profile could decode its own clean renders at any resolution. The sampler's fixed ±0.12-unit support, sized for P1's one-unit modules, averaged P2/P3's 0.10–0.20-unit dots and rays below threshold. Each feature class now uses a support matched to its width and a threshold calibrated from its own samples (two-means). P3 ray width is read as integrated coverage.
+* **Dead space removed.** These changes ship as Profile 2 Format 0.25 (byte `19`) and Profile 3 Format 0.26 (byte `1A`). Every site now carries a value, and sites are ordered by a keyed bijective hash so the codeword is spread uniformly. A specified SplitMix32 whitening stream (modulation, not ECC) prevents payload-dependent empty or solid regions. The previous P2 layout left everything below y = 22.75 empty. In the previous P3 layout, 400 of 573 rays were blank stubs.
+* **Safe area enforced.** Payload modules now keep a declared ink clearance from the frame, from the finder arcs (including round caps and the concave side), from the Grid Key, and from the radial alphabet. The old moat let modules overlap finder ink (P2 −0.32, P3 −1.5 units).
+* **P3 polar join.** The ring field and Ring Key move outward (24.62 / 25.11), so the Ring Key-to-ray gap matches P2 (1.19 units) instead of a 1.85-unit dark annulus.
+* **Ring arcs over half a turn** now set the SVG large-arc flag. Previously they were drawn as the complementary short arc on the wrong side of the ring.
+* **Profile 1 decoder (format unchanged).** P1's empty reference at (1.5, 11.5) was a payload module, which skewed the threshold whenever that bit was set. It now uses a point in the polar aperture. Thresholds are also per class. On 40 random renders, failures at 6–8 px/unit fell from 19/40 to 0/40, and the committed iPhone fixtures still decode. The P3 calibration score's polar empty reference was a data ray and has moved too.
+* **Tests now run in Release.** `assert()` was compiled out under `NDEBUG`, so CI executed none of the checks. Tests use an always-on `CKEY_CHECK`. New suites cover render → rasterize → decode round trips for all profiles (including all-zero/all-`FF` payloads, rotation, winding, inversion, keystone and blur) and white-box layout checks for site counts, clearance-boundary stability, uniform spread, measured ink gaps and dead space. CI adds a Debug ASan/UBSan job.
+* Site layouts are built once and cached instead of on every call. On a 1080p noise frame, P3 decode fell from about 27 ms to 18 ms per call. The remaining cost is sampling all 8 orientations when the cheap contrast gate passes.
+* The image decoders and calibration scores share one argument check (finite coordinates, `height × stride` overflow).
+* A corrupt Profile 2 length field now returns `CKEY_INTEGRITY_FAILURE` instead of `CKEY_INSUFFICIENT_BUFFER`.
+* The CLI rejects malformed hex such as `1g`, `-1`, ` 1` and `0x`, and reports real profile and format numbers.
+* Stale format references corrected in the README, CONTEXT, header and code comments. The three `patches/` files no longer applied and were removed (they remain in history).
+
 ## 0.1.0-dev.48 — 2026-11-04
 
 * Enlarged the radial safety moat surrounding the actual P2/P3 finder arcs and closed the unnecessary annular gap between each radial alphabet and Cartesian field. P2 emits Format 0.23; P3 emits Format 0.24.
