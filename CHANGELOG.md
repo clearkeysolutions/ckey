@@ -10,6 +10,32 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.69 — 2026-11-05
+
+* **Android SDK, Maven `org.openckey:ckey` (`sdk/android/`, spec §3 and §7):** AGP 8 and Kotlin. NDK CMake compiles the repository's own `src/` files with a JNI bridge that exports only the `Java_*` functions.
+  * **Modules:**
+    * `ckey`, the core AAR, with no dependencies beyond the Kotlin standard library;
+    * `ckey-compose`, which provides `CKeyImage`;
+    * `ckey-camerax`, which provides `CKeyAnalyzer`.
+  * **Scan-only and render-only builds:** set the Gradle properties `ckey.native.scan`, `ckey.native.render` and `ckey.native.telemetry`.
+  * **API:**
+    * `CKeySymbol.encode`;
+    * `toBitmap`, which converts straight alpha to Android's premultiplied form;
+    * `toPng`, `toSvg`, `toPdf` and `certify`;
+    * `CKeyStyle`, with presets and a policy;
+    * `CKeyDecoder`, for gray buffers, a `ByteBuffer`, `android.media.Image` or a `Bitmap`;
+    * `CKeyScanner`, which records telemetry sessions;
+    * `CKeyPayload.classify`.
+  * **Telemetry:** `CKey.telemetry` takes 0, 1 or 2; any other value throws `IllegalArgumentException`. One background thread sends batches over HTTPS only, and the SDK tries a send when the app moves to the background.
+  * **Publishing:** maven-publish to a local directory, with no credentials in the build.
+  * **Verified here** with `jni-host-test/run.sh`:
+    * the Kotlin native declarations and the C++ bridge are checked against each other through a generated JNI header;
+    * a JVM harness runs 60 checks under `-Xcheck:jni`, including round trips, premultiplication, exports, refusals, certification and the full telemetry cycle;
+    * the real Kotlin sources compile with Kotlin 2.0.21 against stubs;
+    * 22 Java-side API checks pass, and 17 JUnit tests pass.
+  * **Not verified here:** the Gradle/AGP/NDK build, the Compose module and the instrumented tests run only in `sdk-android.yml`.
+* `tools/bump_version.py` now also covers the SDK READMEs.
+
 ## 0.1.0-build.68 — 2026-11-05
 
 * **`docs/IMPLEMENTATION-STATUS.md`:** rewritten against builds 61–67, item by item against the specification. It ends with a list of what only the maintainer can do: deploy openckey.org, publish to the registries, set up branch protection, make real prints and camera captures, and pin action SHAs.

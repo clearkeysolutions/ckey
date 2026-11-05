@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.cxx/
+.externalNativeBuild/
+*.iml
+.idea/
+jni-host-test/build/
+# Wrapper jar/scripts are generated locally, never committed.
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+gradlew.bat
