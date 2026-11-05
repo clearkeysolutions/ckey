@@ -274,9 +274,12 @@ ckey_status ckey_certify_scalable_style(const ckey_scalable_symbol *s, const cke
         }
     }
     ckey_style work = st;
-    if (st.policy == CKEY_POLICY_ADAPTIVE) out->adjustments |= adapt_style(L, *s, work, extra);
     double contrast = 0, load = 0;
-    std::string problem = safety_problem(L, *s, work, extra, contrast, load);
+    std::string advice;
+    // Adaptive repairs a hard failure up front; anything else is left for the sweep to judge.
+    if (st.policy == CKEY_POLICY_ADAPTIVE && !safety_problem(L, *s, work, extra, contrast, load).empty())
+        out->adjustments |= adapt_style(L, *s, work, extra);
+    std::string problem = safety_problem(L, *s, work, extra, contrast, load, &advice);
     // Grounds the symbol is judged on: its own background, or every backdrop.
     std::vector<std::pair<const ckey_rgb *, const ckey_backdrop *>> grounds;
     if (!transparent) grounds.push_back({nullptr, nullptr});
@@ -305,18 +308,20 @@ ckey_status ckey_certify_scalable_style(const ckey_scalable_symbol *s, const cke
     evaluate(work, result, separation);
     int grade = grade_of(result);
     if (st.policy == CKEY_POLICY_ADAPTIVE && (!problem.empty() || grade < 2)) {
+        out->adjustments |= adapt_style(L, *s, work, extra);  // now also the advisory contrast repairs
         strip_materials(work); out->adjustments |= CKEY_ADJUST_MATERIALS;
-        problem = safety_problem(L, *s, work, extra, contrast, load);
+        problem = safety_problem(L, *s, work, extra, contrast, load, &advice);
         evaluate(work, result, separation);
         grade = grade_of(result);
     }
     out->min_contrast = contrast; out->logo_load = load;
     out->trials = result.scenes; out->trials_passed = result.passed; out->feature_separation = separation;
     out->certified = problem.empty() && grade >= 2 ? 1u : 0u;
-    char sweep_text[200];
+    char sweep_text[320];
     const auto ppm_text = [](const Sweep &r) { char b[48]; if (r.smallest_step < 0) std::snprintf(b, sizeof(b), "not even at %.0f px per module", kLadder[0]); else std::snprintf(b, sizeof(b), "down to %.2g px per module", r.smallest_ppm); return std::string(b); };
     std::snprintf(sweep_text, sizeof(sweep_text), "%s scan margin: found and decoded in modelled photos %s; plain black on white %s",
                   grade_name(grade), ppm_text(result).c_str(), ppm_text(plain).c_str());
+    if (!advice.empty()) { std::strncat(sweep_text, "; note: ", sizeof(sweep_text) - std::strlen(sweep_text) - 1); std::strncat(sweep_text, advice.c_str(), sizeof(sweep_text) - std::strlen(sweep_text) - 1); }
     std::string text = out->certified ? std::string("certified (") + grade_name(grade) + "); " + sweep_text
                      : !problem.empty() ? "not certified: " + problem + "; " + sweep_text
                                         : std::string("not certified: ") + sweep_text;

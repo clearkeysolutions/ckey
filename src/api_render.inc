@@ -197,8 +197,9 @@ ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_
     const std::string structural = structural_problem(L, *st);
     if (!structural.empty()) { set_status(diag, CKEY_INVALID_ARGUMENT, structural.c_str()); return CKEY_INVALID_ARGUMENT; }
     ckey_style eff = *st; uint32_t adjusted = 0;
-    if (st->policy == CKEY_POLICY_ADAPTIVE) adjusted = adapt_style(L, *s, eff, {});
-    const std::string problem = safety_problem(L, *s, eff, {}, contrast, load);
+    if (st->policy == CKEY_POLICY_ADAPTIVE && !safety_problem(L, *s, eff, {}, contrast, load).empty()) adjusted = adapt_style(L, *s, eff, {});
+    std::string advice;
+    const std::string problem = safety_problem(L, *s, eff, {}, contrast, load, &advice);
     char message[96];
     if (!problem.empty()) {
         if (st->policy != CKEY_POLICY_OVERRIDE) { set_status(diag, CKEY_INVALID_ARGUMENT, problem.c_str()); return CKEY_INVALID_ARGUMENT; }
@@ -206,7 +207,8 @@ ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_
         set_status(diag, CKEY_OK, message);
         return CKEY_OK;
     }
-    std::snprintf(message, sizeof(message), "style OK%s: contrast >= %.1f:1; logo uses %.0f%% of block correction",
+    if (!advice.empty()) std::snprintf(message, sizeof(message), "style OK%s, but %s; certify it to check that it scans", adjusted ? " after adaptive changes" : "", advice.c_str());
+    else std::snprintf(message, sizeof(message), "style OK%s: contrast >= %.1f:1; logo uses %.0f%% of block correction",
                   adjusted ? " after adaptive changes" : "", contrast, 100 * load);
     set_status(diag, CKEY_OK, message);
     return CKEY_OK;

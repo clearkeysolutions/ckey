@@ -238,15 +238,16 @@ int main() {
         std::printf("concept style: %s\n", d.message);
         CKEY_CHECK(decode_svg(render_styled(s, art), 7.0 / 0.5, payload) == 11);
 
-        // The checker refuses unscannable styles, with a reason.
-        ckey_style low = base; low.ink = low.ink_shade = {0xbb, 0xbb, 0xbb};
+        // The checker refuses near-invisible styles, with a reason; lower contrast is a warning
+        // (certification's photo sweep decides whether it scans).
+        ckey_style low = base; low.ink = low.ink_shade = {0xe8, 0xe8, 0xe8};
         CKEY_CHECK(ckey_check_scalable_style(&s, &low, &d) == CKEY_INVALID_ARGUMENT);
         std::printf("refused: %s\n", d.message);
         ckey_style mixed = base; mixed.background = mixed.background_edge = {0x80, 0x80, 0x80}; mixed.accents[0] = {0xff, 0xff, 0xff}; mixed.accent_count = 1; mixed.accent_percent = 10;
         CKEY_CHECK(ckey_check_scalable_style(&s, &mixed, &d) == CKEY_INVALID_ARGUMENT);
         ckey_style light = base; light.background = light.background_edge = {0xf4, 0xf1, 0xe8}; light.ink = light.ink_shade = {0x10, 0x10, 0x10};
         CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_OK);
-        light.shadow = 0.6; CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_INVALID_ARGUMENT);
+        light.shadow = 0.6; CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_OK && std::string(d.message).find("certify it") != std::string::npos);
         size_t n = 0; CKEY_CHECK(ckey_render_scalable_styled_svg(&s, &low, 8, nullptr, 0, &n) == CKEY_INVALID_ARGUMENT);
 
         // Logos: the empty centre costs nothing; a larger logo needs a plate and

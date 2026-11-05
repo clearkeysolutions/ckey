@@ -32,11 +32,12 @@ Each element can still take any colour or material below.
 Under the default **strict** policy, the renderers refuse any style that fails, and the check names the reason. These rules are a conservative pre-filter. They do not certify a style; see [Policies and certification](#policies-and-certification).
 
 1. **Contrast:**
-   - **Pairs:** every ink colour (ink, shade, each accent in use) against every background colour (centre and edge) needs a WCAG contrast ratio of at least **3:1**.
+   - **Hard limit:** any ink colour (ink, shade, each accent in use) below **1.5:1** against any background colour (centre and edge) is refused: such marks are near-invisible.
+   - **Warning below 3:1:** pairs under 3:1 are reported but not refused. Certification's photo sweep decides whether the style scans, and many such styles do. Examples are concept on slate or teal, whose lighter accents sit near 2.9:1.
    - **One polarity:** inks must be all lighter or all darker than the background. Either polarity is allowed.
 2. **Effects:**
    - **Range:** bevel, depth and grain are each 0–1.
-   - **Dark-on-light:** depth is limited to 0.4 and bevel to 0.5, because shadows darken the gaps and highlights lighten the marks.
+   - **Dark-on-light:** depth above 0.4 or bevel above 0.5 is a warning, because shadows darken the gaps and highlights lighten the marks. The sweep judges it.
 3. **Logo:**
    - **Free size:** within the empty centre (radius about 3.2 units, roughly 22% of the symbol's width), a logo needs no plate and hides nothing.
    - **Ring Key:** never beyond `ckey_scalable_logo_max_radius(v)`, which keeps the outermost ring and the Ring Key fully visible.

@@ -10,6 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.73 — 2026-11-05
+
+* **The photo sweep, not fixed rules, decides certification.** Custom backgrounds were refused by the old 3:1 rule even when they scanned well; concept on slate `#555`, for example, has a 2.9:1 accent and is graded "good" by the sweep. Now:
+  * **Hard refusals** remain only for near-invisible marks (below **1.5:1**), mixed polarity, and logo limits (Ring Key, plate, 50% budget).
+  * **Low contrast below 3:1** and strong depth on dark-on-light styles are warnings. They appear in the style check ("style OK, but …; certify it to check that it scans") and in the certification message ("note: …").
+  * **Strict renderers** draw these styles. Adaptive repairs only hard failures up front, and the advisory repairs only if the sweep fails.
+  * **Measured:** concept on navy, forest and burgundy is excellent; on slate, teal and `#777` it is good; on tan and cream it is refused or marginal.
+* Tests updated: `#e8e8e8` on white is the near-invisible refusal case, and `#bbbbbb` renders but fails the sweep.
+
 ## 0.1.0-build.72 — 2026-11-05
 
 * **Certification now models real photographs.** The old check decoded the styled symbol from a perfectly known position at a comfortable 8 px per module, so almost every style passed. `ckey_certify_scalable_style` now runs a photo sweep:

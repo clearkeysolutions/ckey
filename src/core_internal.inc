@@ -1316,30 +1316,37 @@ std::string structural_problem(const ScalableLayout &L, const ckey_style &st) {
     return {};
 }
 
-// Scan-safety rules (the strict policy): contrast and one polarity against
-// every background colour, depth limits, and the logo's correction budget.
+// Scan-safety rules. Only what reliably breaks a code is a hard refusal:
+// near-invisible marks (any ink or accent below kHardContrast against a
+// background), mixed polarity, and logos that hide too much. Lower contrast
+// and strong depth are warnings: the photo sweep in ckey_certify decides
+// whether such a style scans, and it often does.
+constexpr double kHardContrast = 1.5;
+constexpr double kAdviseContrast = 3.0;
+
 std::string safety_problem(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st,
-                           const std::vector<ckey_rgb> &extra_backgrounds, double &min_contrast, double &load) {
+                           const std::vector<ckey_rgb> &extra_backgrounds, double &min_contrast, double &load,
+                           std::string *warnings = nullptr) {
     min_contrast = 1e9; load = 0;
     std::vector<ckey_rgb> inks = {st.ink, st.ink_shade};
     if (st.accent_percent > 0) for (uint32_t i = 0; i < st.accent_count; ++i) inks.push_back(st.accents[i]);
     std::vector<ckey_rgb> backgrounds = {st.background, st.background_edge};
     backgrounds.insert(backgrounds.end(), extra_backgrounds.begin(), extra_backgrounds.end());
-    int polarity = 0; std::string problem;
+    int polarity = 0; std::string problem, advice;
     for (const auto &bg : backgrounds) for (const auto &ink : inks) {
         const double ratio = contrast_ratio(ink, bg);
         min_contrast = std::min(min_contrast, ratio);
-        char why[96];
-        if (ratio < 3.0 && problem.empty()) { std::snprintf(why, sizeof(why), "ink %s on background %s is %.1f:1; need 3:1", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio); problem = why; }
+        char why[112];
+        if (ratio < kHardContrast && problem.empty()) { std::snprintf(why, sizeof(why), "ink %s on background %s is %.1f:1, too faint to read (minimum %.1f:1)", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio, kHardContrast); problem = why; }
+        else if (ratio < kAdviseContrast && advice.empty()) { std::snprintf(why, sizeof(why), "ink %s on background %s is only %.1f:1", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio); advice = why; }
         const int side = relative_luminance(ink) > relative_luminance(bg) ? 1 : -1;
         if (polarity && side != polarity && problem.empty()) problem = "all inks must be lighter than the background, or all darker";
         polarity = side;
     }
+    if (polarity < 0 && st.shadow > 0.4 && advice.empty()) advice = "strong shadow on dark-on-light marks";
+    if (polarity < 0 && st.bevel > 0.5 && advice.empty()) advice = "strong bevel on dark-on-light marks";
+    if (warnings) *warnings = advice;
     if (!problem.empty()) return problem;
-    // Dark ink on a light ground: shadows darken the gaps and highlights
-    // lighten the marks, both eating into contrast.
-    if (polarity < 0 && st.shadow > 0.4) return "dark-on-light symbols allow shadow up to 0.4";
-    if (polarity < 0 && st.bevel > 0.5) return "dark-on-light symbols allow bevel up to 0.5";
     if (st.logo_href && *st.logo_href) {
         const double radius = st.logo_radius > 0 ? st.logo_radius : logo_quiet_radius(L);
         char why[96];
@@ -1414,7 +1421,9 @@ uint32_t adapt_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, c
 // The style a renderer draws: an ADAPTIVE style after its rule-based repairs.
 ckey_style effective_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st) {
     ckey_style out = st;
-    if (st.policy == CKEY_POLICY_ADAPTIVE && structural_problem(L, st).empty()) adapt_style(L, sym, out, {});
+    double contrast = 0, load = 0;
+    if (st.policy == CKEY_POLICY_ADAPTIVE && structural_problem(L, st).empty() && !safety_problem(L, sym, st, {}, contrast, load).empty())
+        adapt_style(L, sym, out, {});
     return out;
 }
 

@@ -56,13 +56,24 @@ int main() {
         hard.trials = 0; CKEY_CHECK(ckey_certify_scalable_style(&dense, nullptr, 0, nullptr, &hard, nullptr, &c) == CKEY_INVALID_ARGUMENT);
     }
 
-    // Strict refuses low contrast everywhere: check, render, certify.
-    ckey_style grey = plain; grey.ink = grey.ink_shade = {0xbb, 0xbb, 0xbb};
+    // Strict refuses near-invisible marks everywhere: check, render, certify.
+    ckey_style grey = plain; grey.ink = grey.ink_shade = {0xe8, 0xe8, 0xe8};
     ckey_diagnostics d{};
     CKEY_CHECK(ckey_check_scalable_style(&s, &grey, &d) == CKEY_INVALID_ARGUMENT);
     CKEY_CHECK(!renders(s, grey));
     CKEY_CHECK(ckey_certify_scalable_style(&s, &grey, 0, nullptr, nullptr, nullptr, &c) == CKEY_INVALID_ARGUMENT && c.certified == 0);
-    std::printf("strict grey: %s\n", c.message);
+    std::printf("strict near-invisible: %s\n", c.message);
+    // Low but visible contrast is only a warning: it renders, and the photo sweep decides.
+    ckey_style faint = plain; faint.ink = faint.ink_shade = {0xbb, 0xbb, 0xbb};
+    CKEY_CHECK(ckey_check_scalable_style(&s, &faint, &d) == CKEY_OK && std::string(d.message).find("only 1.9:1") != std::string::npos);
+    CKEY_CHECK(renders(s, faint));
+    CKEY_CHECK(ckey_certify_scalable_style(&s, &faint, 0, nullptr, nullptr, nullptr, &c) == CKEY_INVALID_ARGUMENT && c.certified == 0);
+    std::printf("strict #bbbbbb: %s\n", c.message);
+    // A dark custom background with concept's lighter accents scans: certified despite a 2.9:1 accent.
+    ckey_style slate; ckey_style_preset_fill(&slate, CKEY_PRESET_CONCEPT); slate.background = {0x55, 0x55, 0x55};
+    CKEY_CHECK(ckey_certify_scalable_style(&s, &slate, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);
+    CKEY_CHECK(std::string(c.message).find("note: ink") != std::string::npos);
+    std::printf("concept on #555555: %s\n", c.message);
 
     // Override renders it, says so, and never certifies it.
     ckey_style forced = grey; forced.policy = CKEY_POLICY_OVERRIDE;
