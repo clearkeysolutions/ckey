@@ -157,7 +157,7 @@ int main() {
     CKEY_CHECK(ckey_render_svg(&a, 0, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     CKEY_CHECK(ckey_render_svg(&a, CKEY_MAX_RENDER_SCALE + 1, nullptr, 0, &ignored)==CKEY_INVALID_ARGUMENT);
     CKEY_CHECK(svg.find("viewBox=\"-1 -1 31 31\"")!=std::string::npos);
-    CKEY_CHECK(svg.find("fill=\"#050505\"")!=std::string::npos);
+    CKEY_CHECK(svg.find("fill=\"#ffffff\"")!=std::string::npos);
     CKEY_CHECK(svg.find("A 2.3000 2.3000")!=std::string::npos);
     CKEY_CHECK(occurrences(svg,"r=\"0.1500\"")==occurrences(svg,"<circle "));
     CKEY_CHECK(occurrences(svg,"<circle ")>3);

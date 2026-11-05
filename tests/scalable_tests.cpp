@@ -228,21 +228,21 @@ int main() {
         std::printf("design system: 16 mark-shape combinations decode at v2 and v20\n");
 
         // Concept-art look: champagne sheen, navy vignette, sage/grey accents, depth, grain.
-        ckey_style art = base;
-        art.background = {0x14, 0x16, 0x1e}; art.background_edge = {0x07, 0x08, 0x0c};
-        art.ink = {0xf6, 0xee, 0xe0}; art.ink_shade = {0xc8, 0xb6, 0x9a};
-        art.accents[0] = {0xa9, 0xb8, 0x96}; art.accents[1] = {0x9e, 0xa1, 0xa6}; art.accent_count = 2; art.accent_percent = 18;
-        art.bevel = 0.6; art.shadow = 0.5; art.texture = 0.4;
+        ckey_style art; CKEY_CHECK(ckey_style_preset_fill(&art, CKEY_PRESET_CONCEPT) == CKEY_OK);
+        CKEY_CHECK(ckey_style_preset_fill(&art, static_cast<ckey_style_preset>(7)) == CKEY_INVALID_ARGUMENT);
+        CKEY_CHECK(ckey_style_preset_fill(&art, CKEY_PRESET_CONCEPT) == CKEY_OK);
+        // The default is black on white (specification §4).
+        CKEY_CHECK(base.ink.r == 0 && base.ink.g == 0 && base.background.r == 255 && base.background.b == 255);
         CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 11, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
         CKEY_CHECK(ckey_check_scalable_style(&s, &art, &d) == CKEY_OK);
         std::printf("concept style: %s\n", d.message);
         CKEY_CHECK(decode_svg(render_styled(s, art), 7.0 / 0.5, payload) == 11);
 
         // The checker refuses unscannable styles, with a reason.
-        ckey_style low = base; low.ink = low.ink_shade = {0x44, 0x44, 0x44};
+        ckey_style low = base; low.ink = low.ink_shade = {0xbb, 0xbb, 0xbb};
         CKEY_CHECK(ckey_check_scalable_style(&s, &low, &d) == CKEY_INVALID_ARGUMENT);
         std::printf("refused: %s\n", d.message);
-        ckey_style mixed = base; mixed.accents[0] = {0x01, 0x01, 0x01}; mixed.accent_count = 1; mixed.accent_percent = 10;
+        ckey_style mixed = base; mixed.background = mixed.background_edge = {0x80, 0x80, 0x80}; mixed.accents[0] = {0xff, 0xff, 0xff}; mixed.accent_count = 1; mixed.accent_percent = 10;
         CKEY_CHECK(ckey_check_scalable_style(&s, &mixed, &d) == CKEY_INVALID_ARGUMENT);
         ckey_style light = base; light.background = light.background_edge = {0xf4, 0xf1, 0xe8}; light.ink = light.ink_shade = {0x10, 0x10, 0x10};
         CKEY_CHECK(ckey_check_scalable_style(&s, &light, &d) == CKEY_OK);

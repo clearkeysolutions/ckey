@@ -18,13 +18,13 @@ The project lives in one repository, [`clearkeysolutions/ckey`](https://github.c
 | `Stable-Release` | Maintainer only; anyone may fork | The supported source. Every release is a tag on this branch. Fork from here. |
 | `community` | Anyone | Experimental contributions. **Unstable:** do not depend on it in production. |
 
-Changes flow `scratch` → `Stable-Release` → forks and `community`. Community work reaches a release only when the maintainer brings it into `scratch`. Releases are immutable tags such as `v0.1.0-dev.60`. A deprecated release keeps its tag and is retitled `Deprecated - {release name}`. No release has been tagged yet. See [branches and releases](docs/BRANCHES-AND-RELEASES.md).
+Changes flow `scratch` → `Stable-Release` → forks and `community`. Community work reaches a release only when the maintainer brings it into `scratch`. Releases are immutable tags such as `v0.1.0-build.61`. A deprecated release keeps its tag and is retitled `Deprecated - {release name}`. No release has been tagged yet. See [branches and releases](docs/BRANCHES-AND-RELEASES.md).
 
 ### Versions
 
 CKey has four version numbers:
 
-- **Software version:** `0.1.0-dev.N`, bumped on every commit. It lives in [`VERSION`](VERSION).
+- **Software version:** `0.1.0-build.N` (builds up to 60 were named `0.1.0-dev.N`), bumped on every commit. It lives in [`VERSION`](VERSION).
 - **Format version:** `0.N.0`, written into every symbol as format byte `N`.
 - **Profile byte:** `00`–`03`.
 - **C ABI version:** currently 3.

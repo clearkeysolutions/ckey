@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 3u
-#define CKEY_SOFTWARE_VERSION "0.1.0-dev.60"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.61"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -311,8 +311,14 @@ typedef struct ckey_style {
     double logo_radius;        /* canonical units; 0 = the empty centre's size */
     uint32_t logo_plate;       /* 1: background disc behind the logo */
 } ckey_style;
-/* Fills the default style (the plain Profile 0 look). */
+/* Fills the default style: black ink on a white background (spec §4). */
 CKEY_API void ckey_style_default(ckey_style *style);
+typedef enum ckey_style_preset {
+    CKEY_PRESET_PLAIN = 0,     /* the default style */
+    CKEY_PRESET_CONCEPT = 1    /* cream metallic ink on a dark vignette, accents, depth, grain */
+} ckey_style_preset;
+/* Fills a named preset; CKEY_INVALID_ARGUMENT for an unknown preset. */
+CKEY_API ckey_status ckey_style_preset_fill(ckey_style *style, ckey_style_preset preset);
 /* Largest logo radius for a version (keeps the Ring Key and outer ring). */
 CKEY_API double ckey_scalable_logo_max_radius(uint32_t version, ckey_scalable_layout layout);
 /* Share (0..) of the worst RS block's correction capacity consumed by marks

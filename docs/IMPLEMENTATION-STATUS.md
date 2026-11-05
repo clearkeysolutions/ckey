@@ -36,7 +36,7 @@ Real-device, real-print and platform claims are only made where measured.
 | Item | Status | Where / notes |
 |---|---|---|
 | Colours, textures, images, materials (§4) | **Partial** | Profile 0 `ckey_style`: sheen, vignette, accents, bevel, depth, grain, logo, mark shapes. |
-| Default black on white (§4) | **Conflict** | The current default is cream `#f4f1e8` on black `#050505`. Print output already uses black on paper. |
+| Default black on white (§4) | **Done** | Since build 61 every renderer defaults to black on white. The concept look is `CKEY_PRESET_CONCEPT`. |
 | Transparent mode needs host background to certify (§4, §11.5) | **None** | |
 | Contrast not certified from WCAG alone; tie to a capture/print model (§4) | **Conflict** | `ckey_check_scalable_style` gates on WCAG 3:1 and reports "style OK". It also checks effect limits and the logo budget, but not a capture model. |
 | Policy modes strict / adaptive / override (§4) | **Partial** | Strict only: the renderer refuses failing styles. No adaptive or override mode. |

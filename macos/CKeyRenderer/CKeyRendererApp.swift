@@ -62,8 +62,8 @@ private final class RendererModel: ObservableObject {
     @Published private(set) var styleStatus = ""
     @Published var payload = "CKeyDemoPayload!" { didSet { scheduleRegenerate() } }
     @Published var extendedTier = 0 { didSet { scheduleRegenerate() } }
-    @Published var foreground = Color(red: 0.95, green: 0.94, blue: 0.88) { didSet { scheduleRegenerate() } }
-    @Published var background = Color.black { didSet { scheduleRegenerate() } }
+    @Published var foreground = Color.black { didSet { scheduleRegenerate() } }
+    @Published var background = Color.white { didSet { scheduleRegenerate() } }
     @Published var blur = 0.0
     @Published var damage = 0.0
     @Published var noise = 0.0
@@ -165,8 +165,10 @@ private final class RendererModel: ObservableObject {
         }
         guard var next = rendered else { svg = ""; status = "The C++ renderer did not produce SVG."; return }
         if profile != .scalable {  // Profile 0 colours come from its ckey_style
-            next = next.replacingOccurrences(of: "#050505", with: background.hex)
-            next = next.replacingOccurrences(of: "#f4f1e8", with: foreground.hex)
+            // Default output is black (#000000) on white (#ffffff); swap through
+            // placeholders so a black background cannot be re-coloured as ink.
+            next = next.replacingOccurrences(of: "#ffffff", with: "@CKEY-BG@").replacingOccurrences(of: "#000000", with: "@CKEY-FG@")
+            next = next.replacingOccurrences(of: "@CKEY-BG@", with: background.hex).replacingOccurrences(of: "@CKEY-FG@", with: foreground.hex)
         }
         svg = next
         let version = ckey_get_software_version().map { String(cString: $0) } ?? "development"

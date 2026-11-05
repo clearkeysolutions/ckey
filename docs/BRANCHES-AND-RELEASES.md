@@ -18,9 +18,9 @@ Automation that merges into `community` must not have access to publishing crede
 
 ## Releases
 
-- **Tags:** every release is an immutable tag on a `Stable-Release` commit, such as `v0.1.0-dev.60`. Published tags are never moved or reused.
+- **Tags:** every release is an immutable tag on a `Stable-Release` commit, such as `v0.1.0-build.61`. Published tags are never moved or reused.
 - **GitHub Releases:** each release has one tag. Its title is the release name.
 - **Deprecation:** when a release is deprecated, its title is changed to **`Deprecated - {release name}`**. The tag and its source stay available. Deprecation means "discouraged for new use", not deleted.
-- **Version history:** the dev counter is preserved in the version itself (`0.1.0-dev.N`). The exact public-release form, for example `v0.1.0+build.60`, is still an open decision (specification §8.1).
+- **Version history:** the build counter is part of the version itself, `0.1.0-build.N`. Tags are `v` + `VERSION`, for example `v0.1.0-build.61`. Builds 1–60 were named `0.1.0-dev.N`.
 
 See the [release and versioning map](RELEASE-AND-VERSIONING-MAP.md) for the step-by-step release and deprecation procedure, format and ABI history, and the release table. Each branch has its own changelog: [`CHANGELOG.md`](../CHANGELOG.md) for `scratch`, [`CHANGELOG-STABLE.md`](../CHANGELOG-STABLE.md) for `Stable-Release` and [`CHANGELOG-COMMUNITY.md`](../CHANGELOG-COMMUNITY.md) for `community`.

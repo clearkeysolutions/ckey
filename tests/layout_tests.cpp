@@ -193,7 +193,7 @@ int main() {
     // ---- Ring runs over half a turn need the SVG large-arc flag ----
     {
         std::ostringstream o; o << std::fixed << std::setprecision(4);
-        o << "<svg viewBox=\"0 0 29 29\"><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">";
+        o << "<svg viewBox=\"0 0 29 29\"><g fill=\"#000000\" stroke=\"#000000\">";
         svg_ring_run(o, 14.5, 5.0, 0.5, 100.5, 144.0, 0.1, "0.2000");  // 250 degrees clockwise from 12:00
         o << "</g></svg>";
         const auto svg = svgtest::parse(o.str());

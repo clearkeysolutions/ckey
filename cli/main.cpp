@@ -79,12 +79,9 @@ static int encode_scalable(int argc, char **argv) {
             if (arg == "standard") layout = CKEY_LAYOUT_STANDARD; else if (arg == "print") layout = CKEY_LAYOUT_PRINT;
             else { std::cerr << "--layout must be standard or print\n"; return 2; }
         } else if (flag == "--preset") {
-            if (arg == "concept") {
-                style.background = {0x14, 0x16, 0x1e}; style.background_edge = {0x07, 0x08, 0x0c};
-                style.ink = {0xf6, 0xee, 0xe0}; style.ink_shade = {0xc8, 0xb6, 0x9a};
-                style.accents[0] = {0xa9, 0xb8, 0x96}; style.accents[1] = {0x9e, 0xa1, 0xa6}; style.accent_count = 2; style.accent_percent = 18;
-                style.bevel = 0.6; style.shadow = 0.5; style.texture = 0.4;
-            } else if (arg != "plain") { std::cerr << "--preset must be plain or concept\n"; return 2; }
+            if (arg == "concept") ckey_style_preset_fill(&style, CKEY_PRESET_CONCEPT);
+            else if (arg == "plain") ckey_style_preset_fill(&style, CKEY_PRESET_PLAIN);
+            else { std::cerr << "--preset must be plain or concept\n"; return 2; }
         } else if (flag == "--modules") {
             if (arg == "rounded") style.modules = CKEY_MODULE_ROUNDED; else if (arg == "square") style.modules = CKEY_MODULE_SQUARE;
             else if (arg == "circle") style.modules = CKEY_MODULE_CIRCLE; else if (arg == "diamond") style.modules = CKEY_MODULE_DIAMOND;

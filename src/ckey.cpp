@@ -1517,7 +1517,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey locator symbol\">"
-      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#ffffff\"/><g fill=\"#000000\" stroke=\"#000000\">"
       << "<g class=\"ckey-frame\"><rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/></g>"
       << "<g class=\"ckey-finders\">";
     svg_corner_finders(o, 29.0, 4.0, {2.30, 0.0, 0.0}, .80, .95);
@@ -1529,7 +1529,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     for (const auto &[slot, fraction] : {std::pair{0, 1.0}, {54, .5}, {55, .75}}) {
         const double a = kTau * slot / 72.0, r0 = 7.6, r1 = r0 + 1.9 * fraction;
         o << "<path d=\"M " << kCenter + r0 * std::sin(a) << ' ' << kCenter - r0 * std::cos(a) << " L " << kCenter + r1 * std::sin(a) << ' ' << kCenter - r1 * std::cos(a)
-          << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.22\"/>";
+          << "\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.22\"/>";
     }
     // Permanent Ring Key on the outermost inner data ring.
     const double rr = 6.0;
@@ -1541,7 +1541,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
     const double a0 = kTau * 21.5 / 72.0 + cap_angle;
     const double a1 = kTau * 25.5 / 72.0 - cap_angle;
     o << "<path d=\"M " << kCenter + rr * std::sin(a0) << ' ' << kCenter - rr * std::cos(a0) << " A " << rr << ' ' << rr << " 0 0 1 "
-      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"round\"/>";
+      << kCenter + rr * std::sin(a1) << ' ' << kCenter - rr * std::cos(a1) << "\" fill=\"none\" stroke=\"#000000\" stroke-width=\"" << ring_key_dot_diameter << "\" stroke-linecap=\"round\"/>";
     o << "</g><g class=\"ckey-data-polar\">";
     for (size_t i = 0; i < kBits; ++i) {
         const Node &n = nodes[i];
@@ -1551,7 +1551,7 @@ ckey_status ckey_render_svg(const ckey_symbol *s, uint32_t scale, char *out,
             // a long ray encodes 1. Both remain distinct from reserved keys.
             const double length = code_bit(s, i) ? 1.35 : 0.65;
             o << "<path d=\"M " << kCenter + 7.6 * std::sin(a) << ' ' << kCenter - 7.6 * std::cos(a) << " L " << kCenter + (7.6 + length) * std::sin(a) << ' ' << kCenter - (7.6 + length) * std::cos(a)
-              << "\" fill=\"none\" stroke=\"#f4f1e8\" stroke-width=\"0.15\" stroke-linecap=\"round\"/>";
+              << "\" fill=\"none\" stroke=\"#000000\" stroke-width=\"0.15\" stroke-linecap=\"round\"/>";
             continue;
         }
         if (!code_bit(s, i)) continue;
@@ -1574,7 +1574,7 @@ ckey_status ckey_render_text_svg(const ckey_text_symbol *s, uint32_t scale, char
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey text symbol profile 2\">"
-      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"-1\" y=\"-1\" width=\"31\" height=\"31\" fill=\"#ffffff\"/><g fill=\"#000000\" stroke=\"#000000\">"
       << "<g class=\"ckey-frame\"><rect x=\"0.5\" y=\"0.5\" width=\"28\" height=\"28\" rx=\"3.5\" fill=\"none\" stroke-width=\"0.65\"/></g>"
       << "<g class=\"ckey-finders\">";
     svg_corner_finders(o, 29.0, 4.0, {2.30, 0.0, 0.0}, .80, .95);
@@ -1620,7 +1620,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);  // Cartesian payload layer
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 124*scale << "\" height=\"" << 124*scale << "\" viewBox=\"-4 -4 124 124\" role=\"img\" aria-label=\"CKey extended symbol profile 3\">"
-      << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#050505\"/><g fill=\"#f4f1e8\" stroke=\"#f4f1e8\">"
+      << "<rect x=\"-4\" y=\"-4\" width=\"124\" height=\"124\" fill=\"#ffffff\"/><g fill=\"#000000\" stroke=\"#000000\">"
       << "<g class=\"ckey-frame\"><rect x=\"2\" y=\"2\" width=\"112\" height=\"112\" rx=\"14\" fill=\"none\" stroke-width=\"2.6\"/></g>"
       << "<g class=\"ckey-finders\">";
     svg_corner_finders(o, 116.0, 16.0, {9.20, 0.0, 0.0}, 3.2, 3.8);
@@ -2252,9 +2252,21 @@ extern "C" {
 void ckey_style_default(ckey_style *st) {
     if (!st) return;
     std::memset(st, 0, sizeof(*st));
-    st->background = st->background_edge = {5, 5, 5};
-    st->ink = st->ink_shade = {0xf4, 0xf1, 0xe8};
+    st->background = st->background_edge = {0xff, 0xff, 0xff};  // spec §4: black on white by default
+    st->ink = st->ink_shade = {0, 0, 0};
     st->modules = CKEY_MODULE_ROUNDED; st->rings = CKEY_RING_JOINED; st->rays = CKEY_RAY_ROUND;
+}
+
+ckey_status ckey_style_preset_fill(ckey_style *st, ckey_style_preset preset) {
+    if (!st || (preset != CKEY_PRESET_PLAIN && preset != CKEY_PRESET_CONCEPT)) return CKEY_INVALID_ARGUMENT;
+    ckey_style_default(st);
+    if (preset == CKEY_PRESET_CONCEPT) {
+        st->background = {0x14, 0x16, 0x1e}; st->background_edge = {0x07, 0x08, 0x0c};
+        st->ink = {0xf6, 0xee, 0xe0}; st->ink_shade = {0xc8, 0xb6, 0x9a};
+        st->accents[0] = {0xa9, 0xb8, 0x96}; st->accents[1] = {0x9e, 0xa1, 0xa6}; st->accent_count = 2; st->accent_percent = 18;
+        st->bevel = 0.6; st->shadow = 0.5; st->texture = 0.4;
+    }
+    return CKEY_OK;
 }
 
 double ckey_scalable_logo_max_radius(uint32_t version, ckey_scalable_layout layout) {

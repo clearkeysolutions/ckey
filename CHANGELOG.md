@@ -10,6 +10,19 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.61 — 2026-11-05
+
+* **Version scheme:** from this build, versions are `0.1.0-build.N` and release tags are `v0.1.0-build.N`, as the maintainer chose. Builds 1–60 keep their `0.1.0-dev.N` names in this log. See the [map](docs/RELEASE-AND-VERSIONING-MAP.md#tag-and-version-form).
+* **Default look (specification §4):** with no style, every profile now renders black ink on white. This covers the P0 default style and the P1–P3 SVG renderers.
+* **Presets:** the previous cream-on-black concept look is a named preset, `ckey_style_preset_fill(style, CKEY_PRESET_CONCEPT)`. The CLI's `--preset concept` uses it.
+* **Mac renderer:** defaults to black on white. Its colour swap for P1–P3 now goes through placeholders, so a black background cannot be repainted as ink.
+* No format changes. Site hashes are unchanged; only SVG colours changed.
+* Added `docs/adoption-and-telemetry.md`, the normative telemetry definition:
+  * modes 0/1/2 and what switching between them does;
+  * what counts as a scan session;
+  * the batch schema, version 1;
+  * the openckey.org service's obligations.
+
 ## 0.1.0-dev.60 — 2026-11-05
 
 * Cleaned up `CHANGELOG.md`:

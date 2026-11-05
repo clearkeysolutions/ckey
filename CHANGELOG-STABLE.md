@@ -9,11 +9,11 @@ This log lists the releases tagged on the `Stable-Release` branch, newest first.
 Copy this block to the top of the list for each release, and fill it in.
 
 ```markdown
-### CKey 0.1.0-dev.N — YYYY-MM-DD
+### CKey 0.1.0-build.N — YYYY-MM-DD
 
-* **Tag:** `v0.1.0-dev.N` (commit `abcdef0`)
-* **Status:** supported  <!-- or: Deprecated YYYY-MM-DD, replaced by CKey 0.1.0-dev.M, because … -->
-* **Builds included:** dev.A to dev.N (see CHANGELOG.md)
+* **Tag:** `v0.1.0-build.N` (commit `abcdef0`)
+* **Status:** supported  <!-- or: Deprecated YYYY-MM-DD, replaced by CKey 0.1.0-build.M, because … -->
+* **Builds included:** build.A to build.N (see CHANGELOG.md)
 * **Formats emitted:** P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0
 * **Formats read:** the emitted formats, plus the legacy formats listed in the map
 * **C ABI:** 3

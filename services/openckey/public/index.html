@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Make a CKey optical code from text or a link, in your browser.">
+<title>CKey renderer</title>
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+<script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>CKey renderer</h1>
+    <p class="sub">Type text or a link and get a CKey symbol. Everything is drawn in your browser; nothing you type is sent to the server.</p>
+  </div>
+</header>
+
+<main class="wrap layout">
+  <form id="controls" class="panel" autocomplete="off" novalidate>
+    <div class="field">
+      <label for="payload">Text or URL</label>
+      <textarea id="payload" name="payload" rows="4" spellcheck="false" aria-describedby="payload-meta convention">https://openckey.org</textarea>
+      <p id="payload-meta" class="meta" aria-live="polite"></p>
+      <p id="convention" class="hint" aria-live="polite"></p>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="version">Profile 0 version</label>
+        <select id="version" name="version"></select>
+      </div>
+      <div class="field">
+        <label for="level">Error correction</label>
+        <select id="level" name="level">
+          <option value="L">L (low)</option>
+          <option value="M" selected>M (medium)</option>
+          <option value="Q">Q (quartile)</option>
+          <option value="H">H (high)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="layout">Layout</label>
+        <select id="layout" name="layout">
+          <option value="standard" selected>Standard</option>
+          <option value="print">Print</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="size">Size (px)</label>
+        <input id="size" name="size" type="number" inputmode="numeric" min="64" max="4096" step="1" value="512">
+      </div>
+    </div>
+
+    <div class="field check">
+      <input id="transparent" name="transparent" type="checkbox">
+      <label for="transparent">Transparent background</label>
+    </div>
+
+    <div class="actions">
+      <button type="button" id="dl-png" disabled>Download PNG</button>
+      <button type="button" id="dl-svg" disabled>Download SVG</button>
+    </div>
+  </form>
+
+  <section class="panel preview" aria-labelledby="preview-title">
+    <h2 id="preview-title" class="visually-hidden">Preview</h2>
+    <div id="stage" class="stage">
+      <canvas id="canvas" width="512" height="512" role="img" aria-label="CKey symbol preview"></canvas>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">Loading the renderer…</p>
+    <noscript><p class="status error">The renderer needs JavaScript and WebAssembly.</p></noscript>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p>CKey is an open optical code. Telemetry figures and short links on openckey.org follow the
+  project's published privacy rules.</p>
+</footer>
+</body>
+</html>

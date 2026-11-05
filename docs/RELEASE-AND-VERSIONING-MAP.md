@@ -6,7 +6,7 @@ This map shows how CKey's version numbers relate to one another, which build int
 
 | Number | Form | Where it lives | Changes when |
 |---|---|---|---|
-| **Software version** | `0.1.0-dev.N` | `VERSION`, `CKEY_SOFTWARE_VERSION`, `CHANGELOG.md`, `CONTEXT.md`, `tests/vectors/locator-v14.json` | Every commit. `tools/check_version.py` fails CI if these disagree. |
+| **Software version** | `0.1.0-build.N` (`0.1.0-dev.N` up to build 60) | `VERSION`, `CKEY_SOFTWARE_VERSION`, `CHANGELOG.md`, `CONTEXT.md`, `tests/vectors/locator-v14.json` | Every commit. `tools/check_version.py` fails CI if these disagree. |
 | **Format version** | `0.N.0`, written into the symbol as format byte `N` | `spec/CKey-Format-v0.N.0.md`, `CKEY_*FORMAT_VERSION` in `include/ckey/ckey.h` | Any change to the bytes or geometry a reader must understand. Each change gets a new number. Numbers are never reused. |
 | **Profile** | profile byte `00`–`03` | The frame header | A new symbol family is added. Profile 0.1 is a layout of Profile 0 (format byte `1C`), not a separate profile byte. |
 | **C ABI version** | integer | `CKEY_ABI_VERSION` and the `abi_version` field of every public struct | A public struct or function signature changes incompatibly. Additive functions do not bump it. |
@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-dev.60**, C ABI **3**.
+Build **0.1.0-build.61**, C ABI **3**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -84,7 +84,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| dev.60 | (this commit) | 2026-11-05 | Changelogs, repository README and the release and versioning map |
+| build.61 | (this commit) | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
+| dev.60 | `817e365` | 2026-11-05 | Changelogs, repository README and the release and versioning map |
 | dev.59 | `58f0066` | 2026-11-05 | Add rendering/SDK/telemetry specification, status map, branch guide |
 | dev.58 | `8d5a42a` | 2026-11-04 | Add Profile 0.1 print-robust layout and print output |
 | dev.57 | `a3cc66c` | 2026-11-04 | Add the Profile 0 design system |
@@ -131,7 +132,7 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 ```mermaid
 flowchart LR
-  S["scratch<br/>maintainer only<br/>every build 0.1.0-dev.N"] -->|promote reviewed builds| R["Stable-Release<br/>maintainer push, anyone may fork<br/>tagged releases"]
+  S["scratch<br/>maintainer only<br/>every build 0.1.0-build.N"] -->|promote reviewed builds| R["Stable-Release<br/>maintainer push, anyone may fork<br/>tagged releases"]
   R -->|fork or branch| C["community<br/>anyone<br/>unstable"]
   C -.->|maintainer picks changes| S
 ```
@@ -146,10 +147,10 @@ Community changes reach a release only through `scratch`. The maintainer brings 
 
 ### Cutting a release
 
-1. On `scratch`, pass CI and `tools/check_version.py` at the build being released, for example dev.60.
+1. On `scratch`, pass CI and `tools/check_version.py` at the build being released, for example build.61.
 2. Fast-forward or merge `Stable-Release` to that commit.
-3. Tag the commit `v0.1.0-dev.60`. Tags are immutable: never move, delete or reuse one.
-4. Create a GitHub Release from the tag. Its title is the release name, for example `CKey 0.1.0-dev.60`.
+3. Tag the commit `v0.1.0-build.61`. Tags are immutable: never move, delete or reuse one.
+4. Create a GitHub Release from the tag. Its title is the release name, for example `CKey 0.1.0-build.61`.
 5. Add an entry to the top of `CHANGELOG-STABLE.md` with:
    - the tag;
    - the formats the release emits and the formats it reads;
@@ -160,7 +161,7 @@ Community changes reach a release only through `scratch`. The maintainer brings 
 
 ### Deprecating a release
 
-1. Retitle the GitHub Release `Deprecated - {release name}`, for example `Deprecated - CKey 0.1.0-dev.60`.
+1. Retitle the GitHub Release `Deprecated - {release name}`, for example `Deprecated - CKey 0.1.0-build.61`.
 2. Mark it deprecated in the release table and in `CHANGELOG-STABLE.md`. Name the release that replaces it and give the reason.
 3. Keep the tag and its source. Deprecated means "do not use for new work", not deleted.
 
@@ -172,4 +173,11 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 |---|---|---|---|---|---|
 | none yet | | | | | |
 
-The public tag form is still open. Specification §8.1 lists `v0.1.0-dev.N` and `v0.1.0+build.N` as options. Until it is decided, tags use `v` + `VERSION`.
+### Tag and version form
+
+Decided at build 61: versions are `0.1.0-build.N`, and tags are `v0.1.0-build.N`.
+
+- **Valid SemVer:** `build.N` is a prerelease, so every package registry accepts it.
+- **Ordering:** builds sort numerically (`build.9` < `build.10`), and all of them sort before a final `0.1.0`.
+- **Build count kept:** it stays visible, as specification §8.1 asks.
+- **Old builds:** builds 1–60 were named `0.1.0-dev.N`. SemVer would sort `build.61` before `dev.60`, because it compares the labels alphabetically. None of the dev builds was published or tagged, so no registry ever has to compare the two. The map keeps the old names for history.
