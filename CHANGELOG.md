@@ -10,6 +10,34 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.63 — 2026-11-05
+
+* **Separate libraries (spec §2.1, §6, §9.2; acceptance criterion 8):** the core is now `ckey_codec`, `ckey_scan` (needs only the codec), `ckey_render` and the optional `ckey_telemetry`. `ckey_core` remains as the union of the first three.
+  * A scanner app links no renderer and no telemetry. `ckey_optical_image_decode` now links `ckey_scan` alone, so CI enforces this.
+  * The source is split into shared internals plus one file of public functions per library. `src/ckey.cpp` stays as the amalgamation for the Xcode projects. See `src/README.md`.
+  * `-DCKEY_BUILD_TELEMETRY=OFF` leaves telemetry out entirely.
+* **Telemetry core (spec §9; `docs/adoption-and-telemetry.md`):** `include/ckey/telemetry.h`.
+  * **Modes:** 0, 1 (the default) and 2. Any other value returns `CKEY_INVALID_ARGUMENT` and leaves the mode unchanged. Mode switches follow the documented table: switching to 0 purges everything; 1 → 2 drops the unsent delta and ignores any batch in flight.
+  * **Sessions:** a session starts when scanning starts, succeeds at the first decode, and fails when scanning ends or after a 30 s timeout. Frames are counted separately.
+  * **Data:** counts by profile, and histograms of time to decode and per-frame processing time.
+  * **Batches:**
+    * the exact schema-1 JSON, with per-batch clamping to the schema's limits;
+    * an hourly send cadence;
+    * result handling that drops a batch on 2xx, 400 or 413, and keeps it on 429, 5xx or a network error.
+  * **State:** optional export and import, strictly parsed.
+  * **No networking:** the core never sends; SDK wrappers post to `CKEY_TELEMETRY_ENDPOINT` (`https://openckey.org/api/telemetry/v1/batch`). It uses no clock, heap or exceptions, and is thread-safe.
+  * **Tests:** new test `ckey_telemetry`, clean under AddressSanitizer, UBSan and ThreadSanitizer.
+* **openckey.org service (`services/openckey/`):** a Node 22 service with no dependencies. Run `npm test`; 75 tests pass.
+  * **Telemetry ingestion:**
+    * strict parsing, rejecting unknown fields, non-integer literals, duplicate keys and over-size bodies;
+    * rate limits keyed by a daily-salted HMAC of the client IP, kept in memory only;
+    * daily aggregates only, kept for 400 days;
+    * a summary labelled "not total usage".
+  * **Short links (`/r/:id`):** created by an admin. The interstitial shows the destination host first; `?go=1` redirects directly. Counts are opt-in, per link and per day.
+  * **Hosted text pages (`/t/:id`):** escaped HTML under a strict CSP, plus `.txt`.
+  * **Web renderer page (`/`):** uses the web SDK when it is built.
+  * No IPs, bodies or URLs are logged.
+
 ## 0.1.0-build.62 — 2026-11-05
 
 * **Canonical geometry (spec §2.1):** `ckey_scalable_geometry` returns a Profile 0 / 0.1 symbol as a list of primitives in canonical units, in painter's order. The primitives are rect, rect outline, circle, diamond, line, arc and logo, each tagged with a layer and a paint. Every native backend draws this list.

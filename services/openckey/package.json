@@ -1,0 +1,14 @@
+{
+  "name": "openckey-service",
+  "private": true,
+  "description": "openckey.org: CKey telemetry ingestion, short links, hosted text and the web renderer page.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "test": "node --test --no-warnings"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
