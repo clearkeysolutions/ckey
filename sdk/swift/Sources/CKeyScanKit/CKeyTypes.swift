@@ -17,6 +17,10 @@ public struct CKeyError: Error, Equatable, CustomStringConvertible {
         /// A configuration value is out of range (for example a telemetry
         /// mode other than 0, 1 or 2).
         case invalidConfiguration = 101
+        /// Camera access was denied or restricted by the user or by policy.
+        case cameraAccessDenied = 102
+        /// No usable camera, or it could not be configured or started.
+        case cameraUnavailable = 103
     }
 
     public let code: Code

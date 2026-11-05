@@ -10,6 +10,17 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.74 — 2026-11-05
+
+Swift SDK fixes, found while building the Open CKey Scanner iPhone app:
+
+* **`CKeyPayload.classify`, `tel:` and `sms:`:** the number now ends at the first `;` or `?`, so URI parameters are never dialled as digits. Previously `tel:+15550100;ext=7` became `+155501007`.
+* **`CKeyPayload.text(from:)` and `CKeyResult.text`:** only C0 controls other than tab, LF and CR, plus DEL and C1, make a payload binary, as in the web reader. Emoji ZWJ sequences, soft hyphens, bidi marks and BOMs are text.
+* **vCards** must begin with a `BEGIN:VCARD` line and end with an `END:VCARD` line, as in the web reader.
+* **`CKeyCameraScanner(observer:resolution:)`:** new `.uhd4K` (default) and `.hd1080` resolutions. `.hd1080` suits memory-limited camera extensions.
+* **Camera errors:** reported as `.cameraAccessDenied` or `.cameraUnavailable` instead of `.invalidConfiguration`.
+* XCTests added for each fix. They have not been compiled here; `sdk-swift.yml` runs them on macOS.
+
 ## 0.1.0-build.73 — 2026-11-05
 
 * **The photo sweep, not fixed rules, decides certification.** Custom backgrounds were refused by the old 3:1 rule even when they scanned well; concept on slate `#555`, for example, has a 2.9:1 accent and is graded "good" by the sweep. Now:

@@ -1,6 +1,6 @@
 # Implementation status against the Rendering, SDK, Distribution & Telemetry Specification
 
-This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.73`, on branch `scratch`.
+This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.74`, on branch `scratch`.
 
 **Status key:**
 

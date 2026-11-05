@@ -34,8 +34,13 @@ public enum CKeyPayload {
     /// `nil` (show the payload as binary, for example as hex).
     public static func text(from bytes: Data) -> String? {
         guard !bytes.isEmpty, let text = String(data: bytes, encoding: .utf8) else { return nil }
+        // Only C0 controls (except tab, LF, CR), DEL and C1 controls make a
+        // payload binary, as the web reader does. Format characters (ZWJ in
+        // emoji sequences, soft hyphens, bidi marks, BOM) are ordinary text.
         let printable = text.unicodeScalars.allSatisfy { scalar in
-            scalar == "\n" || scalar == "\r" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
+            let v = scalar.value
+            if scalar == "\n" || scalar == "\r" || scalar == "\t" { return true }
+            return !(v < 0x20 || v == 0x7F || (0x80...0x9F).contains(v))
         }
         return printable ? text : nil
     }
@@ -49,7 +54,7 @@ public enum CKeyPayload {
     /// text. Schemes match case-insensitively; surrounding whitespace is ignored.
     public static func classify(_ text: String) -> CKeyPayloadAction? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.uppercased().hasPrefix("BEGIN:VCARD") { return contactCard(trimmed) }
+        if trimmed.uppercased().hasPrefix("BEGIN:VCARD") { return contactCard(trimmed) }  // vCard 3.0/4.0, RFC 6350
         guard let colon = trimmed.firstIndex(of: ":") else { return nil }
         let scheme = trimmed[..<colon].lowercased()
         let rest = String(trimmed[trimmed.index(after: colon)...])
@@ -63,7 +68,10 @@ public enum CKeyPayload {
             guard address.contains("@"), let url = URL(string: trimmed) else { return nil }
             return .email(url, address: address)
         case "tel", "sms":
-            let number = beforeQuery.filter { $0.isASCII && ($0.isNumber || $0 == "+") }
+            // The number ends at the first URI parameter or query (";ext=", "?body="),
+            // so parameters are never dialled as digits.
+            let numberPart = String(rest.split(whereSeparator: { $0 == "?" || $0 == ";" }).first ?? "")
+            let number = numberPart.filter { $0.isASCII && ($0.isNumber || $0 == "+") }
             guard number.filter(\.isNumber).count >= 3, let dial = URL(string: "\(scheme):\(number)") else { return nil }
             if scheme == "tel" { return .call(dial, number: number) }
             return .message(URL(string: trimmed) ?? dial, number: number)
@@ -100,7 +108,9 @@ public enum CKeyPayload {
     }
 
     private static func contactCard(_ card: String) -> CKeyPayloadAction? {
-        guard card.uppercased().contains("END:VCARD") else { return nil }
+        // A complete card: BEGIN:VCARD on its own line and END:VCARD as the last line.
+        let lines = card.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
+        guard lines.count >= 2, lines.first == "BEGIN:VCARD", lines.last == "END:VCARD" else { return nil }
         let name = card.split(whereSeparator: \.isNewline)
             .first { $0.uppercased().hasPrefix("FN:") || $0.uppercased().hasPrefix("FN;") }
             .flatMap { line in line.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) }?

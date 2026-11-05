@@ -44,10 +44,19 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     // Main-thread state.
     private var sessionOpen = false
 
-    /// - Parameter observer: optional session observer (for example your own
-    ///   metrics); held strongly. `nil` for none.
-    public init(observer: CKeyScanObserver?) {
+    /// Capture resolution. `.uhd4K` reads the densest symbols; `.hd1080` uses
+    /// far less memory (camera extensions, older devices).
+    public enum Resolution: Sendable { case uhd4K, hd1080 }
+    private let resolution: Resolution
+
+    /// - Parameters:
+    ///   - observer: optional session observer (for example your own metrics);
+    ///     held strongly. `nil` for none.
+    ///   - resolution: preferred capture resolution; falls back to the best
+    ///     the device supports.
+    public init(observer: CKeyScanObserver?, resolution: Resolution = .uhd4K) {
         self.observer = observer
+        self.resolution = resolution
         super.init()
     }
 
@@ -66,11 +75,11 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if allowed { self.run() } else { self.fail("Camera access was denied.") }
+                    if allowed { self.run() } else { self.fail("Camera access was denied.", .cameraAccessDenied) }
                 }
             }
         default:
-            fail("Camera access is not authorized.")
+            fail("Camera access is not authorized.", .cameraAccessDenied)
         }
     }
 
@@ -101,8 +110,8 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         observer?.scanSessionDidEnd()
     }
 
-    private func fail(_ message: String) {
-        DispatchQueue.main.async { self.onError?(CKeyError(.invalidConfiguration, message)) }
+    private func fail(_ message: String, _ code: CKeyError.Code = .cameraUnavailable) {
+        DispatchQueue.main.async { self.onError?(CKeyError(code, message)) }
     }
 
     private func run() {
@@ -124,8 +133,8 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     private func configure() -> Bool {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
-        // Dense symbols need many camera pixels per unit: prefer 4K.
-        if session.canSetSessionPreset(.hd4K3840x2160) {
+        // Dense symbols need many camera pixels per unit: prefer 4K unless asked otherwise.
+        if resolution == .uhd4K, session.canSetSessionPreset(.hd4K3840x2160) {
             session.sessionPreset = .hd4K3840x2160
         } else if session.canSetSessionPreset(.hd1920x1080) {
             session.sessionPreset = .hd1920x1080

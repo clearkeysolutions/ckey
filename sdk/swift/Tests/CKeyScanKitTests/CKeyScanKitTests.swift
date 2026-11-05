@@ -82,3 +82,27 @@ final class CKeyDecoderTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(CKeyCoreInfo.abiVersion, 4)
     }
 }
+
+final class CKeyPayloadEdgeCaseTests: XCTestCase {
+    func testPhoneParametersAreNeverDialled() {
+        guard case .call(let url, let number)? = CKeyPayload.classify("tel:+15550100;ext=7") else { return XCTFail("tel") }
+        XCTAssertEqual(number, "+15550100")
+        XCTAssertEqual(url.absoluteString, "tel:+15550100")
+        guard case .message(_, let sms)? = CKeyPayload.classify("sms:+15550100?body=Hi") else { return XCTFail("sms") }
+        XCTAssertEqual(sms, "+15550100")
+    }
+
+    func testFormatCharactersAreText() {
+        // Family emoji (ZWJ sequence), a soft hyphen and a BOM are text, not binary.
+        let text = "👨‍👩‍👧 co\u{00AD}operate \u{FEFF}hello"
+        XCTAssertEqual(CKeyPayload.text(from: Data(text.utf8)), text)
+        XCTAssertNil(CKeyPayload.text(from: Data([0x41, 0x07, 0x42])))  // BEL is a control character
+        XCTAssertNil(CKeyPayload.text(from: Data("a\u{0085}b".utf8)))   // C1 control
+    }
+
+    func testVCardMustBeComplete() {
+        XCTAssertNotNil(CKeyPayload.classify("BEGIN:VCARD\nVERSION:4.0\nFN:Ada\nEND:VCARD"))
+        XCTAssertNil(CKeyPayload.classify("BEGIN:VCARD\nFN:Ada\nEND:VCARD trailing words"))
+        XCTAssertNil(CKeyPayload.classify("BEGIN:VCARDS and more END:VCARD"))
+    }
+}
