@@ -1291,6 +1291,16 @@ double logo_load(const ScalableLayout &L, int level, double radius) {
     return worst;
 }
 
+// The default style (spec §4: black on white). Shared so that libraries
+// other than ckey_render (the .ckey reader in ckey_codec) need not link it.
+void fill_default_style(ckey_style &st) {
+    std::memset(&st, 0, sizeof(st));
+    st.background = st.background_edge = {0xff, 0xff, 0xff};
+    st.ink = st.ink_shade = {0, 0, 0};
+    st.modules = CKEY_MODULE_ROUNDED; st.rings = CKEY_RING_JOINED; st.rays = CKEY_RAY_ROUND;
+    st.policy = CKEY_POLICY_STRICT;
+}
+
 // Values a renderer cannot draw at all, whatever the policy.
 std::string structural_problem(const ScalableLayout &L, const ckey_style &st) {
     const auto finite01 = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };

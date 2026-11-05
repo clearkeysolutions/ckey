@@ -11,6 +11,7 @@ context = (root / "CONTEXT.md").read_text()
 changelog = (root / "CHANGELOG.md").read_text()
 readme = (root / "README.md").read_text()
 fixture = json.loads((root / "tests/vectors/locator-v14.json").read_text())
+support = json.loads((root / "docs/support-matrix.json").read_text())
 format_doc = root / "spec/CKey-Format-v0.14.0.md"
 format_text = format_doc.read_text()
 text_format_text = (root / "spec/CKey-Format-v0.25.0.md").read_text()
@@ -23,6 +24,7 @@ software_checks = {
     "living context": re.search(r"Current software version:\*\* `([^`]+)`", context).group(1),
     "interoperability fixture": fixture["software_version"],
     "changelog head": re.search(r"^## ([^ ]+)", changelog, re.MULTILINE).group(1),
+    "support matrix": support["current_build"],
 }
 stale = {name: value for name, value in software_checks.items() if value != version}
 format_checks = {
@@ -40,6 +42,7 @@ format_checks = {
     "scalable format specification": "decimal 27" in scalable_format_text and "profile byte `0x00`" in scalable_format_text,
     "public scalable format byte": re.search(r"#define CKEY_SCALABLE_FORMAT_VERSION (\d+)u", header).group(1) == "27",
     "living context scalable format": "0.27.0" in context,
+    "support matrix ABI": support["abi"] == int(re.search(r"#define CKEY_ABI_VERSION (\d+)u", header).group(1)),
     "release map and branch changelogs": all((root / f).exists() and f in readme for f in ("docs/RELEASE-AND-VERSIONING-MAP.md", "CHANGELOG-STABLE.md", "CHANGELOG-COMMUNITY.md")),
     "print format specification": "decimal 28" in print_format_text and "profile byte `0x00`" in print_format_text,
     "public print format byte": re.search(r"#define CKEY_SCALABLE_PRINT_FORMAT_VERSION (\d+)u", header).group(1) == "28",

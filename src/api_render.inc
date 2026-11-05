@@ -164,13 +164,7 @@ ckey_status ckey_render_extended_svg(const ckey_extended_symbol *s, uint32_t sca
     return CKEY_OK;
 }
 
-void ckey_style_default(ckey_style *st) {
-    if (!st) return;
-    std::memset(st, 0, sizeof(*st));
-    st->background = st->background_edge = {0xff, 0xff, 0xff};  // spec §4: black on white by default
-    st->ink = st->ink_shade = {0, 0, 0};
-    st->modules = CKEY_MODULE_ROUNDED; st->rings = CKEY_RING_JOINED; st->rays = CKEY_RAY_ROUND;
-}
+void ckey_style_default(ckey_style *st) { if (st) fill_default_style(*st); }
 
 ckey_status ckey_style_preset_fill(ckey_style *st, ckey_style_preset preset) {
     if (!st || (preset != CKEY_PRESET_PLAIN && preset != CKEY_PRESET_CONCEPT)) return CKEY_INVALID_ARGUMENT;

@@ -1,0 +1,12 @@
+{
+  "core": "0.1.0-build.64", "synthetic": true, "frame": [960, 720], "trials": 4,
+  "results": [
+    {"symbology": "CKey P0 (M)", "payload_bytes": 33, "condition": "clean", "min_side_px_90": 140, "bytes_per_kpx2": 1.68367, "latency_ms_p50": 25.6515, "latency_ms_p90": 36.2625, "latency_ms_p99": 148.083},
+    {"symbology": "CKey P0 (M)", "payload_bytes": 33, "condition": "camera", "min_side_px_90": 200, "bytes_per_kpx2": 0.825, "latency_ms_p50": 28.1225, "latency_ms_p90": 44.8902, "latency_ms_p99": 69.9622},
+    {"symbology": "CKey P0 (M)", "payload_bytes": 33, "condition": "hard", "min_side_px_90": -1, "bytes_per_kpx2": 0, "latency_ms_p50": 36.5853, "latency_ms_p90": 58.3517, "latency_ms_p99": 85.0852},
+    {"symbology": "CKey P0 (M)", "payload_bytes": 120, "condition": "clean", "min_side_px_90": 140, "bytes_per_kpx2": 6.12245, "latency_ms_p50": 27.6477, "latency_ms_p90": 30.2573, "latency_ms_p99": 35.707},
+    {"symbology": "CKey P0 (M)", "payload_bytes": 120, "condition": "camera", "min_side_px_90": 280, "bytes_per_kpx2": 1.53061, "latency_ms_p50": 29.6283, "latency_ms_p90": 45.562, "latency_ms_p99": 55.2506},
+    {"symbology": "CKey P0 (M)", "payload_bytes": 120, "condition": "hard", "min_side_px_90": -1, "bytes_per_kpx2": 0, "latency_ms_p50": 39.6167, "latency_ms_p90": 60.1141, "latency_ms_p99": 70.2764},
+    {"symbology": "CKey P0 (M)", "false_positive_frames": 60, "false_positives": 0}
+  ]
+}

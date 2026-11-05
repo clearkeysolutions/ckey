@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.64**, C ABI **4**.
+Build **0.1.0-build.65**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -85,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.64 | (this commit) | 2026-11-05 | Style policies and optical certification; ABI 4 |
+| build.65 | (this commit) | 2026-11-05 | `.ckey` interchange v1, conformance suite, support matrix, benchmark harness |
+| build.64 | `83f972d` | 2026-11-05 | Style policies and optical certification; ABI 4 |
 | build.63 | `d2acc2b` | 2026-11-05 | Core split into codec/scan/render/telemetry libraries; telemetry core; openckey.org service |
 | build.62 | `ecfd29a` | 2026-11-05 | Canonical geometry API; direct raster, PNG and PDF backends |
 | build.61 | `ad5e295` | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |

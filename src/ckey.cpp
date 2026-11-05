@@ -4,6 +4,7 @@
 // ckey_render libraries from the same parts (see src/README.md).
 #include "core_internal.inc"
 #include "api_codec.inc"
+#include "api_interchange.inc"
 #include "api_scan.inc"
 #include "api_render.inc"
 #include "api_certify.inc"

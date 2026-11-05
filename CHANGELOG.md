@@ -10,6 +10,31 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.65 — 2026-11-05
+
+* **`.ckey` interchange v1 (spec §2.5; `spec/CKey-Interchange-v1.md`):** `ckey_write_interchange` and `ckey_read_interchange` store a Profile 0 or 0.1 codeword, an optional style and an optional logo reference.
+  * **Layout:** a 12-byte header, type-length-value records, and a closing CRC-32C. Bit 15 marks a record as optional.
+  * **Strict, bounded reader:** at most 64 KiB, all reserved bytes must be zero, and an unknown required record is rejected. The codeword must decode and must be the canonical encoding of its payload.
+  * The file is optional: rendering never needs it. The payload is stored in clear.
+  * **Library:** the reader is in `ckey_codec` and needs no renderer.
+  * **Tests:** new test `ckey_interchange` covers round trips, the rejection cases, and 20,000 mutated files, clean under AddressSanitizer and UBSan.
+* **Conformance suite (spec §6; acceptance criterion 1):** `tools/conformance/ckey_conformance.cpp` and `tests/vectors/conformance-v1.json`.
+  * **19 vectors:** P0 and P0.1 across versions and levels, an empty payload, a vCard, and P1, P2 and P3 legacy encodings.
+  * **Expected outputs:** the codeword, an FNV-1a 64 hash of the canonical geometry with coordinates rounded to 10⁻⁶, a `.ckey` file hash, and a check that a raster decodes. Pixels are checked by behaviour, not by hash.
+  * **Verified identical** under gcc -O0 and -O2, and under clang -O2 with `-ffast-math`.
+  * **New CTest `ckey_conformance_vectors`.** SDKs load the same JSON; see `tools/conformance/README.md`.
+* **Support matrix (spec §8.2):** machine-readable `docs/support-matrix.json` with the current build, ABI, tag form, formats and their status, interchange and telemetry schema versions, packages and deprecations. `check_version.py` checks it.
+* **Benchmark harness (spec §5, §6):** `ckey-bench` (`tools/optical-benchmarks/`).
+  * **Pipeline:** generate, degrade (clutter, rotation, keystone, glare, defocus, noise), then decode with the full reader pipeline.
+  * **Measures:**
+    * recovery;
+    * corrected bytes;
+    * latency p50, p90 and p99;
+    * the smallest side for 90% success, and bytes per 1,000 px² at equal area;
+    * false positives.
+  * **QR Code and Data Matrix** comparison through zxing-cpp with `-DCKEY_BENCH_ZXING=ON`.
+  * A quick, CKey-only synthetic run is committed in `docs/benchmarks/`. It found 0 false positives in 60 clutter frames. Results are explicitly synthetic.
+
 ## 0.1.0-build.64 — 2026-11-05
 
 * **ABI 4:** `ckey_style` gains `policy`. Code that fills styles with `ckey_style_default` or `ckey_style_preset_fill` needs no other change.

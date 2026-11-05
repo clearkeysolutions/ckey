@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "description": "Machine-readable CKey version support matrix (specification §8.2). Human-readable form: docs/RELEASE-AND-VERSIONING-MAP.md.",
+  "current_build": "0.1.0-build.65",
+  "abi": 4,
+  "tag_format": "v0.1.0-build.N",
+  "releases": [],
+  "formats": [
+    {"format": "0.27.0", "byte": "0x1B", "profile": "0", "status": "current", "emitted": true, "decoded": true},
+    {"format": "0.28.0", "byte": "0x1C", "profile": "0.1", "status": "current", "emitted": true, "decoded": true},
+    {"format": "0.14.0", "byte": "0x0E", "profile": "1", "status": "current", "emitted": true, "decoded": true},
+    {"format": "0.25.0", "byte": "0x19", "profile": "2", "status": "current", "emitted": true, "decoded": true},
+    {"format": "0.26.0", "byte": "0x1A", "profile": "3", "status": "current", "emitted": true, "decoded": true},
+    {"format": "0.8.0", "byte": "0x08", "profile": "1", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.11.0", "byte": "0x0B", "profile": "1", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.12.0", "byte": "0x0C", "profile": "1", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.13.0", "byte": "0x0D", "profile": "1", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.9.0", "byte": "0x09", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.15.0", "byte": "0x0F", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.18.0", "byte": "0x12", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.19.0", "byte": "0x13", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.22.0", "byte": "0x16", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.23.0", "byte": "0x17", "profile": "2", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.10.0", "byte": "0x0A", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.16.0", "byte": "0x10", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.17.0", "byte": "0x11", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.20.0", "byte": "0x14", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.21.0", "byte": "0x15", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"},
+    {"format": "0.24.0", "byte": "0x18", "profile": "3", "status": "legacy", "emitted": false, "decoded": "codeword"}
+  ],
+  "interchange": [{"name": ".ckey", "version": 1, "status": "draft", "spec": "spec/CKey-Interchange-v1.md"}],
+  "telemetry_schema": [{"version": 1, "endpoint": "https://openckey.org/api/telemetry/v1/batch", "spec": "docs/adoption-and-telemetry.md"}],
+  "packages": [
+    {"ecosystem": "c/c++", "name": "CKey (CMake package)", "status": "source", "published": false},
+    {"ecosystem": "swift", "name": "CKey", "status": "source", "published": false},
+    {"ecosystem": "npm", "name": "ckey", "status": "source", "published": false},
+    {"ecosystem": "maven", "name": "org.openckey:ckey", "status": "source", "published": false},
+    {"ecosystem": "nuget", "name": "CKey", "status": "source", "published": false},
+    {"ecosystem": "homebrew", "name": "ckey", "status": "source", "published": false}
+  ],
+  "deprecations": []
+}

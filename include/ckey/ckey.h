@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.64"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.65"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -537,6 +537,28 @@ CKEY_API ckey_status ckey_certify_scalable_style(const ckey_scalable_symbol *sym
                                                  uint32_t transparent, const ckey_backdrop *backdrop,
                                                  const ckey_scan_model *model, ckey_style *out_style,
                                                  ckey_certification *out);
+
+/*
+ * .ckey interchange (specification §2.5; spec/CKey-Interchange-v1.md). A
+ * compact, optional container for a Profile 0 symbol and its style; it is
+ * never needed to render or display one. The codeword carries the payload
+ * in clear, so a .ckey file is exactly as sensitive as its payload.
+ *
+ * ckey_write_interchange: style may be NULL. Call with out NULL for the size.
+ * ckey_read_interchange: strict, bounded parser. It rejects anything
+ * malformed, oversized (CKEY_INTERCHANGE_MAX_BYTES), failing its CRC-32C,
+ * whose codeword does not decode, or with an unknown required record.
+ * out_style may be NULL. A logo reference is copied to logo_href (may be
+ * NULL; NUL-terminated, at most logo_cap bytes) and out_style->logo_href
+ * points at it; without a buffer the logo is dropped.
+ */
+#define CKEY_INTERCHANGE_VERSION 1u
+#define CKEY_INTERCHANGE_MAX_BYTES 65536u
+CKEY_API ckey_status ckey_write_interchange(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                            uint8_t *out, size_t out_capacity, size_t *out_required);
+CKEY_API ckey_status ckey_read_interchange(const uint8_t *data, size_t length, ckey_scalable_symbol *out_symbol,
+                                           ckey_style *out_style, char *logo_href, size_t logo_cap,
+                                           ckey_diagnostics *out_diagnostics);
 
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
