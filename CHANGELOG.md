@@ -1,3 +1,16 @@
+## 0.1.0-dev.59 — 2026-11-05
+
+* Work moves to the maintainer-only `scratch` branch. It was created from `main` at `8d5a42a`; `community` and `Stable-Release` are being set up by the maintainer.
+* Added the consolidated **Rendering, SDK, Distribution, Adoption & Telemetry Specification** (`docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md`), as written by the maintainer.
+* Added `docs/IMPLEMENTATION-STATUS.md`, which maps every section of that specification to the current code. It also flags five conflicts:
+  * the print path rasterizes through SVG;
+  * there is no transparent output;
+  * the default palette is cream on black, not black on white;
+  * the style check certifies from WCAG contrast alone;
+  * the scanner and renderer ship as one library.
+* Added `docs/BRANCHES-AND-RELEASES.md` with the branch model and release rules. Releases are immutable tags on `Stable-Release`, and deprecated releases are retitled `Deprecated - {release name}`.
+* No code changes.
+
 ## 0.1.0-dev.58 — 2026-11-04
 
 * **Profile 0.1, a print-robust layout** (Format 0.28.0, byte `1C`).
