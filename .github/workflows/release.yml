@@ -62,8 +62,22 @@ jobs:
           name: ckey-${{ matrix.name }}
           path: ckey-*.tar.gz
 
+  # The SDK workflows, reused, build and test each release package.
+  sdk-web:
+    needs: verify
+    uses: ./.github/workflows/sdk-web.yml
+  sdk-android:
+    needs: verify
+    uses: ./.github/workflows/sdk-android.yml
+  sdk-dotnet:
+    needs: verify
+    uses: ./.github/workflows/sdk-dotnet.yml
+  sdk-swift:
+    needs: verify
+    uses: ./.github/workflows/sdk-swift.yml
+
   publish:
-    needs: [verify, build]
+    needs: [verify, build, sdk-web, sdk-android, sdk-dotnet, sdk-swift]
     runs-on: ubuntu-24.04
     permissions:
       contents: write        # create the draft release
@@ -73,8 +87,32 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/download-artifact@v4
         with:
+          pattern: ckey-*-x64
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ckey-macos-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ckey-npm
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: ckey-android-maven
+          path: maven
+      - name: Package downloads (Maven repository zip, Swift source zip)
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          (cd maven && zip -qr "../dist/ckey-android-maven-${version}.zip" .)
+          git archive --format=zip --prefix="ckey-swift-${version}/" HEAD Package.swift LICENSE src include sdk/swift > "dist/ckey-swift-${version}.zip"
+          ls -la dist
       - name: Source archive and Homebrew formula
         run: |
           tag="${GITHUB_REF_NAME}"

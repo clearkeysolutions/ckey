@@ -15,6 +15,7 @@ on:
       - "VERSION"
       - ".github/workflows/sdk-dotnet.yml"
   workflow_dispatch:
+  workflow_call:   # the release workflow builds release packages with this file
 permissions:
   contents: read
 # Maintainers: pin these actions to full commit SHAs (as ci.yml does) before relying on this workflow.

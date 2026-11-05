@@ -1,6 +1,6 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-build.69`
+**Current software version:** `0.1.0-build.70`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout)
 **Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases, none yet), CHANGELOG-COMMUNITY.md (community merges).
 **Context updated:** 2026-11-05
@@ -34,7 +34,7 @@ CKey is an independent, monochrome optical encoding standard that must work with
   * **Certification:** a modelled scan with the real decoder. A transparent symbol needs a backdrop to be certified.
   * **Telemetry:** modes 0/1/2, default 1. Endpoint `https://openckey.org/api/telemetry/v1/batch`. The core never does networking; SDKs send.
   * **SDKs:** Swift (`Package.swift`), npm `ckey`, Maven `org.openckey:ckey`, NuGet `CKey`. The Swift, wasm, Kotlin and C# builds are verified only in CI.
-  * **Service:** `services/openckey` (Node 22, no dependencies) provides telemetry ingestion, short links, text pages and the renderer page.
+  * **openckey.org:** operated from a separate, proprietary repository. It provides telemetry ingestion, `/text/{id}` and `/sq/{id}` destinations, the hosted renderer and package downloads. The prototype `services/openckey` is being retired from this repository.
 * RS parameters are primitive polynomial `0x11D`, primitive element 2, roots `α^0…α^50`, high-degree coefficient first, with parity appended. CRC-32C is integrity detection, separate from error correction.
 * Geometry is fixed at 29 × 29 for profile 1. The Grid, Ray, and Ring Keys are structural and reserved. The data sites alternate Cartesian and polar coordinate families; exact definitions live in the matching versioned format document. Format 0.14.0 uses one broad inboard arc per rounded corner, inside a continuous rounded-square border; each arc's mouth faces the central polar field. Only the top-left arc is split on its diagonal for orientation. The 6 × 6 corner envelopes are reserved to prevent finder/data collisions. Ring dots are a uniform 0.30 module diameter; the Ring Key arc has round ends and a four-slot visible length; data dial slots encode each bit using short and long rays; the codeword uses 51 parity bytes so 616 of 621 available sites carry RS-coded bits.
 * The C ABI now decodes 8-bit grayscale images when given a caller-supplied cyclic quadrilateral: it tries all corner starts/windings, rectifies a projective mapping, verifies Grid/Ray/Ring calibration evidence, samples the Cartesian and polar payload sites, normalizes light/dark polarity, and runs RS plus frame/CRC validation. It decodes committed browser-rendered captures and a 500×500 crop from the user's iPhone camera preview of a laptop display. Full-frame localization, lens-distortion correction, and live-device verification remain incomplete. No QR-parity or sub-200 ms end-to-end performance claim is made; the 2,048-byte profile is implemented but its physical-camera capacity is not characterized. Erasure decoding is not implemented.

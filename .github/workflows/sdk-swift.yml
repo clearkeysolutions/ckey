@@ -17,6 +17,7 @@ on:
       - "VERSION"
       - ".github/workflows/sdk-swift.yml"
   workflow_dispatch:
+  workflow_call:   # the release workflow builds release packages with this file
 permissions:
   contents: read
 jobs:

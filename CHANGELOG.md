@@ -10,6 +10,22 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.70 — 2026-11-05
+
+* **openckey.org is now a separate, proprietary site.** It provides:
+  * the browser renderer;
+  * package downloads;
+  * `/text/{id}` and `/sq/{id}` destinations;
+  * telemetry ingestion.
+  * README, implementation status and context now say so. The CI job for the prototype `services/openckey` is removed. The prototype itself is retired in the next build.
+* **Release workflow:** reuses the SDK workflows, which now accept `workflow_call`, to build and test each package, and attaches it to the draft release:
+  * the npm tarball;
+  * NuGet packages;
+  * a Maven repository zip for Android;
+  * a Swift source zip.
+  * These join the CLI archives, the source archive and the Homebrew formula, so openckey.org can host every package for download.
+* The `sdk-web` workflow also uploads the `npm pack` tarball.
+
 ## 0.1.0-build.69 — 2026-11-05
 
 * **Android SDK, Maven `org.openckey:ckey` (`sdk/android/`, spec §3 and §7):** AGP 8 and Kotlin. NDK CMake compiles the repository's own `src/` files with a JNI bridge that exports only the `Java_*` functions.

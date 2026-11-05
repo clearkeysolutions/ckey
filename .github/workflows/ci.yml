@@ -35,18 +35,6 @@ jobs:
           cmake --build "$RUNNER_TEMP/example"
           (cd "$RUNNER_TEMP/example" && ./render_and_scan)
 
-  service:
-    name: openckey.org service
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Test
-        working-directory: services/openckey
-        run: npm test
-
   benchmarks:
     name: optical benchmarks (synthetic, with QR/Data Matrix via zxing-cpp)
     runs-on: ubuntu-24.04

@@ -18,6 +18,7 @@ on:
       - 'VERSION'
       - '.github/workflows/sdk-web.yml'
   workflow_dispatch:
+  workflow_call:   # the release workflow builds release packages with this file
 permissions:
   contents: read
 defaults:
@@ -61,8 +62,13 @@ jobs:
         env:
           CKEY_REQUIRE_WASM: '1'
         run: npm test
-      - name: Package contents
-        run: npm pack --dry-run
+      - name: Package
+        run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckey-npm
+          path: sdk/web/ckey-*.tgz
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: ckey-web-dist

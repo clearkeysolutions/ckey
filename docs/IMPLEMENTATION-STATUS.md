@@ -1,6 +1,6 @@
 # Implementation status against the Rendering, SDK, Distribution & Telemetry Specification
 
-This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.69`, on branch `scratch`.
+This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.70`, on branch `scratch`.
 
 **Status key:**
 
@@ -81,7 +81,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | Modes 0 / 1 / 2; invalid values rejected | **Done** | `include/ckey/telemetry.h`, and every SDK. |
 | Local aggregate counters, no identifiers | **Done** | `docs/adoption-and-telemetry.md`. |
 | Session definition, batching, cadence, switching semantics | **Done** | Same document. |
-| Ingestion service with abuse controls, no IP retention | **Done** (code); **Open** (deployment) | `services/openckey`. It is to be deployed at openckey.org by the maintainer. |
+| Ingestion service with abuse controls, no IP retention | **Done** (code); **Open** (deployment) | Runs on openckey.org, which is a separate, proprietary site, not part of this repository. It must meet the service obligations in `docs/adoption-and-telemetry.md`. |
 | Scanner builds without telemetry | **Done** | `-DCKEY_BUILD_TELEMETRY=OFF`, the SwiftPM `CKeyScanner` product, the Android core module, and `CKEY_DOTNET_TELEMETRY=OFF`. |
 
 ## Acceptance criteria (spec §11)
@@ -104,7 +104,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 
 ## What only the maintainer can do
 
-- Deploy `services/openckey` behind TLS at openckey.org, with the CDN and proxy IP-logging policy its README describes.
+- Deploy openckey.org (separate repository), which hosts telemetry ingestion, short destinations, the renderer and package downloads.
 - Create the registry accounts (npm, Maven Central `org.openckey`, NuGet, a Homebrew tap) and publish from tagged releases.
 - Protect `Stable-Release` and the tags in GitHub, and create `community`.
 - Make real prints and real-camera captures. These are the evidence for print compensation, latency targets, and any comparison with QR.

@@ -116,12 +116,12 @@ Every SDK wraps the same core. Each gives you:
 - payload actions per the [conventions](spec/CKey-Payload-Conventions.md);
 - telemetry mode `0`/`1`/`2`, default `1`. Opting out takes one line: `CKey.telemetry = 0`.
 
-The openckey.org service ([`services/openckey`](services/openckey)) is a Node 22 service with no dependencies. It hosts:
+[openckey.org](https://openckey.org) is the project's hosted site. It runs separately from this repository and is not open source. It provides:
 
-- telemetry ingestion: aggregates only, with no IPs stored;
-- short links, behind an interstitial that shows the destination host;
-- hosted text pages;
-- the web renderer page.
+- the browser renderer;
+- downloads of the packages above (MIT, built from this repository);
+- `/text/{id}` and `/sq/{id}` destinations;
+- the telemetry endpoint the SDKs report to. It keeps aggregates only and stores no IPs, as `docs/adoption-and-telemetry.md` requires.
 
 ### Rendering, certification and verification
 
