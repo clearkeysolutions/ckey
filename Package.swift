@@ -28,6 +28,8 @@
 // so the core's own `#include "ckey/ckey.h"` resolves without any
 // header-search flags (and without unsafeFlags, which SwiftPM refuses in
 // dependencies). CKeyTelemetry does the same for include/ckey/telemetry.h.
+// The other C++ targets have no headers of their own, but SwiftPM requires
+// their include/ directory to exist, so each keeps one with a .gitkeep.
 import PackageDescription
 
 let package = Package(

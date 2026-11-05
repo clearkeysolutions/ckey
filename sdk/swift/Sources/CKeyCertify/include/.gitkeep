@@ -1,0 +1,4 @@
+// This target has no public headers of its own: the core API is
+// include/ckey/ckey.h, exposed by CKeyCodec. SwiftPM requires an include
+// directory to exist, and Git stores no empty directories, so this file
+// keeps it.

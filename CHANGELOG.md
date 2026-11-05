@@ -10,6 +10,10 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.75 — 2026-11-05
+
+* **Swift package resolves in Xcode:** the `CKeyScan`, `CKeyRender` and `CKeyCertify` targets now ship an `include/` directory. Git stores no empty directories, so a fresh clone lacked them and Xcode refused the package graph with "public headers ("include") directory path for 'CKeyScan' is invalid or not contained in the target".
+
 ## 0.1.0-build.74 — 2026-11-05
 
 Swift SDK fixes, found while building the Open CKey Scanner iPhone app:
