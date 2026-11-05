@@ -15,8 +15,7 @@ root = Path(__file__).resolve().parents[1]
 FILES = [
     "VERSION", "CONTEXT.md", "include/ckey/ckey.h", "tests/vectors/locator-v14.json",
     "ios/README.md", "macos/README.md", "docs/support-matrix.json",
-    "sdk/web/package.json", "sdk/android/gradle.properties", "sdk/dotnet/Directory.Build.props",
-    "sdk/swift/Sources/CKey/CKeyVersion.swift",
+    "sdk/web/package.json", "sdk/android/gradle.properties", "sdk/dotnet/README.md",
 ]
 old = (root / "VERSION").read_text().strip()
 m = re.fullmatch(r"(\d+\.\d+\.\d+)-build\.(\d+)", old)

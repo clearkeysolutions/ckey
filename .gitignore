@@ -12,3 +12,5 @@
 *.xcuserstate
 xcuserdata/
 tools/__pycache__/
+/.build/
+/.swiftpm/

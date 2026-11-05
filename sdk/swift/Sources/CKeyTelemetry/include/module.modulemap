@@ -1,0 +1,7 @@
+// The optional telemetry core (include/ckey/telemetry.h, used in place).
+// ckey/telemetry.h in this directory is a forwarder (see CKeyCodec).
+module CKeyTelemetry {
+    header "../../../../../include/ckey/telemetry.h"
+    textual header "ckey/telemetry.h"
+    export *
+}

@@ -10,6 +10,42 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.67 — 2026-11-05
+
+* **Swift package `CKey` (`Package.swift` at the repo root, `sdk/swift/`, spec §3 and §7):** apps add the repository URL in Xcode.
+  * **C++ targets:** `CKeyCodec`, `CKeyScan`, `CKeyRender`, `CKeyCertify` and `CKeyTelemetry`. Each is a one-line shim that compiles the repository's own `src/` file, so nothing is copied.
+  * **Products:**
+    * `CKey`, the full SDK;
+    * `CKeyScanner`, scan only: module `CKeyScanKit`, with no renderer and no telemetry.
+  * **Rendering API:**
+    * `CKeySymbol.encode`;
+    * `cgImage`, `pngData`, `svg` and `pdfData`;
+    * `certify`;
+    * `CKeyStyle`, with presets and a policy.
+  * **Scanning API:**
+    * `CKeyView`, a SwiftUI view that draws native pixels and is transparent by default, plus UIKit and AppKit views;
+    * `CKeyDecoder` for `CGImage` and `CVPixelBuffer`;
+    * `CKeyScanner`, an AVFoundation camera helper that drives telemetry sessions.
+  * **Payloads:** `CKeyPayload.classify`.
+  * **Telemetry:** `CKey.telemetry` takes 0, 1 or 2, and `try CKey.setTelemetry(rawValue:)` rejects anything else. Batches are sent off the scan queue through an ephemeral `URLSession`, and the SDK tries a send when the app moves to the background.
+  * **Privacy:** `PrivacyInfo.xcprivacy` declares analytics that are not linked to the user and not used for tracking.
+  * **Verified here:** the C++ shims and module maps compile with gcc and clang, and their results were checked.
+  * **Not verified here:** the Swift sources have not been compiled. `sdk-swift.yml` runs `swift build`, `swift test` and an iOS Simulator build on macOS.
+* **.NET SDK, NuGet `CKey` (`sdk/dotnet/`, namespace `OpenCKey`):**
+  * **Native library:** one shared `ckey` library built by CMake, exporting exactly the 55 C ABI functions. On Linux it statically links the C++ runtime. The package carries it for `win-x64`, `linux-x64`, `osx-arm64` and `osx-x64`.
+  * **Interop:** `LibraryImport` on net8.0 and `DllImport` on netstandard2.0. Struct layouts are checked against a C `offsetof` probe in tests and in CI.
+  * **API:**
+    * `CKeySymbol.Encode`;
+    * `RenderRgba`, `ToPng`, `ToSvg` and `ToPdf`;
+    * `Certify`;
+    * `CKeyDecoder.Decode`, using the same pipeline as the iOS reader;
+    * `CKeyPayload.Classify`.
+  * **Telemetry:** `CKey.Telemetry` takes 0, 1 or 2, and anything else throws `ArgumentOutOfRangeException`. Batches are sent asynchronously with `HttpClient`. `CKeyScanSession` records scan sessions.
+  * **Optional `CKey.Wpf`** adapter, which returns `WriteableBitmap`.
+  * **Verified here:** the native build, its exported symbols and the struct layouts.
+  * **Not verified here:** the C# has not been compiled. `sdk-dotnet.yml` builds the native libraries on Linux, Windows and macOS, then runs `dotnet test` and `dotnet pack`.
+* `.gitignore`: SwiftPM's `.build/` and `.swiftpm/`.
+
 ## 0.1.0-build.66 — 2026-11-05
 
 * **CMake package (spec §7):** `cmake --install` installs the libraries, headers and the `ckey` CLI, plus `CKeyConfig.cmake`.

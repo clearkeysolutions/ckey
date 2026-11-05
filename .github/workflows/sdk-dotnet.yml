@@ -1,0 +1,146 @@
+name: SDK .NET
+on:
+  push:
+    paths:
+      - "sdk/dotnet/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-dotnet.yml"
+  pull_request:
+    paths:
+      - "sdk/dotnet/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-dotnet.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+# Maintainers: pin these actions to full commit SHAs (as ci.yml does) before relying on this workflow.
+jobs:
+  native:
+    name: native (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-22.04          # oldest supported glibc we build against
+            cmake_args: ""
+            run_probe: true
+          - rid: win-x64
+            os: windows-2022
+            cmake_args: "-A x64"
+            run_probe: true
+          - rid: osx-arm64
+            os: macos-14
+            cmake_args: "-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+            run_probe: true
+          - rid: osx-x64
+            os: macos-14              # cross-compiled on Apple silicon
+            cmake_args: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
+            run_probe: false
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S sdk/dotnet/native -B build-dotnet -DCMAKE_BUILD_TYPE=Release -DCKEY_DOTNET_RID=${{ matrix.rid }} ${{ matrix.cmake_args }}
+      - name: Build
+        run: cmake --build build-dotnet --config Release --parallel 4
+      - name: Check struct layouts against the C# mirrors
+        if: matrix.run_probe
+        run: |
+          ./build-dotnet/ckey_layout_probe | tr -d '\r' > layout.txt
+          diff -u sdk/dotnet/native/tools/layout_expected.txt layout.txt
+      - name: Check exported symbols
+        if: matrix.rid == 'linux-x64'
+        run: |
+          lib=sdk/dotnet/artifacts/native/linux-x64/libckey.so
+          nm -D --defined-only "$lib" | awk '{print $3}' | sort > exports.txt
+          if grep -v '^ckey_' exports.txt; then echo "unexpected exports"; exit 1; fi
+          grep -q '^ckey_encode_scalable$' exports.txt
+          grep -q '^ckey_telemetry_set_mode$' exports.txt
+          ! ldd "$lib" | grep -E 'libstdc\+\+|libgcc_s'
+      - name: List output
+        run: ls -la sdk/dotnet/artifacts/native/${{ matrix.rid }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: sdk/dotnet/artifacts/native/${{ matrix.rid }}/
+          if-no-files-found: error
+
+  test:
+    name: test (${{ matrix.rid }})
+    needs: native
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-24.04
+          - rid: win-x64
+            os: windows-2022
+          - rid: osx-arm64
+            os: macos-14
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: sdk/dotnet/artifacts/native/${{ matrix.rid }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build CKey (net8.0 and netstandard2.0)
+        run: dotnet build sdk/dotnet/src/CKey/CKey.csproj -c Release -p:CKeyHostRid=${{ matrix.rid }}
+      - name: Build CKey.Wpf
+        if: matrix.rid == 'win-x64'
+        run: dotnet build sdk/dotnet/src/CKey.Wpf/CKey.Wpf.csproj -c Release -p:CKeyHostRid=${{ matrix.rid }}
+      - name: Test
+        run: dotnet test sdk/dotnet/tests/CKey.Tests/CKey.Tests.csproj -c Release -p:CKeyHostRid=${{ matrix.rid }} --logger "console;verbosity=normal"
+
+  pack:
+    needs: [native, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: sdk/dotnet/artifacts/download
+      - name: Arrange native assets
+        run: |
+          for rid in win-x64 linux-x64 osx-arm64 osx-x64; do
+            mkdir -p sdk/dotnet/artifacts/native/$rid
+            cp sdk/dotnet/artifacts/download/native-$rid/* sdk/dotnet/artifacts/native/$rid/
+          done
+          ls -laR sdk/dotnet/artifacts/native
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Pack
+        run: |
+          dotnet pack sdk/dotnet/src/CKey/CKey.csproj -c Release -p:CKeyRequireAllNatives=true -o sdk/dotnet/artifacts/packages
+          dotnet pack sdk/dotnet/src/CKey.Wpf/CKey.Wpf.csproj -c Release -o sdk/dotnet/artifacts/packages
+      - name: Verify package layout
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          pkg=sdk/dotnet/artifacts/packages/CKey.$version.nupkg
+          unzip -l "$pkg" | tee contents.txt
+          for f in runtimes/win-x64/native/ckey.dll runtimes/linux-x64/native/libckey.so \
+                   runtimes/osx-arm64/native/libckey.dylib runtimes/osx-x64/native/libckey.dylib \
+                   lib/net8.0/CKey.dll lib/netstandard2.0/CKey.dll README.md buildTransitive/CKey.targets; do
+            grep -q " $f\$" contents.txt || { echo "missing $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: sdk/dotnet/artifacts/packages/
