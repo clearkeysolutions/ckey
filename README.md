@@ -49,6 +49,10 @@ The [release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) has the ful
 - [`spec/`](spec): the wire-format specifications, one file per format version, plus [payload conventions](spec/CKey-Payload-Conventions.md), the [design system](spec/CKey-Design-System.md), the [printing guide](spec/CKey-Printing.md) and the [research and license audit](spec/RESEARCH.md).
 - [`docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md`](docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md): the rendering, SDK, distribution, adoption and telemetry specification.
 - [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md): how far the code meets that specification.
+- [`docs/adoption-and-telemetry.md`](docs/adoption-and-telemetry.md): telemetry modes, schema and service obligations.
+- [`spec/CKey-Interchange-v1.md`](spec/CKey-Interchange-v1.md): the optional `.ckey` file.
+- [`docs/support-matrix.json`](docs/support-matrix.json): machine-readable version support.
+- [`docs/platform-integration.md`](docs/platform-integration.md): adopting the scanner in a camera platform, and the device benchmark plan.
 - [`CONTEXT.md`](CONTEXT.md): the living engineering record.
 
 ## Build and use
@@ -80,6 +84,62 @@ The experimental extended profile accepts 1–2,048 bytes. Seven capacity tiers 
 ```
 
 See [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md) and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md). The encoder automatically chooses the smallest Profile 3 tier that fits, or callers can select a tier explicitly through the C ABI and CLI. The projective decoder reads clean renders of the 2,048-byte tier from about 11 px per unit (round-trip tested in CI); physical camera decode is not yet validated.
+
+## Libraries, SDKs and services
+
+The core is C++20 behind a C ABI ([`include/ckey/ckey.h`](include/ckey/ckey.h), ABI 4). It is split so an app links only what it needs ([`src/README.md`](src/README.md)):
+
+| Library | Purpose |
+|---|---|
+| `ckey_codec` | encode and decode codewords; the `.ckey` file format |
+| `ckey_scan` | full-frame localization and decoding; needs only `ckey_codec` |
+| `ckey_render` | canonical geometry; native RGBA/gray raster, PNG, PDF, SVG, print |
+| `ckey_certify` | style certification through a modelled camera scan |
+| `ckey_telemetry` | optional aggregate scan counters ([details](docs/adoption-and-telemetry.md)) |
+
+`cmake --install` provides a CMake package (`find_package(CKey)`, targets `CKey::core`, `CKey::scan` and so on); see [`examples/c`](examples/c).
+
+| SDK | Package | Location | Verified |
+|---|---|---|---|
+| Swift (iOS, macOS) | SwiftPM `CKey` (this repository's URL) | [`sdk/swift`](sdk/swift) | in CI on macOS |
+| Web (WASM) | npm `ckey` | [`sdk/web`](sdk/web) | JS here; wasm in CI |
+| Android | Maven `org.openckey:ckey` | [`sdk/android`](sdk/android) | JNI here; Gradle in CI |
+| .NET | NuGet `CKey` | [`sdk/dotnet`](sdk/dotnet) | native library here; C# in CI |
+| CLI | Homebrew `ckey` (formula generated per release) | [`packaging/homebrew`](packaging/homebrew) | |
+
+None of these is published to a registry yet.
+
+Every SDK wraps the same core. Each gives you:
+
+- headless rendering to native images, plus a UI view;
+- a scanner;
+- payload actions per the [conventions](spec/CKey-Payload-Conventions.md);
+- telemetry mode `0`/`1`/`2`, default `1`. Opting out takes one line: `CKey.telemetry = 0`.
+
+The openckey.org service ([`services/openckey`](services/openckey)) is a Node 22 service with no dependencies. It hosts:
+
+- telemetry ingestion: aggregates only, with no IPs stored;
+- short links, behind an interstitial that shows the destination host;
+- hosted text pages;
+- the web renderer page.
+
+### Rendering, certification and verification
+
+```sh
+./build/ckey encode-scalable --utf8 "https://openckey.org" --raster code.png --size-px 1024             # native pixels
+./build/ckey encode-scalable --utf8 "https://openckey.org" --raster code.png --transparent yes          # alpha 0 where unpainted
+./build/ckey encode-scalable --utf8 "https://openckey.org" --pdf code.pdf --size-in 2                   # vector PDF
+```
+
+- **Default look:** black on white.
+- **Style policies** (the `policy` field of `ckey_style`):
+  - `strict` (default): refuses styles that could fail to scan;
+  - `adaptive`: repairs them and reports the changes;
+  - `override`: renders anything, but never certifies it.
+- **Certification:** `ckey_certify_scalable_style` certifies a style by decoding it through a modelled camera, not by contrast ratio. A transparent symbol needs the host's backdrop to be certified ([design system](spec/CKey-Design-System.md#policies-and-certification)).
+- **Conformance:** vectors in [`tests/vectors/conformance-v1.json`](tests/vectors/conformance-v1.json) ([how](tools/conformance/README.md)).
+- **Benchmarks:** synthetic, with QR and Data Matrix comparison in CI ([`docs/benchmarks`](docs/benchmarks)).
+- **Status:** the full requirement-by-requirement map is in [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md).
 
 ## Profile 0: the scalable family
 

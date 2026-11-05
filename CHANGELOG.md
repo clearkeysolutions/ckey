@@ -10,6 +10,20 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.68 — 2026-11-05
+
+* **`docs/IMPLEMENTATION-STATUS.md`:** rewritten against builds 61–67, item by item against the specification. It ends with a list of what only the maintainer can do: deploy openckey.org, publish to the registries, set up branch protection, make real prints and camera captures, and pin action SHAs.
+* **`docs/platform-integration.md`** (new) is for camera-platform teams. It covers:
+  * what to link (only `ckey_codec` and `ckey_scan`);
+  * the decoding pipeline for each frame;
+  * threading and memory;
+  * the security review surface;
+  * conformance;
+  * a proposed device benchmark plan, with a p90 first-decode target to be confirmed by measurement.
+* **README:** new sections on libraries, SDKs and services, and on rendering, certification and verification. The documentation index is extended.
+* **CONTEXT:** records the decisions from builds 61–68.
+* No code changes.
+
 ## 0.1.0-build.67 — 2026-11-05
 
 * **Swift package `CKey` (`Package.swift` at the repo root, `sdk/swift/`, spec §3 and §7):** apps add the repository URL in Xcode.

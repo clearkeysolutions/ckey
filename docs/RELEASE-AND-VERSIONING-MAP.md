@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.67**, C ABI **4**.
+Build **0.1.0-build.68**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -85,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.67 | (this commit) | 2026-11-05 | Swift package and .NET SDK |
+| build.68 | (this commit) | 2026-11-05 | Implementation status, platform integration guide, README and context |
+| build.67 | `97f304d` | 2026-11-05 | Swift package and .NET SDK |
 | build.66 | `b8fa90b` | 2026-11-05 | CMake package, Homebrew formula, release/community/deprecate workflows, Web SDK |
 | build.65 | `bb934da` | 2026-11-05 | `.ckey` interchange v1, conformance suite, support matrix, benchmark harness |
 | build.64 | `83f972d` | 2026-11-05 | Style policies and optical certification; ABI 4 |
