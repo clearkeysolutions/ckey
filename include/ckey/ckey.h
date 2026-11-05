@@ -20,8 +20,8 @@
 extern "C" {
 #endif
 
-#define CKEY_ABI_VERSION 3u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.63"
+#define CKEY_ABI_VERSION 4u
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.64"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -293,6 +293,24 @@ typedef enum ckey_ray_cap {
     CKEY_RAY_ROUND = 0,        /* default */
     CKEY_RAY_FLAT = 1
 } ckey_ray_cap;
+/*
+ * Optical-safety policy (specification §4), carried by the style:
+ *   STRICT    (default) renderers refuse a style that fails the safety rules.
+ *   ADAPTIVE  renderers repair the style by fixed rules first (ink pushed to
+ *             black or white, failing accents dropped, depth limited, logo
+ *             plated or shrunk), then apply the strict rules.
+ *             ckey_certify_scalable_style reports every change.
+ *   OVERRIDE  renderers draw the style as given, skipping the safety rules.
+ *             The caller accepts an uncertified symbol; the style check and
+ *             certification still report what fails.
+ * Values a renderer cannot draw (unknown shapes, NaN, out-of-range effects)
+ * are refused under every policy.
+ */
+typedef enum ckey_style_policy {
+    CKEY_POLICY_STRICT = 0,
+    CKEY_POLICY_ADAPTIVE = 1,
+    CKEY_POLICY_OVERRIDE = 2
+} ckey_style_policy;
 typedef struct ckey_style {
     ckey_rgb background;       /* centre of the background */
     ckey_rgb background_edge;  /* edge colour (radial vignette); equal = solid */
@@ -310,6 +328,7 @@ typedef struct ckey_style {
     const char *logo_href;     /* image URL or data: URI; NULL or "" for none */
     double logo_radius;        /* canonical units; 0 = the empty centre's size */
     uint32_t logo_plate;       /* 1: background disc behind the logo */
+    uint32_t policy;           /* ckey_style_policy; 0 = strict (ABI 4) */
 } ckey_style;
 /* Fills the default style: black ink on a white background (spec §4). */
 CKEY_API void ckey_style_default(ckey_style *style);
@@ -452,6 +471,72 @@ CKEY_API ckey_status ckey_encode_png(const uint8_t *pixels, uint32_t width, uint
 CKEY_API ckey_status ckey_render_scalable_pdf(const ckey_scalable_symbol *symbol, const ckey_style *style,
                                               double width_pt, uint32_t transparent, uint8_t *out,
                                               size_t out_capacity, size_t *out_required);
+
+/*
+ * Optical certification (specification §4, acceptance criteria 5 and 6).
+ * A style is certified only by decoding it through a modelled acquisition,
+ * never from a contrast ratio alone. The symbol is rendered with the native
+ * raster, composited over every backdrop, degraded by the scan model, and
+ * decoded with the real decoder. certified = 1 only if every trial on every
+ * backdrop decodes the payload exactly.
+ *
+ * Transparent symbols: the renderer cannot see what lies behind them, so
+ * transparent = 1 needs a backdrop (solid colours and/or the host's pixels
+ * behind the symbol). Without one, certification reports certified = 0
+ * ("background unknown") and never claims readability.
+ *
+ * The default scan model is a phone camera at about 8 pixels per module
+ * with mild defocus, sensor noise, and glare. It is a model, not a
+ * measurement; real-camera tests remain the evidence (spec §11.6).
+ */
+typedef struct ckey_backdrop {
+    const ckey_rgb *colours;   /* solid backgrounds the symbol may sit on */
+    uint32_t colour_count;     /* 0..16 */
+    const uint8_t *rgba;       /* optional host pixels behind the symbol (straight RGBA8), */
+    uint32_t width, height;    /* stretched over the symbol's full 31-unit canvas */
+    size_t stride;             /* 0 = width * 4 */
+} ckey_backdrop;
+typedef struct ckey_scan_model {
+    uint32_t abi_version;      /* CKEY_ABI_VERSION */
+    double px_per_module;      /* camera sampling; default 8 */
+    double blur_px;            /* Gaussian defocus sigma in camera pixels; default 0.9 */
+    double noise;              /* sensor noise sigma, fraction of full scale; default 0.03 */
+    double glare;              /* contrast compression 0..0.9: luma -> luma * (1 - g) + g; default 0.2 */
+    uint32_t trials;           /* noise seeds per backdrop, 1..16; default 3 */
+} ckey_scan_model;
+#define CKEY_ADJUST_INK 1u         /* ink replaced by black or white */
+#define CKEY_ADJUST_ACCENTS 2u     /* accents removed */
+#define CKEY_ADJUST_EFFECTS 4u     /* bevel or shadow limited */
+#define CKEY_ADJUST_LOGO 8u        /* logo plated or shrunk */
+#define CKEY_ADJUST_BACKGROUND 16u /* the symbol was given its own background */
+#define CKEY_ADJUST_MATERIALS 32u  /* sheen, vignette, depth and grain removed after a failed model test */
+typedef struct ckey_certification {
+    uint32_t abi_version;
+    uint32_t certified;        /* 1: decoded in every modelled trial */
+    uint32_t policy;           /* the policy that was applied */
+    uint32_t adjustments;      /* CKEY_ADJUST_* bits (adaptive policy) */
+    uint32_t trials, trials_passed;
+    double min_contrast;       /* informative WCAG-style ratio over all ink/background pairs */
+    double feature_separation; /* luma separation of mark vs gap pixels after compositing: 5th/95th percentile gap, 0..1; <= 0 means they overlap */
+    double logo_load;          /* share of the worst block's correction hidden by the logo */
+    char message[256];         /* the reason for refusal, or the list of changes and warnings */
+} ckey_certification;
+CKEY_API void ckey_scan_model_default(ckey_scan_model *model);
+/*
+ * Certifies style (NULL = default) on symbol under style->policy:
+ *   STRICT    returns CKEY_INVALID_ARGUMENT unless the style is certified.
+ *   ADAPTIVE  repairs the style; if it still fails the model, removes
+ *             materials and retries. On success writes the style to render
+ *             to out_style (may be NULL) and returns CKEY_OK.
+ *   OVERRIDE  returns CKEY_OK whatever happens; out->certified says whether
+ *             the symbol would scan under the model.
+ * backdrop may be NULL for an opaque symbol (its own background is used).
+ * model may be NULL for the default. transparent selects transparent output.
+ */
+CKEY_API ckey_status ckey_certify_scalable_style(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                 uint32_t transparent, const ckey_backdrop *backdrop,
+                                                 const ckey_scan_model *model, ckey_style *out_style,
+                                                 ckey_certification *out);
 
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,

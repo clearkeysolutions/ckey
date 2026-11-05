@@ -112,7 +112,7 @@ const ScalableLayout *scene_layout(const ckey_scalable_symbol *s, const ckey_sty
         s->ecc_level > 3 || s->layout >= static_cast<uint32_t>(kScalableFamilies)) return nullptr;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return nullptr;
-    if (style) st = *style; else ckey_style_default(&st);
+    if (style) st = effective_style(L, *s, *style); else ckey_style_default(&st);
     double contrast = 0, load = 0;
     if (!check_style(L, *s, st, contrast, load).empty()) return nullptr;
     return &L;

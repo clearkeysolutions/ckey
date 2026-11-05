@@ -10,6 +10,30 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.64 — 2026-11-05
+
+* **ABI 4:** `ckey_style` gains `policy`. Code that fills styles with `ckey_style_default` or `ckey_style_preset_fill` needs no other change.
+* **Style policies (spec §4):** `CKEY_POLICY_STRICT` (the default), `CKEY_POLICY_ADAPTIVE` (renderers repair the style by fixed rules, then check it) and `CKEY_POLICY_OVERRIDE` (renderers draw the style as given; checks report "NOT scan-safe"). Structurally invalid values are refused under every policy.
+* **Optical certification (spec §4; acceptance criteria 5 and 6):** `ckey_certify_scalable_style` certifies through a modelled scan, not a contrast ratio:
+  1. render with the native raster;
+  2. composite over each backdrop;
+  3. apply glare, defocus and noise;
+  4. decode with the real decoder, on 3 seeded trials per backdrop.
+  * It also reports the minimum contrast, the mark/gap luma separation and the logo load.
+  * Adaptive certification returns the repaired style and a `CKEY_ADJUST_*` bit for each change.
+  * **Transparent output** needs a `ckey_backdrop` (colours and/or the host's pixels). Without one the result is "background unknown" and is never certified.
+* **New library `ckey_certify`** (needs scan and render). `ckey_core` now includes it.
+* **New test `ckey_style_certification`:**
+  * The default style certifies at v1, v11 and v31 (v31 in about 1.3 s).
+  * A coarse, blurred model fails v31.
+  * Strict refuses low contrast in the check, the renderer and certification.
+  * Override renders but never certifies.
+  * Adaptive repairs ink, accents and depth.
+  * Transparent output: refused without a backdrop, certified on white, refused for black on #333333, which adaptive fixes by flipping the ink.
+  * A half-black host image is refused.
+  * The concept preset certifies.
+* `spec/CKey-Design-System.md`: new section on policies and certification.
+
 ## 0.1.0-build.63 — 2026-11-05
 
 * **Separate libraries (spec §2.1, §6, §9.2; acceptance criterion 8):** the core is now `ckey_codec`, `ckey_scan` (needs only the codec), `ckey_render` and the optional `ckey_telemetry`. `ckey_core` remains as the union of the first three.

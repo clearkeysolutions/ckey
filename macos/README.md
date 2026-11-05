@@ -15,7 +15,7 @@ smallest feature; the lab should be used to establish their real capture limits.
 
 ## Verify the build has the current core
 
-The status line ends with the compiled core version, which must be **`0.1.0-build.63`**. If it shows an older version, run **Product → Clean Build Folder** (⇧⌘K) and rebuild.
+The status line ends with the compiled core version, which must be **`0.1.0-build.64`**. If it shows an older version, run **Product → Clean Build Folder** (⇧⌘K) and rebuild.
 
 With current code you should see:
 

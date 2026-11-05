@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.63**, C ABI **3**.
+Build **0.1.0-build.64**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -75,6 +75,7 @@ The "Introduced" column is the build whose changelog entry first describes the f
 | 1 | dev.1 | First C ABI: locator encode, decode and SVG. |
 | 2 | dev.6 | The public locator codeword grew from 42 to 77 bytes (RS(77,26)). |
 | 3 | dev.58 | `ckey_scalable_symbol` gains `layout`. The Profile 0 encode, decode, capacity and logo-radius calls take a layout. `ckey_decode_scalable_gray8` reports the layout it found. |
+| 4 | build.64 | `ckey_style` gains `policy` (strict / adaptive / override). |
 
 Between these, many functions were added without a bump (image decoding, calibration scores, text and extended profiles, Profile 0, the design system, print output).
 
@@ -84,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.63 | (this commit) | 2026-11-05 | Core split into codec/scan/render/telemetry libraries; telemetry core; openckey.org service |
+| build.64 | (this commit) | 2026-11-05 | Style policies and optical certification; ABI 4 |
+| build.63 | `d2acc2b` | 2026-11-05 | Core split into codec/scan/render/telemetry libraries; telemetry core; openckey.org service |
 | build.62 | `ecfd29a` | 2026-11-05 | Canonical geometry API; direct raster, PNG and PDF backends |
 | build.61 | `ad5e295` | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
 | dev.60 | `817e365` | 2026-11-05 | Changelogs, repository README and the release and versioning map |

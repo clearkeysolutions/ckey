@@ -199,9 +199,21 @@ ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_
         set_status(diag, CKEY_INVALID_ARGUMENT, "style check needs a Profile 0 symbol and a style"); return CKEY_INVALID_ARGUMENT;
     }
     double contrast = 0, load = 0;
-    const std::string problem = check_style(scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout)), *s, *st, contrast, load);
-    if (!problem.empty()) { set_status(diag, CKEY_INVALID_ARGUMENT, problem.c_str()); return CKEY_INVALID_ARGUMENT; }
-    char message[96]; std::snprintf(message, sizeof(message), "style OK: contrast >= %.1f:1; logo uses %.0f%% of block correction", contrast, 100 * load);
+    const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
+    const std::string structural = structural_problem(L, *st);
+    if (!structural.empty()) { set_status(diag, CKEY_INVALID_ARGUMENT, structural.c_str()); return CKEY_INVALID_ARGUMENT; }
+    ckey_style eff = *st; uint32_t adjusted = 0;
+    if (st->policy == CKEY_POLICY_ADAPTIVE) adjusted = adapt_style(L, *s, eff, {});
+    const std::string problem = safety_problem(L, *s, eff, {}, contrast, load);
+    char message[96];
+    if (!problem.empty()) {
+        if (st->policy != CKEY_POLICY_OVERRIDE) { set_status(diag, CKEY_INVALID_ARGUMENT, problem.c_str()); return CKEY_INVALID_ARGUMENT; }
+        std::snprintf(message, sizeof(message), "override, NOT scan-safe: %s", problem.c_str());
+        set_status(diag, CKEY_OK, message);
+        return CKEY_OK;
+    }
+    std::snprintf(message, sizeof(message), "style OK%s: contrast >= %.1f:1; logo uses %.0f%% of block correction",
+                  adjusted ? " after adaptive changes" : "", contrast, 100 * load);
     set_status(diag, CKEY_OK, message);
     return CKEY_OK;
 }
@@ -211,14 +223,16 @@ ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *s, uint32_t sca
     return ckey_render_scalable_styled_svg(s, &st, scale, out, cap, required);
 }
 
-ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const ckey_style *st, uint32_t scale,
+ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const ckey_style *style_in, uint32_t scale,
                                             char *out, size_t cap, size_t *required) {
-    if (!s || !st || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
+    if (!s || !style_in || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
         s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->layout >= kScalableFamilies) return CKEY_INVALID_ARGUMENT;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
+    const ckey_style eff = effective_style(L, *s, *style_in);
+    const ckey_style *st = &eff;
     double contrast = 0, load = 0;
-    if (!check_style(L, *s, *st, contrast, load).empty()) return CKEY_INVALID_ARGUMENT;
+    if (!check_style(L, *s, eff, contrast, load).empty()) return CKEY_INVALID_ARGUMENT;
     const double p = L.pitch, dot = L.dot;
     const std::string dot_stroke = fixed4(2 * dot), cap_style = st->rays == CKEY_RAY_FLAT ? "butt" : "round";
     const bool sheen = !same_colour(st->ink, st->ink_shade), vignette = !same_colour(st->background, st->background_edge);

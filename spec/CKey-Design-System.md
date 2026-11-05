@@ -29,7 +29,7 @@ Each element can still take any colour or material below.
 
 ## The checks (`ckey_check_scalable_style`)
 
-The renderer refuses any style that fails, and the check names the reason.
+Under the default **strict** policy, the renderers refuse any style that fails, and the check names the reason. These rules are a conservative pre-filter. They do not certify a style; see [Policies and certification](#policies-and-certification).
 
 1. **Contrast:**
    - **Pairs:** every ink colour (ink, shade, each accent in use) against every background colour (centre and edge) needs a WCAG contrast ratio of at least **3:1**.
@@ -45,6 +45,44 @@ The renderer refuses any style that fails, and the check names the reason.
 
 **Known limit on logo size.** Profile 0 scatters each byte's 8 bits across the whole symbol, which protects against stripes and smudges. The cost is that a logo covering one ring corrupts roughly one byte per hidden mark, not one per eight. So today a logo can fill the empty centre, plus a little at level H, but not much more. A future format could place each byte's bits in neighbouring sites, as QR does, and roughly triple the allowed logo size. That would be a wire-format change.
 
+## Policies and certification
+
+`ckey_style.policy` (ABI 4) selects one of three policies (specification §4):
+
+| Policy | Renderers | `ckey_certify_scalable_style` |
+|---|---|---|
+| `CKEY_POLICY_STRICT` (default) | refuse a style that fails the checks above | `CKEY_OK` only if certified |
+| `CKEY_POLICY_ADAPTIVE` | apply fixed repairs, then the strict checks | repairs, then strips materials if the modelled scan still fails; returns the repaired style and every change (`CKEY_ADJUST_*`) |
+| `CKEY_POLICY_OVERRIDE` | draw the style as given | always `CKEY_OK`; `certified` says whether it would scan |
+
+The adaptive repairs are:
+
+- the ink is pushed to black or white;
+- if no ink can work, the symbol gets its own background;
+- accents that fail are dropped;
+- depth is limited on dark-on-light styles;
+- a logo is plated, or shrunk until it fits its error budget.
+
+Values a renderer cannot draw, such as an unknown shape or NaN, are refused under every policy.
+
+**Certification is a modelled scan, not a contrast ratio:**
+
+1. The symbol is rendered with the native raster.
+2. It is composited over every backdrop.
+3. The scan model degrades it: about 8 pixels per module, Gaussian defocus 0.9 px, sensor noise 3%, and 20% glare compression. Each setting can be changed in `ckey_scan_model`.
+4. The real decoder decodes it on 3 seeded trials per backdrop.
+5. The style is `certified = 1` only if every trial decodes exactly and the rules pass.
+
+The result also reports, for information:
+
+- the WCAG-style minimum contrast;
+- the luma separation between mark and gap pixels after compositing (5th/95th percentile);
+- the logo load.
+
+**Transparent output:** the renderer cannot see what is behind a transparent symbol. Certification therefore needs a `ckey_backdrop`, given as solid colours and/or the host's own pixels. Without one it reports "background unknown" and `certified = 0`. A host image's darkest and lightest pixels also join the contrast rules, so a busy photo is not certified by its average.
+
+The model is a model. Real-camera captures remain the evidence (specification §11.6). The logo image's own pixels are not modelled, only the marks it hides.
+
 ## Verification
 
 - **Geometry, in the test suite:** all 16 mark-shape combinations decode from rasterized renders at v2 and v20. At every level, the largest logo the checker allows decodes, the hidden marks corrected by Reed–Solomon. The checker refuses low contrast, mixed polarity, and too-strong depth on light backgrounds.
@@ -54,4 +92,4 @@ The renderer refuses any style that fails, and the check names the reason.
 
 - **CKey Renderer:** Profile 0 → **Design**: modules, rings, rays, metal sheen, vignette, accents, bevel, depth, grain, logo, and a "Concept preset". The status line shows the style check.
 - **CLI:** `ckey encode-scalable --utf8 "…" --preset concept --modules circle --logo logo.png --out symbol.svg`
-- **C ABI:** `ckey_style_default`, `ckey_check_scalable_style`, `ckey_render_scalable_styled_svg`, `ckey_scalable_logo_max_radius`, `ckey_scalable_logo_load`.
+- **C ABI:** `ckey_style_default`, `ckey_style_preset_fill`, `ckey_check_scalable_style`, `ckey_certify_scalable_style`, `ckey_scan_model_default`, `ckey_render_scalable_styled_svg`, `ckey_scalable_logo_max_radius`, `ckey_scalable_logo_load`.

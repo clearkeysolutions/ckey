@@ -6,3 +6,4 @@
 #include "api_codec.inc"
 #include "api_scan.inc"
 #include "api_render.inc"
+#include "api_certify.inc"

@@ -1291,34 +1291,46 @@ double logo_load(const ScalableLayout &L, int level, double radius) {
     return worst;
 }
 
-std::string check_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st, double &min_contrast, double &load) {
-    min_contrast = 0; load = 0;
+// Values a renderer cannot draw at all, whatever the policy.
+std::string structural_problem(const ScalableLayout &L, const ckey_style &st) {
     const auto finite01 = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
+    if (st.policy > CKEY_POLICY_OVERRIDE) return "unknown style policy";
     if (st.modules < CKEY_MODULE_ROUNDED || st.modules > CKEY_MODULE_DIAMOND) return "unknown module shape";
     if (st.rings < CKEY_RING_JOINED || st.rings > CKEY_RING_DOTS) return "unknown ring style";
     if (st.rays < CKEY_RAY_ROUND || st.rays > CKEY_RAY_FLAT) return "unknown ray cap";
     if (st.accent_count > 4 || st.accent_percent > 100) return "accents: at most 4 colours and 100%";
     if (!finite01(st.bevel) || !finite01(st.shadow) || !finite01(st.texture)) return "bevel, shadow, and texture must be 0..1";
+    if (!std::isfinite(st.logo_radius) || st.logo_radius < 0) return "logo radius must be 0 or positive";
+    if (st.logo_href && *st.logo_href && st.logo_radius > 14.5) return "logo radius must be at most 14.5 units";
+    (void)L;
+    return {};
+}
+
+// Scan-safety rules (the strict policy): contrast and one polarity against
+// every background colour, depth limits, and the logo's correction budget.
+std::string safety_problem(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st,
+                           const std::vector<ckey_rgb> &extra_backgrounds, double &min_contrast, double &load) {
+    min_contrast = 1e9; load = 0;
     std::vector<ckey_rgb> inks = {st.ink, st.ink_shade};
     if (st.accent_percent > 0) for (uint32_t i = 0; i < st.accent_count; ++i) inks.push_back(st.accents[i]);
-    const ckey_rgb backgrounds[2] = {st.background, st.background_edge};
-    min_contrast = 1e9; int polarity = 0;
+    std::vector<ckey_rgb> backgrounds = {st.background, st.background_edge};
+    backgrounds.insert(backgrounds.end(), extra_backgrounds.begin(), extra_backgrounds.end());
+    int polarity = 0; std::string problem;
     for (const auto &bg : backgrounds) for (const auto &ink : inks) {
         const double ratio = contrast_ratio(ink, bg);
         min_contrast = std::min(min_contrast, ratio);
         char why[96];
-        if (ratio < 3.0) { std::snprintf(why, sizeof(why), "ink %s on background %s is %.1f:1; need 3:1", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio); return why; }
+        if (ratio < 3.0 && problem.empty()) { std::snprintf(why, sizeof(why), "ink %s on background %s is %.1f:1; need 3:1", hex_colour(ink).c_str(), hex_colour(bg).c_str(), ratio); problem = why; }
         const int side = relative_luminance(ink) > relative_luminance(bg) ? 1 : -1;
-        if (polarity && side != polarity) return "all inks must be lighter than the background, or all darker";
+        if (polarity && side != polarity && problem.empty()) problem = "all inks must be lighter than the background, or all darker";
         polarity = side;
     }
+    if (!problem.empty()) return problem;
     // Dark ink on a light ground: shadows darken the gaps and highlights
     // lighten the marks, both eating into contrast.
     if (polarity < 0 && st.shadow > 0.4) return "dark-on-light symbols allow shadow up to 0.4";
     if (polarity < 0 && st.bevel > 0.5) return "dark-on-light symbols allow bevel up to 0.5";
-    const bool has_logo = st.logo_href && *st.logo_href;
-    if (!std::isfinite(st.logo_radius) || st.logo_radius < 0) return "logo radius must be 0 or positive";
-    if (has_logo) {
+    if (st.logo_href && *st.logo_href) {
         const double radius = st.logo_radius > 0 ? st.logo_radius : logo_quiet_radius(L);
         char why[96];
         if (radius > logo_max_radius(L)) { std::snprintf(why, sizeof(why), "logo radius %.2f exceeds %.2f (it would hide the Ring Key)", radius, logo_max_radius(L)); return why; }
@@ -1327,6 +1339,73 @@ std::string check_style(const ScalableLayout &L, const ckey_scalable_symbol &sym
         if (load > 0.5) { std::snprintf(why, sizeof(why), "logo hides %.0f%% of a block's correction (max 50%%); raise the level or shrink it", 100 * load); return why; }
     }
     return {};
+}
+
+// Policy-aware check. STRICT and ADAPTIVE styles must pass the safety rules
+// (renderers adapt an ADAPTIVE style first, see effective_style); OVERRIDE
+// skips them: the caller has explicitly accepted an uncertified symbol.
+std::string check_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st, double &min_contrast, double &load) {
+    min_contrast = 0; load = 0;
+    std::string problem = structural_problem(L, st);
+    if (!problem.empty()) return problem;
+    problem = safety_problem(L, sym, st, {}, min_contrast, load);
+    return st.policy == CKEY_POLICY_OVERRIDE ? std::string() : problem;
+}
+
+// ---- Adaptive policy: rule-based repairs, each reported in a bitmask ----
+
+ckey_rgb best_ink_for(const std::vector<ckey_rgb> &backgrounds) {
+    double black = 1e9, white = 1e9;
+    for (const auto &bg : backgrounds) { black = std::min(black, contrast_ratio({0, 0, 0}, bg)); white = std::min(white, contrast_ratio({255, 255, 255}, bg)); }
+    return black >= white ? ckey_rgb{0, 0, 0} : ckey_rgb{255, 255, 255};
+}
+
+uint32_t adapt_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, ckey_style &st, const std::vector<ckey_rgb> &extra_backgrounds) {
+    uint32_t changed = 0;
+    std::vector<ckey_rgb> backgrounds = {st.background, st.background_edge};
+    backgrounds.insert(backgrounds.end(), extra_backgrounds.begin(), extra_backgrounds.end());
+    const auto ink_ok = [&](ckey_rgb ink, int &side) {
+        for (const auto &bg : backgrounds) {
+            if (contrast_ratio(ink, bg) < 3.0) return false;
+            const int s = relative_luminance(ink) > relative_luminance(bg) ? 1 : -1;
+            if (side && s != side) return false;
+            side = s;
+        }
+        return true;
+    };
+    int side = 0;
+    if (!ink_ok(st.ink, side) || !ink_ok(st.ink_shade, side)) {
+        st.ink = st.ink_shade = best_ink_for(backgrounds);
+        changed |= CKEY_ADJUST_INK; side = 0;
+        if (!ink_ok(st.ink, side)) {  // no ink can work on these backgrounds: give the symbol its own ground
+            st.background = st.background_edge = st.ink.r ? ckey_rgb{0, 0, 0} : ckey_rgb{255, 255, 255};
+            backgrounds = {st.background};
+            changed |= CKEY_ADJUST_BACKGROUND; side = 0; ink_ok(st.ink, side);
+        }
+    }
+    if (st.accent_percent > 0 && st.accent_count > 0) {
+        int s = side; bool ok = true;
+        for (uint32_t i = 0; i < st.accent_count; ++i) { int t = s; ok = ok && ink_ok(st.accents[i], t); }
+        if (!ok) { st.accent_percent = 0; st.accent_count = 0; changed |= CKEY_ADJUST_ACCENTS; }
+    }
+    if (side < 0 && (st.shadow > 0.4 || st.bevel > 0.5)) { st.shadow = std::min(st.shadow, 0.4); st.bevel = std::min(st.bevel, 0.5); changed |= CKEY_ADJUST_EFFECTS; }
+    if (st.logo_href && *st.logo_href) {
+        double radius = st.logo_radius > 0 ? st.logo_radius : logo_quiet_radius(L);
+        if (radius > logo_quiet_radius(L) && !st.logo_plate) { st.logo_plate = 1; changed |= CKEY_ADJUST_LOGO; }
+        const double original = radius;
+        radius = std::min(radius, logo_max_radius(L));
+        while (radius > logo_quiet_radius(L) && logo_load(L, static_cast<int>(sym.ecc_level), radius) > 0.5) radius -= 0.05;
+        radius = std::max(radius, logo_quiet_radius(L));
+        if (radius < original - 1e-9) { st.logo_radius = radius; changed |= CKEY_ADJUST_LOGO; }
+    }
+    return changed;
+}
+
+// The style a renderer draws: an ADAPTIVE style after its rule-based repairs.
+ckey_style effective_style(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st) {
+    ckey_style out = st;
+    if (st.policy == CKEY_POLICY_ADAPTIVE && structural_problem(L, st).empty()) adapt_style(L, sym, out, {});
+    return out;
 }
 
 void emit_module(std::ostringstream &o, double cx, double cy, double p, ckey_module_shape shape, const std::string &colour) {
