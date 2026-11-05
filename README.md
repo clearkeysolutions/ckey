@@ -4,9 +4,52 @@ CKey is an independent, monochrome optical symbol under development. Its target 
 
 ## Current milestone
 
-The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read the current draft formats — [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) — before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
+The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read the current draft formats — [Profile 0 Format 0.27.0](spec/CKey-Format-v0.27.0.md), [Profile 0.1 Format 0.28.0](spec/CKey-Format-v0.28.0.md), [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), and [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) — before treating any bytes or geometry as interoperable. It is a draft and may change before 1.0.
 
 The authoritative working state is identified by [`VERSION`](VERSION). Read [`CONTEXT.md`](CONTEXT.md) and [`CONTRIBUTING_VERSIONING.md`](CONTRIBUTING_VERSIONING.md) before changing the project. Every committed change must bump the software version and update the context record.
+
+## Repository, branches and releases
+
+The project lives in one repository, [`clearkeysolutions/ckey`](https://github.com/clearkeysolutions/ckey). It has three long-lived branches:
+
+| Branch | Who can push | Use it for |
+|---|---|---|
+| `scratch` | Maintainer only | Development. Every change is written and tested here first, one numbered build per commit. |
+| `Stable-Release` | Maintainer only; anyone may fork | The supported source. Every release is a tag on this branch. Fork from here. |
+| `community` | Anyone | Experimental contributions. **Unstable:** do not depend on it in production. |
+
+Changes flow `scratch` → `Stable-Release` → forks and `community`. Community work reaches a release only when the maintainer brings it into `scratch`. Releases are immutable tags such as `v0.1.0-dev.60`. A deprecated release keeps its tag and is retitled `Deprecated - {release name}`. No release has been tagged yet. See [branches and releases](docs/BRANCHES-AND-RELEASES.md).
+
+### Versions
+
+CKey has four version numbers:
+
+- **Software version:** `0.1.0-dev.N`, bumped on every commit. It lives in [`VERSION`](VERSION).
+- **Format version:** `0.N.0`, written into every symbol as format byte `N`.
+- **Profile byte:** `00`–`03`.
+- **C ABI version:** currently 3.
+
+The [release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) has the full picture:
+
+- which build introduced each format and ABI;
+- which legacy formats are still readable;
+- a build-to-commit table;
+- the procedure for cutting and deprecating a release.
+
+### Changelogs
+
+| File | Covers |
+|---|---|
+| [`CHANGELOG.md`](CHANGELOG.md) | Every development build on `scratch`, newest first |
+| [`CHANGELOG-STABLE.md`](CHANGELOG-STABLE.md) | Tagged releases on `Stable-Release` (none yet) |
+| [`CHANGELOG-COMMUNITY.md`](CHANGELOG-COMMUNITY.md) | Changes merged into `community`, and the rules for contributing there |
+
+### Documentation
+
+- [`spec/`](spec): the wire-format specifications, one file per format version, plus [payload conventions](spec/CKey-Payload-Conventions.md), the [design system](spec/CKey-Design-System.md), the [printing guide](spec/CKey-Printing.md) and the [research and license audit](spec/RESEARCH.md).
+- [`docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md`](docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md): the rendering, SDK, distribution, adoption and telemetry specification.
+- [`docs/IMPLEMENTATION-STATUS.md`](docs/IMPLEMENTATION-STATUS.md): how far the code meets that specification.
+- [`CONTEXT.md`](CONTEXT.md): the living engineering record.
 
 ## Build and use
 

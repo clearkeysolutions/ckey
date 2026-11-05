@@ -1,3 +1,34 @@
+# Changelog
+
+This is the development changelog for the `scratch` branch. It has one entry per build (`0.1.0-dev.N`), newest first. Every commit that changes the project adds an entry here, and `tools/check_version.py` checks that the top entry matches `VERSION`.
+
+Related logs:
+
+* [CHANGELOG-STABLE.md](CHANGELOG-STABLE.md): releases tagged on `Stable-Release`.
+* [CHANGELOG-COMMUNITY.md](CHANGELOG-COMMUNITY.md): changes merged into `community`.
+* [Release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md): which build introduced each format and ABI.
+
+Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
+
+## 0.1.0-dev.60 — 2026-11-05
+
+* Cleaned up `CHANGELOG.md`:
+  * Removed the duplicate dev.11 and dev.42 entries.
+  * Restored newest-first order.
+  * Recorded what happened to dev.27–30: dev.28's entry had been folded into dev.31, and the other three were never committed builds.
+  * Added a header that explains the log.
+* Added `CHANGELOG-STABLE.md` for tagged `Stable-Release` releases (none yet) and `CHANGELOG-COMMUNITY.md` for `community` merges. Each has an entry template and rules.
+* Added `docs/RELEASE-AND-VERSIONING-MAP.md`. It covers:
+  * how the software, format, profile and ABI numbers relate;
+  * the current support matrix, including legacy formats that still decode;
+  * the history of all 28 formats, with byte, profile, introducing build and status;
+  * the ABI history;
+  * a build-to-commit table;
+  * the procedures for cutting and deprecating a release.
+* README: added sections on the repository, its branches, releases, versions, changelogs and documentation. The current-format list now includes Profile 0 and 0.1.
+* `tools/check_version.py` now also requires the map and both branch changelogs to exist and be linked from the README.
+* No code or format changes.
+
 ## 0.1.0-dev.59 — 2026-11-05
 
 * Work moves to the maintainer-only `scratch` branch. It was created from `main` at `8d5a42a`; `community` and `Stable-Release` are being set up by the maintainer.
@@ -241,6 +272,11 @@ An independent second review of dev.49 was run under rule 7 and every verified f
 * Reserved the interior of each curved finder as well as its stroke guard, while leaving the surrounding exterior Cartesian field available for data.
 * Preserved the camera-validated Format 0.8 locator unchanged. Profile 3 image/mobile decoding remains unimplemented and is explicitly not camera validated.
 
+## 0.1.0-dev.30, dev.29, dev.28, dev.27 — 2026-11-03
+
+* **dev.28** (`3b7da13`) first added Profile 3, Format 0.10.0. That entry was folded into the dev.31 entry above when dev.31 corrected it, so its text appears there.
+* **dev.27, dev.29 and dev.30** have no commit that changed `VERSION` and no recorded entry. They were not published builds.
+
 ## 0.1.0-dev.26 — 2026-11-03
 
 * Added experimental Format 0.9.0 Profile 2 for 1–200 byte text/binary payloads: a framed full RS(255,210) codeword with 45 parity bytes, CRC-32C, and deterministic SVG rendering in a denser 58×58 Cartesian / 144-slot eight-ring polar field.
@@ -375,12 +411,6 @@ An independent second review of dev.49 was run under rule 7 and every verified f
 * Versioned the wire format as 0.4.0 / format byte 04 and regenerated the CRC-32C/Reed–Solomon interoperability vector.
 * Added maintained geometry and version context for the supplied blueprint.
 
-## 0.1.0-dev.11 — 2026-11-03
-
-* Added C ABI grayscale image decoding for a caller-supplied symbol quadrilateral, with projective rectification, calibration-key checks, polarity normalization, data sampling, RS correction, and CRC-32C validation.
-* Added an optical PGM fixture cropped from a browser-rendered v0.8 symbol; tests cover actual pixel-to-payload decode, rotated quadrilateral order, inverted polarity, and invalid geometry.
-* Kept wire geometry at CKey Format 0.8.0. Full-frame symbol localization, lens-distortion correction, camera video scanning, and camera robustness benchmarks remain open.
-
 ## 0.1.0-dev.4 — 2026-11-02
 
 * Reworked the polar field into four inner concentric rings plus a separate 1.9-unit annular dial band; all 12:00/9:00/9:05 calibration rays now stay within that band rather than extending to the center.
@@ -407,11 +437,3 @@ An independent second review of dev.49 was run under rule 7 and every verified f
 * Added C ABI, CLI encoder, independent RS parity reference/vector, unit tests, and CI workflow.
 * Recorded versioning, context, research, license, and milestone rules.
 * Not included: erasure correction, image/camera decoder, perspective recovery, SDKs, browser lab, or measured device benchmarks.
-## 0.1.0-dev.42 — 2026-11-03
-
-* Added Profile 3 capacity/ECC tiers at 256, 384, 512, 768, 1,024, 1,536, and 2,048 payload bytes. The fixed optical codeword stays fully populated; each tier changes the RS data/parity split, and automatic encoding selects the smallest tier that fits.
-* Added deterministic SplitMix32 visual fill to new Profile 2 and Profile 3 frames, protected by RS and checked by frame/CRC validation. This prevents short payloads from rendering as mostly empty fields; it provides no secrecy.
-* Kept decoders compatible with legacy Profile 2 and 3 frames, and added the 0.17/0.18 format specifications.
-* Fixed the Mac renderer's stale-preview behavior on invalid input, stopped padding Profile 1 text into a different payload, debounced regeneration, updated preview effects without reloading the SVG, and rendered Profile 3 at the same module scale as lower profiles.
-* Expanded live scanner candidates from the visible border bounds to account for the border's inset from the canonical sampling field. This is a geometry correction; renderer-origin camera scans still need physical-device validation.
-* C++ core tests, optical locator fixtures, and version-node validation pass. Xcode builds and physical iPhone scans are not available in this environment.
