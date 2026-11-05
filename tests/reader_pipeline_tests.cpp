@@ -17,16 +17,17 @@ struct Rng { uint32_t s; uint32_t next() { s = s * 1664525u + 1013904223u; retur
 
 // Profile 0 symbols are encoded at this version (set per case).
 uint32_t g_scalable_version = 1;
+ckey_scalable_layout g_scalable_layout = CKEY_LAYOUT_STANDARD;  // Profile 0 (standard) or 0.1 (print)
 
 std::vector<uint8_t> payload_for(int profile, uint32_t seed) {
-    const size_t n = profile == 0 ? ckey_scalable_capacity(g_scalable_version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD)
+    const size_t n = profile == 0 ? ckey_scalable_capacity(g_scalable_version, CKEY_ECC_M, g_scalable_layout)
                    : profile == 1 ? 16 : profile == 2 ? 120 : 1200;
     std::vector<uint8_t> p(n); Rng r{seed}; for (auto &b : p) b = static_cast<uint8_t>(r.next() >> 24); return p;
 }
 
 std::string render(int profile, const std::vector<uint8_t> &payload) {
     ckey_diagnostics d{}; size_t n = 0; std::string svg;
-    if (profile == 0) { ckey_scalable_symbol s{}; ckey_encode_scalable(payload.data(), payload.size(), g_scalable_version, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d); ckey_render_scalable_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_scalable_svg(&s, 8, svg.data(), n, &n); }
+    if (profile == 0) { ckey_scalable_symbol s{}; ckey_encode_scalable(payload.data(), payload.size(), g_scalable_version, CKEY_ECC_M, g_scalable_layout, &s, &d); ckey_render_scalable_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_scalable_svg(&s, 8, svg.data(), n, &n); }
     else if (profile == 1) { ckey_symbol s{}; ckey_encode_locator(payload.data(), payload.size(), &s, &d); ckey_render_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_svg(&s, 8, svg.data(), n, &n); }
     else if (profile == 2) { ckey_text_symbol s{}; ckey_encode_text(payload.data(), payload.size(), &s, &d); ckey_render_text_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_text_svg(&s, 8, svg.data(), n, &n); }
     else { ckey_extended_symbol s{}; ckey_encode_extended(payload.data(), payload.size(), &s, &d); ckey_render_extended_svg(&s, 8, nullptr, 0, &n); svg.resize(n); ckey_render_extended_svg(&s, 8, svg.data(), n, &n); }
@@ -128,18 +129,21 @@ int scan(const std::vector<uint8_t> &frame, int w, int h, const std::vector<uint
 }  // namespace
 
 int main() {
-    struct Case { int profile, frame_w, frame_h; double px_per_unit; uint32_t version; };
+    struct Case { int profile, frame_w, frame_h; double px_per_unit; uint32_t version; ckey_scalable_layout layout = CKEY_LAYOUT_STANDARD; };
     // Field width in pixels = px/unit x field units; frame sizes match the
     // reader's portrait capture (1080p and 4K).
     // Profile 0 cases give px/unit as 8 px per module (px/unit = 8 / pitch).
     const Case cases[] = {{1, 1080, 1920, 10, 0}, {1, 1080, 1920, 14, 0}, {2, 1080, 1920, 14, 0}, {2, 1080, 1920, 20, 0},
                           {3, 2160, 3840, 13, 0}, {3, 2160, 3840, 16, 0},
                           {0, 1080, 1920, 8.0 * 29 / 29, 1}, {0, 1080, 1920, 8.0 * 31 / 29, 2}, {0, 1080, 1920, 8.0 * 58 / 29, 11},
-                          {0, 1080, 1920, 8.0 * 108 / 29, 20}, {0, 2160, 3840, 7.0 * 232 / 29, 31}};
+                          {0, 1080, 1920, 8.0 * 108 / 29, 20}, {0, 2160, 3840, 7.0 * 232 / 29, 31},
+                          // Profile 0.1 (print layout): the reader must find and decode it through the same pipeline.
+                          {0, 1080, 1920, 8.0 * 31 / 29, 2, CKEY_LAYOUT_PRINT}, {0, 1080, 1920, 8.0 * 58 / 29, 11, CKEY_LAYOUT_PRINT},
+                          {0, 1080, 1920, 6.0 * 108 / 29, 20, CKEY_LAYOUT_PRINT}};
     const double rotations[] = {0, 7, 18, 33};
     int total = 0, passed = 0, skipped = 0;
     for (const auto &c : cases) {
-        g_scalable_version = c.version;
+        g_scalable_version = c.version; g_scalable_layout = c.layout;
         int ok = 0, n = 0;
         for (double rotation : rotations) for (double keystone : {0.0, 0.08}) for (int variant = 0; variant < 2; ++variant) {
             const Scene sc{c.profile, c.frame_w, c.frame_h, c.px_per_unit * (c.profile == 3 ? 116 : 29), rotation, keystone,
@@ -158,7 +162,7 @@ int main() {
                 std::printf("  miss: P%d %.0f px/unit rot %.0f keystone %.2f %s%s (borders found %zu)\n", c.profile, c.px_per_unit, rotation,
                             keystone, variant ? "blur" : "sharp", sc.dark_on_light ? " dark-on-light" : "", borders);
         }
-        if (c.profile == 0) std::printf("P0 v%u %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.version, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
+        if (c.profile == 0) std::printf("P0%s v%u %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.layout == CKEY_LAYOUT_PRINT ? ".1" : "", c.version, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
         else std::printf("P%d %dx%d @ %.0f px/unit: %d/%d scenes decoded\n", c.profile, c.frame_w, c.frame_h, c.px_per_unit, ok, n);
         total += n; passed += ok;
     }

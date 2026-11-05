@@ -65,18 +65,19 @@ The adaptive repairs are:
 
 Values a renderer cannot draw, such as an unknown shape or NaN, are refused under every policy.
 
-**Certification is a modelled scan, not a contrast ratio:**
+**Certification is a modelled photo sweep, not a contrast ratio.** The style is judged against plain black on white for the same symbol.
 
-1. The symbol is rendered with the native raster.
-2. It is composited over every backdrop.
-3. The scan model degrades it: about 8 pixels per module, Gaussian defocus 0.9 px, sensor noise 3%, and 20% glare compression. Each setting can be changed in `ckey_scan_model`.
-4. The real decoder decodes it on 3 seeded trials per backdrop.
-5. The style is `certified = 1` only if every trial decodes exactly and the rules pass.
+1. The symbol is rendered with the native raster and composited over every backdrop.
+2. It is placed in a cluttered frame, tilted (8° rotation with a 4% keystone, and a −5° variant), with glare, defocus and sensor noise.
+3. The full reader pipeline (`ckey_find_borders_gray8`, then `ckey_refine_quad_gray8`, then decode) must find and decode it, exactly as an app would.
+4. The sweep walks down a ladder of camera resolutions (9, 7, 5.5, 4.5, 3.75 and 3 pixels per module) to find the smallest one that still decodes.
+5. The grade compares that size with plain black on white: **excellent** (as small as plain), **good** (one step larger), **marginal** (two steps) or **fails**.
+6. A style is `certified = 1` when the rules pass and the grade is good or better.
 
-The result also reports, for information:
+The message states both sizes, so a designer can see the cost of a decoration rather than only a pass or fail. The result also reports, for information:
 
 - the WCAG-style minimum contrast;
-- the luma separation between mark and gap pixels after compositing (5th/95th percentile);
+- the mark/gap luma separation;
 - the logo load.
 
 **Transparent output:** the renderer cannot see what is behind a transparent symbol. Certification therefore needs a `ckey_backdrop`, given as solid colours and/or the host's own pixels. Without one it reports "background unknown" and `certified = 0`. A host image's darkest and lightest pixels also join the contrast rules, so a busy photo is not certified by its average.

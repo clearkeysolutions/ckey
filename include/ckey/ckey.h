@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.71"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.72"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -474,20 +474,32 @@ CKEY_API ckey_status ckey_render_scalable_pdf(const ckey_scalable_symbol *symbol
 
 /*
  * Optical certification (specification §4, acceptance criteria 5 and 6).
- * A style is certified only by decoding it through a modelled acquisition,
- * never from a contrast ratio alone. The symbol is rendered with the native
- * raster, composited over every backdrop, degraded by the scan model, and
- * decoded with the real decoder. certified = 1 only if every trial on every
- * backdrop decodes the payload exactly.
+ * A style is certified only by decoding it through modelled photographs,
+ * never from a contrast ratio alone, and it is judged against plain black on
+ * white for the same symbol.
+ *
+ * The sweep renders the symbol with the native raster, composites it over
+ * every backdrop, places it in a cluttered frame tilted by rotation and
+ * keystone, adds glare, defocus and sensor noise, and runs the full reader
+ * pipeline (ckey_find_borders_gray8, ckey_refine_quad_gray8, decode). It
+ * walks a ladder of camera resolutions (9, 7, 5.5, 4.5, 3.75, 3 pixels per
+ * module) to find the smallest one at which the style still decodes. The
+ * grade compares that with plain black on white:
+ *   excellent  decodes as small as plain does
+ *   good       needs one ladder step more than plain
+ *   marginal   needs two steps more
+ *   fails      three or more, never decodes, or needs more than
+ *              model.px_per_module
+ * certified = 1 needs the safety rules to pass and a grade of good or
+ * better. trials and trials_passed count the modelled photos.
  *
  * Transparent symbols: the renderer cannot see what lies behind them, so
  * transparent = 1 needs a backdrop (solid colours and/or the host's pixels
  * behind the symbol). Without one, certification reports certified = 0
  * ("background unknown") and never claims readability.
  *
- * The default scan model is a phone camera at about 8 pixels per module
- * with mild defocus, sensor noise, and glare. It is a model, not a
- * measurement; real-camera tests remain the evidence (spec §11.6).
+ * The model is a model, not a measurement. Real-camera tests remain the
+ * evidence (spec §11.6).
  */
 typedef struct ckey_backdrop {
     const ckey_rgb *colours;   /* solid backgrounds the symbol may sit on */
@@ -498,11 +510,11 @@ typedef struct ckey_backdrop {
 } ckey_backdrop;
 typedef struct ckey_scan_model {
     uint32_t abi_version;      /* CKEY_ABI_VERSION */
-    double px_per_module;      /* camera sampling; default 8 */
+    double px_per_module;      /* the style must decode at this resolution or finer; default 8 */
     double blur_px;            /* Gaussian defocus sigma in camera pixels; default 0.9 */
     double noise;              /* sensor noise sigma, fraction of full scale; default 0.03 */
     double glare;              /* contrast compression 0..0.9: luma -> luma * (1 - g) + g; default 0.2 */
-    uint32_t trials;           /* noise seeds per backdrop, 1..16; default 3 */
+    uint32_t trials;           /* accepted for compatibility (1..16); the sweep sets its own scenes */
 } ckey_scan_model;
 #define CKEY_ADJUST_INK 1u         /* ink replaced by black or white */
 #define CKEY_ADJUST_ACCENTS 2u     /* accents removed */

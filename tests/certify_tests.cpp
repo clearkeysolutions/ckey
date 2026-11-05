@@ -33,18 +33,21 @@ int main() {
     CKEY_CHECK(plain.policy == CKEY_POLICY_STRICT);
     ckey_certification c{};
 
-    // The default style certifies through the modelled scan at small, middle and largest versions.
+    // The default style certifies, with the best grade, through the realistic photo sweep
+    // (clutter, tilt, glare, defocus, noise, and the full find -> refine -> decode pipeline).
     for (uint32_t v : {1u, 11u, 31u}) {
         const auto s = encode(v, url);
         const auto t0 = std::chrono::steady_clock::now();
         CKEY_CHECK(ckey_certify_scalable_style(&s, nullptr, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK);
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        CKEY_CHECK(c.certified == 1 && c.trials == 3 && c.trials_passed == 3 && c.feature_separation > 0.5 && c.min_contrast > 20);
+        CKEY_CHECK(c.certified == 1 && c.trials > 0 && c.trials_passed > 0 && c.feature_separation > 0.5 && c.min_contrast > 20);
+        CKEY_CHECK(std::string(c.message).find("certified (excellent)") == 0);
         std::printf("v%u plain: %s (%.0f ms)\n", v, c.message, ms);
     }
     const auto s = encode(6, url);
 
-    // A coarser, blurrier model can fail a dense symbol: the verdict depends on the model, not the colours.
+    // The model's px_per_module is the resolution a style must decode at: asking for 2.5 px per
+    // module (below the sweep's smallest step) with heavy blur fails even plain black on white.
     {
         const auto dense = encode(31, url);
         ckey_scan_model hard; ckey_scan_model_default(&hard); hard.px_per_module = 2.5; hard.blur_px = 1.6;
@@ -113,6 +116,17 @@ int main() {
     const auto s11 = encode(11, url);
     CKEY_CHECK(ckey_certify_scalable_style(&s11, &art, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);
     std::printf("concept preset: %s\n", c.message);
+    // Grades rank styles by how much larger than plain black on white they must be to scan.
+    {
+        const auto v11 = encode(11, url);
+        ckey_style faint = plain; faint.ink = faint.ink_shade = {0xaa, 0xaa, 0xaa}; faint.policy = CKEY_POLICY_OVERRIDE;
+        CKEY_CHECK(ckey_certify_scalable_style(&v11, &faint, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 0);
+        CKEY_CHECK(std::string(c.message).find("fails scan margin") != std::string::npos);
+        std::printf("faint #aaaaaa (override): %s\n", c.message);
+        ckey_style decorated; ckey_style_preset_fill(&decorated, CKEY_PRESET_CONCEPT);
+        CKEY_CHECK(ckey_certify_scalable_style(&v11, &decorated, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);
+        CKEY_CHECK(std::string(c.message).find("plain black on white down to") != std::string::npos);
+    }
     std::printf("certification tests passed\n");
     return 0;
 }

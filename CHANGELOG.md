@@ -10,6 +10,22 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.72 — 2026-11-05
+
+* **Certification now models real photographs.** The old check decoded the styled symbol from a perfectly known position at a comfortable 8 px per module, so almost every style passed. `ckey_certify_scalable_style` now runs a photo sweep:
+  1. place the symbol in a cluttered frame, with rotation, keystone, glare, defocus and noise;
+  2. run the full reader pipeline: find borders, refine, decode;
+  3. walk a ladder of camera resolutions (9 down to 3 px per module) to find the smallest that still decodes;
+  4. grade the style against plain black on white for the same symbol: **excellent** as small as plain, **good** one step larger, **marginal** two steps, otherwise **fails**.
+  * Certification needs the safety rules plus a grade of good or better.
+  * The message states both sizes, so the cost of a decoration is visible.
+  * The plain reference is cached per symbol.
+  * Typical cost is 0.1–0.7 s for v1–v11 and about 5 s for v31, natively.
+  * The API and ABI are unchanged; `model.px_per_module` now sets the resolution the style must decode at.
+  * The design-system spec and the header document the new semantics.
+* **Profile 0.1 regression coverage:** the simulated-reader test now also scans print-layout symbols (v2, v11, v20) through the exact pipeline the iPhone reader uses. All 48 new scenes decode, and under heavy blur Profile 0.1 decodes far better than the standard layout. The reported CKey Reader failure is consistent with an app build from before build 58, when Profile 0.1 did not exist.
+* **CKey Reader:** the subtitle now lists Profiles 0, 0.1 and 1–3.
+
 ## 0.1.0-build.71 — 2026-11-05
 
 * **Removed `services/openckey`,** the Node prototype of the openckey.org service. Its telemetry ingestion, renderer page and abuse controls now live in the proprietary openckey.org site. That site follows the same normative `docs/adoption-and-telemetry.md`, and it pins this repository's commits to build the web SDK.
