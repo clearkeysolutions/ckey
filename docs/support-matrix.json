@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "description": "Machine-readable CKey version support matrix (specification §8.2). Human-readable form: docs/RELEASE-AND-VERSIONING-MAP.md.",
-  "current_build": "0.1.0-build.70",
+  "current_build": "0.1.0-build.71",
   "abi": 4,
   "tag_format": "v0.1.0-build.N",
   "releases": [],

@@ -10,6 +10,10 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.71 — 2026-11-05
+
+* **Removed `services/openckey`,** the Node prototype of the openckey.org service. Its telemetry ingestion, renderer page and abuse controls now live in the proprietary openckey.org site. That site follows the same normative `docs/adoption-and-telemetry.md`, and it pins this repository's commits to build the web SDK.
+
 ## 0.1.0-build.70 — 2026-11-05
 
 * **openckey.org is now a separate, proprietary site.** It provides:

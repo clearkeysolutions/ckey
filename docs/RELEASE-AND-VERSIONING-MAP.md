@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.70**, C ABI **4**.
+Build **0.1.0-build.71**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -85,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.70 | (this commit) | 2026-11-05 | openckey.org separated; release attaches every SDK package |
+| build.71 | (this commit) | 2026-11-05 | Remove the openckey.org prototype service |
+| build.70 | `3f44787` | 2026-11-05 | openckey.org separated; release attaches every SDK package |
 | build.69 | `946793a` | 2026-11-05 | Android SDK |
 | build.68 | `71d20d6` | 2026-11-05 | Implementation status, platform integration guide, README and context |
 | build.67 | `97f304d` | 2026-11-05 | Swift package and .NET SDK |
