@@ -1,11 +1,12 @@
 #include "ckey/ckey.h"
-#include "svg_raster.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -2402,6 +2403,8 @@ ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const
 
 }  // extern "C"
 
+#include "scalable_render.inc"
+
 // ---------------------------------------------------------------------------
 // Full-frame localization (moved from the iPhone reader so it is shared and
 // testable). Border candidates are connected components of the continuous
@@ -2717,17 +2720,19 @@ ckey_status ckey_render_scalable_print(const ckey_scalable_symbol *s, const ckey
         return CKEY_INVALID_ARGUMENT;
     ckey_style st; ckey_style_default(&st);
     if (style) { st.modules = style->modules; st.rings = style->rings; st.rays = style->rays; }  // shapes only
-    size_t needed = 0;
-    if (ckey_render_scalable_styled_svg(s, &st, 8, nullptr, 0, &needed) != CKEY_INSUFFICIENT_BUFFER) return CKEY_INVALID_ARGUMENT;
     const int side = std::max(16, static_cast<int>(std::lround(width_in * dpi)));
+    if (side > 16384) return CKEY_INVALID_ARGUMENT;
+    // Direct geometry -> printer dots: black where at least half of a 3x3
+    // sample grid is ink (no SVG in this path; specification §2.2).
+    ckey_raster_options o; ckey_raster_options_default(&o);
+    o.size_px = static_cast<uint32_t>(side); o.policy = CKEY_RASTER_BINARY; o.format = CKEY_PIXELS_GRAY8;
+    o.supersample = 3; o.materials = 0;
+    size_t needed = 0;
+    const ckey_status probe = ckey_render_scalable_raster(s, &st, &o, nullptr, 0, &needed);
+    if (probe != CKEY_INSUFFICIENT_BUFFER) return probe == CKEY_OK ? CKEY_INTERNAL_ERROR : probe;
     *out_side = static_cast<size_t>(side);
-    if (!out || cap < static_cast<size_t>(side) * side) return CKEY_INSUFFICIENT_BUFFER;
-    std::string svg(needed, '\0');
-    if (ckey_render_scalable_styled_svg(s, &st, 8, svg.data(), needed, &needed) != CKEY_OK) return CKEY_INTERNAL_ERROR;
-    svg.resize(needed - 1);
-    const auto cover = svgtest::rasterize(svgtest::parse(svg), side, side, 3, 0, 255);
-    for (size_t i = 0; i < cover.size(); ++i) out[i] = cover[i] >= 128 ? 0 : 255;
-    return CKEY_OK;
+    if (!out || cap < needed) return CKEY_INSUFFICIENT_BUFFER;
+    return ckey_render_scalable_raster(s, &st, &o, out, cap, &needed);
 }
 
 }  // extern "C"

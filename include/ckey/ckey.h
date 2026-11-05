@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 3u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.61"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.62"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -341,6 +341,118 @@ CKEY_API ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol 
 CKEY_API ckey_status ckey_render_scalable_print(const ckey_scalable_symbol *symbol, const ckey_style *style,
                                                  double width_in, double dpi, uint8_t *out_gray,
                                                  size_t out_capacity, size_t *out_side);
+/*
+ * Canonical geometry (specification §2.1). A Profile 0 symbol, with a
+ * style's mark shapes, is a list of primitives in canonical units: the
+ * symbol field spans 0..29 on both axes and the full canvas, including the
+ * quiet margin, spans -1..30 (31 units). x grows right and y grows down.
+ * Every backend (raster, PDF, SVG) draws exactly these shapes, in this order
+ * (painter's order: a LOGO_PLATE shape erases the ink drawn before it).
+ *
+ *   kind               p[0..4]                         width
+ *   RECT               x, y, w, h, corner radius        -
+ *   RECT_OUTLINE       x, y, w, h, corner radius        stroke width (centred on the outline)
+ *   CIRCLE             cx, cy, r                        -
+ *   DIAMOND            cx, cy, d (vertices at ±d)       -
+ *   LINE               x0, y0, x1, y1                   stroke width; round_cap
+ *   ARC                cx, cy, r, start, sweep          stroke width; round_cap
+ *   LOGO               cx, cy, r (circular clip)        -
+ *
+ * Arc angles are radians in canvas coordinates: 0 points along +x, and a
+ * positive sweep turns clockwise on screen (toward +y).
+ */
+typedef enum ckey_shape_kind {
+    CKEY_SHAPE_RECT = 0, CKEY_SHAPE_RECT_OUTLINE = 1, CKEY_SHAPE_CIRCLE = 2, CKEY_SHAPE_DIAMOND = 3,
+    CKEY_SHAPE_LINE = 4, CKEY_SHAPE_ARC = 5, CKEY_SHAPE_LOGO = 6
+} ckey_shape_kind;
+typedef enum ckey_layer {
+    CKEY_LAYER_FRAME = 0, CKEY_LAYER_FINDERS = 1, CKEY_LAYER_GRID_KEY = 2, CKEY_LAYER_POLAR_KEYS = 3,
+    CKEY_LAYER_DATA_POLAR = 4, CKEY_LAYER_DATA_CARTESIAN = 5, CKEY_LAYER_LOGO_PLATE = 6, CKEY_LAYER_LOGO = 7
+} ckey_layer;
+#define CKEY_PAINT_INK (-1)          /* the style's ink (or its sheen) */
+#define CKEY_PAINT_BACKGROUND (-2)   /* erases ink: the logo plate */
+typedef struct ckey_shape {
+    uint32_t kind;       /* ckey_shape_kind */
+    uint32_t layer;      /* ckey_layer */
+    int32_t paint;       /* CKEY_PAINT_INK, CKEY_PAINT_BACKGROUND, or accent index 0..3 */
+    uint32_t round_cap;  /* LINE and ARC: 1 round caps, 0 flat (butt) caps */
+    double p[5];
+    double width;
+} ckey_shape;
+/* Writes the symbol's primitives (style may be NULL for the default shapes).
+ * Call with out NULL to get *out_count. The style must pass the style check. */
+CKEY_API ckey_status ckey_scalable_geometry(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                            ckey_shape *out, size_t out_capacity, size_t *out_count);
+
+/*
+ * Direct raster backend (specification §2.2): geometry to pixels, with no
+ * SVG, no file system, no network, and no graphics library. The output is
+ * size_px x size_px pixels covering the full 31-unit canvas, rows top to
+ * bottom with no padding.
+ *
+ * Policies (benchmark them; none is universally best):
+ *   COVERAGE  antialiased: each pixel's ink is its supersampled area coverage.
+ *   BINARY    each pixel is ink when at least half its samples are covered.
+ *   HYBRID    coverage, but marks thinner than min_feature_px (default 1 px)
+ *             are widened to it so thin rays and dots stay continuous.
+ *             HYBRID changes drawn widths, never the encoded topology.
+ *
+ * Formats: RGBA8 (straight, non-premultiplied sRGB alpha) or GRAY8 (Rec. 709
+ * luma of the opaque result). transparent = 1 (RGBA8 only) paints no
+ * background, vignette or texture: unpainted pixels have alpha 0. materials
+ * = 0 draws flat ink (no sheen, depth, or grain). logo (optional) is drawn
+ * into the style's logo circle; without it the logo area shows only the
+ * plate, if any.
+ */
+typedef enum ckey_raster_policy { CKEY_RASTER_COVERAGE = 0, CKEY_RASTER_BINARY = 1, CKEY_RASTER_HYBRID = 2 } ckey_raster_policy;
+typedef enum ckey_pixel_format { CKEY_PIXELS_RGBA8 = 0, CKEY_PIXELS_GRAY8 = 1 } ckey_pixel_format;
+typedef struct ckey_logo_image {
+    const uint8_t *rgba;       /* straight-alpha RGBA8 */
+    uint32_t width, height;
+    size_t stride;             /* bytes per row; 0 = width * 4 */
+} ckey_logo_image;
+typedef struct ckey_raster_options {
+    uint32_t abi_version;      /* CKEY_ABI_VERSION */
+    uint32_t size_px;          /* 16..16384 */
+    uint32_t policy;           /* ckey_raster_policy */
+    uint32_t format;           /* ckey_pixel_format */
+    uint32_t transparent;
+    uint32_t supersample;      /* samples per pixel axis, 1..8 */
+    double min_feature_px;     /* HYBRID only; > 0 */
+    uint32_t materials;
+    const ckey_logo_image *logo;
+} ckey_raster_options;
+/* Defaults: 512 px, COVERAGE, RGBA8, opaque, 4x4 samples, 1 px, materials on. */
+CKEY_API void ckey_raster_options_default(ckey_raster_options *options);
+/* style may be NULL (default style). Call with out NULL to get *out_required
+ * (size_px * size_px * 4 for RGBA8, size_px * size_px for GRAY8). */
+CKEY_API ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                 const ckey_raster_options *options, uint8_t *out,
+                                                 size_t out_capacity, size_t *out_required);
+
+/*
+ * PNG export (specification §2.5), from any pixel buffer. Compressed with
+ * DEFLATE (fixed Huffman codes and LZ77); no zlib dependency. GRAY1 writes a
+ * 1-bit image from GRAY8 input (< 128 is black) for print bitmaps. dpi > 0
+ * records the physical resolution (pHYs). Call with out NULL for the size.
+ */
+typedef enum ckey_png_format { CKEY_PNG_RGBA8 = 0, CKEY_PNG_GRAY8 = 1, CKEY_PNG_GRAY1 = 2 } ckey_png_format;
+CKEY_API ckey_status ckey_encode_png(const uint8_t *pixels, uint32_t width, uint32_t height, size_t stride,
+                                     ckey_png_format format, double dpi, uint8_t *out, size_t out_capacity,
+                                     size_t *out_required);
+
+/*
+ * PDF vector export (specification §2.3-2.4): a one-page PDF 1.4 whose page
+ * is width_pt points wide (72 points per inch) and holds the exact geometry
+ * as filled and stroked paths (arcs as cubic Béziers). Flat colours only:
+ * ink, accents and the background (omitted when transparent = 1). Screen
+ * materials (sheen, depth, grain) and logos are not exported. Call with out
+ * NULL for the size.
+ */
+CKEY_API ckey_status ckey_render_scalable_pdf(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                              double width_pt, uint32_t transparent, uint8_t *out,
+                                              size_t out_capacity, size_t *out_required);
+
 /* scale is pixels per module and is constrained to 1..CKEY_MAX_RENDER_SCALE. */
 CKEY_API ckey_status ckey_render_svg(const ckey_symbol *symbol, uint32_t scale,
                                       char *out_utf8, size_t out_capacity,

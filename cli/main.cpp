@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -55,7 +56,8 @@ static std::string base64(const std::string &in) {
 //   [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]
 //   [--logo <png|jpg|svg file>] [--logo-radius <units>]
 static int encode_scalable(int argc, char **argv) {
-    std::string mode, value, output, logo_href, png; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    std::string mode, value, output, logo_href, png, raster_out, pdf_out; uint32_t version = 0; ckey_ecc_level level = CKEY_ECC_M;
+    bool transparent = false; ckey_raster_policy policy = CKEY_RASTER_COVERAGE; uint32_t size_px = 1024;
     double size_in = 1.0, dpi = 600;
     ckey_scalable_layout layout = CKEY_LAYOUT_STANDARD;
     ckey_style style; ckey_style_default(&style);
@@ -71,6 +73,17 @@ static int encode_scalable(int argc, char **argv) {
             if (arg == "L") level = CKEY_ECC_L; else if (arg == "M") level = CKEY_ECC_M; else if (arg == "Q") level = CKEY_ECC_Q; else if (arg == "H") level = CKEY_ECC_H;
             else { std::cerr << "--level must be L, M, Q, or H\n"; return 2; }
         } else if (flag == "--png") { png = arg;
+        } else if (flag == "--raster") { raster_out = arg;
+        } else if (flag == "--pdf") { pdf_out = arg;
+        } else if (flag == "--transparent") {
+            if (arg == "yes") transparent = true; else if (arg == "no") transparent = false; else { std::cerr << "--transparent must be yes or no\n"; return 2; }
+        } else if (flag == "--policy") {
+            if (arg == "coverage") policy = CKEY_RASTER_COVERAGE; else if (arg == "binary") policy = CKEY_RASTER_BINARY; else if (arg == "hybrid") policy = CKEY_RASTER_HYBRID;
+            else { std::cerr << "--policy must be coverage, binary, or hybrid\n"; return 2; }
+        } else if (flag == "--size-px") {
+            char *end = nullptr; const long v = std::strtol(arg.c_str(), &end, 10);
+            if (!end || *end || v < 16 || v > 16384) { std::cerr << "--size-px must be 16 to 16384\n"; return 2; }
+            size_px = static_cast<uint32_t>(v);
         } else if (flag == "--size-in" || flag == "--dpi") {
             char *end = nullptr; const double v = std::strtod(arg.c_str(), &end);
             if (!end || *end || !(v > 0)) { std::cerr << flag << " must be a positive number\n"; return 2; }
@@ -105,10 +118,12 @@ static int encode_scalable(int argc, char **argv) {
         } else { std::cerr << "unknown option " << flag << '\n'; return 2; }
     }
     if (!logo_href.empty()) style.logo_href = logo_href.c_str();
-    if ((argc % 2) != 0 || mode.empty() || (output.empty() && png.empty())) {
+    if ((argc % 2) != 0 || mode.empty() || (output.empty() && png.empty() && raster_out.empty() && pdf_out.empty())) {
         std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H] [--layout standard|print]\n"
                      "         [--preset plain|concept] [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]\n"
-                     "         [--logo <file>] [--logo-radius <units>]\n"; return 2;
+                     "         [--logo <file>] [--logo-radius <units>]\n"
+                     "         [--raster <file.png> [--size-px N] [--policy coverage|binary|hybrid] [--transparent yes|no]] [--pdf <file.pdf>]\n"
+                     "         [--png <print.png> [--size-in IN] [--dpi DPI]]\n"; return 2;
     }
     std::vector<uint8_t> payload;
     if (mode == "--hex") { if (!from_hex(value, payload)) { std::cerr << "hex input must be an even number of hexadecimal digits\n"; return 2; } }
@@ -120,12 +135,37 @@ static int encode_scalable(int argc, char **argv) {
     size_t needed = 0; ckey_render_scalable_styled_svg(symbol.get(), &style, 16, nullptr, 0, &needed);
     std::string svg(needed, '\0');
     if (ckey_render_scalable_styled_svg(symbol.get(), &style, 16, svg.data(), svg.size(), &needed) != CKEY_OK || (!output.empty() && !write_svg(output, svg))) { std::cerr << "SVG rendering failed\n"; return 1; }
+    if (!raster_out.empty()) {
+        // Screen raster straight from geometry (no SVG). A logo file is not
+        // decoded here, so the raster shows only its plate.
+        ckey_raster_options o; ckey_raster_options_default(&o);
+        o.size_px = size_px; o.policy = policy; o.transparent = transparent ? 1u : 0u;
+        size_t need = 0;
+        if (ckey_render_scalable_raster(symbol.get(), &style, &o, nullptr, 0, &need) != CKEY_INSUFFICIENT_BUFFER) { std::cerr << "raster rendering failed\n"; return 1; }
+        std::vector<uint8_t> px(need);
+        size_t png_need = 0;
+        if (ckey_render_scalable_raster(symbol.get(), &style, &o, px.data(), px.size(), &need) != CKEY_OK ||
+            ckey_encode_png(px.data(), size_px, size_px, 0, CKEY_PNG_RGBA8, 0, nullptr, 0, &png_need) != CKEY_INSUFFICIENT_BUFFER) { std::cerr << "raster rendering failed\n"; return 1; }
+        std::vector<uint8_t> file(png_need);
+        if (ckey_encode_png(px.data(), size_px, size_px, 0, CKEY_PNG_RGBA8, 0, file.data(), file.size(), &png_need) != CKEY_OK) { std::cerr << "PNG encoding failed\n"; return 1; }
+        std::ofstream f(raster_out, std::ios::binary); f.write(reinterpret_cast<const char *>(file.data()), static_cast<std::streamsize>(file.size()));
+        if (!f) { std::cerr << "could not write " << raster_out << '\n'; return 1; }
+        std::cout << "raster PNG: " << raster_out << " (" << size_px << " px" << (transparent ? ", transparent" : "") << ")\n";
+    }
+    if (!pdf_out.empty()) {
+        size_t need = 0;
+        if (ckey_render_scalable_pdf(symbol.get(), &style, size_in * 72.0, transparent ? 1u : 0u, nullptr, 0, &need) != CKEY_INSUFFICIENT_BUFFER) { std::cerr << "PDF rendering failed\n"; return 1; }
+        std::vector<uint8_t> file(need);
+        if (ckey_render_scalable_pdf(symbol.get(), &style, size_in * 72.0, transparent ? 1u : 0u, file.data(), file.size(), &need) != CKEY_OK) { std::cerr << "PDF rendering failed\n"; return 1; }
+        std::ofstream f(pdf_out, std::ios::binary); f.write(reinterpret_cast<const char *>(file.data()), static_cast<std::streamsize>(file.size()));
+        if (!f) { std::cerr << "could not write " << pdf_out << '\n'; return 1; }
+        std::cout << "vector PDF: " << pdf_out << " (" << size_in << " in)\n";
+    }
     if (!png.empty()) {
         // Print export: black ink on paper on the printer's dot grid. Colours,
         // materials, and logo images are screen styling and are not printed.
         printout::Page page; page.width = page.height = static_cast<int>(std::lround(size_in * dpi)); page.ink.assign(static_cast<size_t>(page.width) * page.height, 0);
-        svg.resize(needed - 1); printout::draw_symbol(page, svg, 0, 0, page.width);
-        if (!printout::write_png(png, page, dpi)) { std::cerr << "could not write " << png << '\n'; return 1; }
+        if (!printout::draw_symbol(page, *symbol, &style, 0, 0, page.width, dpi) || !printout::write_png(png, page, dpi)) { std::cerr << "could not write " << png << '\n'; return 1; }
         std::cout << "print PNG: " << png << " (" << size_in << " in at " << dpi << " dpi, 1-bit, black on paper)\n";
     }
     std::cout << diag.message << "; profile=0" << (layout == CKEY_LAYOUT_PRINT ? ".1" : "") << "; format=0."
@@ -167,9 +207,7 @@ static int print_sheet(int argc, char **argv) {
             if (ckey_encode_scalable(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), 0, CKEY_ECC_M, layout, symbol.get(), &diag) != CKEY_OK) {
                 std::cerr << "cannot encode " << label << ": " << diag.message << '\n'; return 1;
             }
-            size_t needed = 0; ckey_render_scalable_svg(symbol.get(), 8, nullptr, 0, &needed);
-            std::string svg(needed, '\0'); ckey_render_scalable_svg(symbol.get(), 8, svg.data(), needed, &needed); svg.resize(needed - 1);
-            printout::draw_symbol(page, svg, x, y, in(size));
+            if (!printout::draw_symbol(page, *symbol, nullptr, x, y, in(size), dpi)) { std::cerr << "cannot render " << label << '\n'; return 1; }
             char caption[32]; std::snprintf(caption, sizeof(caption), "v%u %.2fin", symbol->version, size);
             printout::draw_text(page, caption, x, y + in(size) + text * 2, text);
             x += in(size) + in(0.3);

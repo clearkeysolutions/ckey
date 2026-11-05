@@ -10,6 +10,36 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.62 — 2026-11-05
+
+* **Canonical geometry (spec §2.1):** `ckey_scalable_geometry` returns a Profile 0 / 0.1 symbol as a list of primitives in canonical units, in painter's order. The primitives are rect, rect outline, circle, diamond, line, arc and logo, each tagged with a layer and a paint. Every native backend draws this list.
+* **Direct raster backend (spec §2.2, §2.5, acceptance criteria 2 and 4):** `ckey_render_scalable_raster` turns the geometry into pixels with no SVG, file system, network or graphics library.
+  * **Output:** RGBA8 (straight alpha) or GRAY8.
+  * **Three raster policies:**
+    * `COVERAGE`: supersampled antialiasing.
+    * `BINARY`: a pixel is ink when at least 50% of its samples are covered.
+    * `HYBRID`: coverage, with marks thinner than a minimum feature, 1 px by default, widened to it.
+  * **Transparency:** in transparent mode the background is not painted and unpainted pixels have alpha 0.
+  * **Materials:** natively rendered approximations of sheen, vignette, grain, drop shadow and bevel. The logo is supplied by the caller as RGBA and drawn into its clip circle.
+* **PNG export:** `ckey_encode_png`, with DEFLATE implemented in the core (fixed Huffman codes, LZ77), RGBA8, GRAY8 or 1-bit, and pHYs. There is no zlib dependency.
+* **PDF vector export (spec §2.3–2.4):** `ckey_render_scalable_pdf` writes a one-page PDF 1.4 with exact paths, arcs as cubic Béziers, flat ink, accents and background, and an optional transparent mode.
+* **Print path:** `ckey_render_scalable_print` now rasterizes the geometry directly, with the binary policy and a 3×3 sample grid, instead of generating SVG and parsing it back. The core no longer includes the SVG parser, which stays a test and reference tool.
+* **CLI:**
+  * `encode-scalable` gains `--raster out.png --size-px N --policy coverage|binary|hybrid --transparent yes|no` and `--pdf out.pdf` (`--size-in` sets the width).
+  * `--png` and `print-sheet` use the core print raster and PNG encoder.
+* **New test `ckey_native_render`:**
+  * The direct raster matches the rasterized SVG export to within 0.01% of pixels, from SVG's 4-decimal rounding, at v2, v11, v20 and v31 across shapes, ring styles and caps.
+  * All three policies decode at 7 px/module for v1, v9 and v31 in both layouts, and the output is deterministic.
+  * HYBRID adds ink to thin features.
+  * Transparent margins have alpha 0.
+  * The concept preset with depth, grain and a logo decodes.
+  * Geometry API layers are checked.
+  * PNG round-trips through an independent inflater.
+  * PDF cross-reference offsets are valid.
+  * Print output is pure ink or paper.
+* No format changes, and conformance hashes are unchanged.
+* The partial `services/openckey/` files committed by accident in build 61 are finished in the next build.
+
 ## 0.1.0-build.61 — 2026-11-05
 
 * **Version scheme:** from this build, versions are `0.1.0-build.N` and release tags are `v0.1.0-build.N`, as the maintainer chose. Builds 1–60 keep their `0.1.0-dev.N` names in this log. See the [map](docs/RELEASE-AND-VERSIONING-MAP.md#tag-and-version-form).

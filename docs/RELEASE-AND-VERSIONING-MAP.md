@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.61**, C ABI **3**.
+Build **0.1.0-build.62**, C ABI **3**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -84,7 +84,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.61 | (this commit) | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
+| build.62 | (this commit) | 2026-11-05 | Canonical geometry API; direct raster, PNG and PDF backends |
+| build.61 | `ad5e295` | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
 | dev.60 | `817e365` | 2026-11-05 | Changelogs, repository README and the release and versioning map |
 | dev.59 | `58f0066` | 2026-11-05 | Add rendering/SDK/telemetry specification, status map, branch guide |
 | dev.58 | `8d5a42a` | 2026-11-04 | Add Profile 0.1 print-robust layout and print output |

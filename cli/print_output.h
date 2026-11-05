@@ -1,11 +1,11 @@
 // Print output for the CLI: 1-bit PNG on the printer's exact dot grid (no
 // anti-aliasing, so no grey for the printer to halftone into noise), with a
 // pHYs chunk so the image prints at its true physical size, plus a tiny 5x7
-// bitmap font for calibration-sheet labels. No dependencies.
+// bitmap font for calibration-sheet labels. Uses only the core's C ABI.
 #ifndef CKEY_CLI_PRINT_OUTPUT_H
 #define CKEY_CLI_PRINT_OUTPUT_H
 
-#include "svg_raster.h"
+#include "ckey/ckey.h"
 
 #include <array>
 #include <cstdint>
@@ -18,54 +18,33 @@ namespace printout {
 
 struct Page { int width = 0, height = 0; std::vector<uint8_t> ink; };  // 1 = ink
 
-inline uint32_t crc32_ieee(const uint8_t *data, size_t len, uint32_t crc = 0xffffffffu) {
-    for (size_t i = 0; i < len; ++i) { crc ^= data[i]; for (int b = 0; b < 8; ++b) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u))); }
-    return crc;
-}
-
+// 1-bit PNG with pHYs, through the core's PNG encoder.
 inline bool write_png(const std::string &path, const Page &page, double dpi) {
-    const auto be32 = [](std::vector<uint8_t> &v, uint32_t x) { for (int s = 24; s >= 0; s -= 8) v.push_back(static_cast<uint8_t>(x >> s)); };
-    std::vector<uint8_t> raw;  // filter byte + packed 1-bit rows (1 = white paper)
-    const size_t row_bytes = (static_cast<size_t>(page.width) + 7) / 8;
-    for (int y = 0; y < page.height; ++y) {
-        raw.push_back(0); const size_t start = raw.size(); raw.resize(start + row_bytes, 0);
-        for (int x = 0; x < page.width; ++x) if (!page.ink[static_cast<size_t>(y) * page.width + x]) raw[start + x / 8] |= static_cast<uint8_t>(0x80 >> (x % 8));
-    }
-    std::vector<uint8_t> z = {0x78, 0x01};  // zlib stream of stored (uncompressed) deflate blocks
-    uint32_t a = 1, b = 0;
-    for (size_t off = 0; off < raw.size();) {
-        const size_t n = std::min<size_t>(65535, raw.size() - off);
-        z.push_back(off + n == raw.size() ? 1 : 0);
-        z.push_back(static_cast<uint8_t>(n)); z.push_back(static_cast<uint8_t>(n >> 8));
-        z.push_back(static_cast<uint8_t>(~n)); z.push_back(static_cast<uint8_t>((~n) >> 8));
-        for (size_t i = 0; i < n; ++i) { const uint8_t c = raw[off + i]; z.push_back(c); a = (a + c) % 65521; b = (b + a) % 65521; }
-        off += n;
-    }
-    be32(z, (b << 16) | a);
+    std::vector<uint8_t> gray(page.ink.size());
+    for (size_t i = 0; i < gray.size(); ++i) gray[i] = page.ink[i] ? 0 : 255;
+    size_t need = 0;
+    if (ckey_encode_png(gray.data(), static_cast<uint32_t>(page.width), static_cast<uint32_t>(page.height), 0, CKEY_PNG_GRAY1, dpi, nullptr, 0, &need) != CKEY_INSUFFICIENT_BUFFER) return false;
+    std::vector<uint8_t> png(need);
+    if (ckey_encode_png(gray.data(), static_cast<uint32_t>(page.width), static_cast<uint32_t>(page.height), 0, CKEY_PNG_GRAY1, dpi, png.data(), png.size(), &need) != CKEY_OK) return false;
     std::ofstream out(path, std::ios::binary); if (!out) return false;
-    const uint8_t sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}; out.write(reinterpret_cast<const char *>(sig), 8);
-    const auto chunk = [&](const char *type, const std::vector<uint8_t> &data) {
-        std::vector<uint8_t> c; be32(c, static_cast<uint32_t>(data.size())); c.insert(c.end(), type, type + 4); c.insert(c.end(), data.begin(), data.end());
-        be32(c, ~crc32_ieee(c.data() + 4, c.size() - 4)); out.write(reinterpret_cast<const char *>(c.data()), static_cast<std::streamsize>(c.size()));
-    };
-    std::vector<uint8_t> ihdr; be32(ihdr, static_cast<uint32_t>(page.width)); be32(ihdr, static_cast<uint32_t>(page.height));
-    ihdr.insert(ihdr.end(), {1, 0, 0, 0, 0});  // bit depth 1, greyscale
-    chunk("IHDR", ihdr);
-    std::vector<uint8_t> phys; const uint32_t ppm = static_cast<uint32_t>(std::lround(dpi / 0.0254)); be32(phys, ppm); be32(phys, ppm); phys.push_back(1);
-    chunk("pHYs", phys);
-    chunk("IDAT", z); chunk("IEND", {});
+    out.write(reinterpret_cast<const char *>(png.data()), static_cast<std::streamsize>(png.size()));
     return static_cast<bool>(out);
 }
 
-// Draws a CKey SVG as black ink on paper at a physical width (the 31-unit
-// canvas including its quiet margin) on the device dot grid.
-inline void draw_symbol(Page &page, const std::string &svg, int x0, int y0, int side_px) {
-    const auto cover = svgtest::rasterize(svgtest::parse(svg), side_px, side_px, 3, 0, 255);
-    for (int y = 0; y < side_px; ++y) for (int x = 0; x < side_px; ++x) {
-        const int px = x0 + x, py = y0 + y;
-        if (px >= 0 && py >= 0 && px < page.width && py < page.height && cover[static_cast<size_t>(y) * side_px + x] >= 128)
-            page.ink[static_cast<size_t>(py) * page.width + px] = 1;
+// Draws a Profile 0 symbol as black ink on paper at a physical width (the
+// 31-unit canvas including its quiet margin) on the device dot grid, with
+// the core's direct print rasterizer.
+inline bool draw_symbol(Page &page, const ckey_scalable_symbol &symbol, const ckey_style *style, int x0, int y0, int side_px, double dpi) {
+    size_t side = 0;
+    if (ckey_render_scalable_print(&symbol, style, side_px / dpi, dpi, nullptr, 0, &side) != CKEY_INSUFFICIENT_BUFFER) return false;
+    std::vector<uint8_t> px(side * side);
+    if (ckey_render_scalable_print(&symbol, style, side_px / dpi, dpi, px.data(), px.size(), &side) != CKEY_OK) return false;
+    for (size_t y = 0; y < side; ++y) for (size_t x = 0; x < side; ++x) {
+        const long px_x = x0 + static_cast<long>(x), px_y = y0 + static_cast<long>(y);
+        if (px_x >= 0 && px_y >= 0 && px_x < page.width && px_y < page.height && px[y * side + x] == 0)
+            page.ink[static_cast<size_t>(px_y) * page.width + px_x] = 1;
     }
+    return true;
 }
 
 inline void draw_text(Page &page, const std::string &text, int x, int y, int scale) {
