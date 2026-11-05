@@ -53,6 +53,30 @@ if(CKEY_BENCH_ZXING)
 endif()
 add_executable(ckey cli/main.cpp)
 target_link_libraries(ckey PRIVATE ckey_core)
+
+# ---- Install and CMake package (spec §7: C/C++ consumers use find_package(CKey)) ----
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/VERSION CKEY_VERSION_STRING LIMIT_COUNT 1)
+set(CKEY_INSTALL_TARGETS ckey_codec ckey_scan ckey_render ckey_certify ckey_core)
+if(CKEY_BUILD_TELEMETRY)
+  list(APPEND CKEY_INSTALL_TARGETS ckey_telemetry)
+endif()
+foreach(lib ${CKEY_INSTALL_TARGETS})
+  string(REPLACE "ckey_" "" short ${lib})
+  set_target_properties(${lib} PROPERTIES EXPORT_NAME ${short})
+endforeach()
+install(TARGETS ${CKEY_INSTALL_TARGETS} EXPORT CKeyTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(TARGETS ckey RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY include/ckey DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT CKeyTargets NAMESPACE CKey:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CKey)
+configure_package_config_file(cmake/CKeyConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/CKeyConfig.cmake
+                              INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CKey)
+write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/CKeyConfigVersion.cmake VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CKeyConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/CKeyConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CKey)
 if(CKEY_BUILD_TESTS)
   enable_testing()
   add_executable(ckey_tests tests/core_tests.cpp)

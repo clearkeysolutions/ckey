@@ -10,6 +10,37 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.66 — 2026-11-05
+
+* **CMake package (spec §7):** `cmake --install` installs the libraries, headers and the `ckey` CLI, plus `CKeyConfig.cmake`.
+  * Consumers call `find_package(CKey)` and link `CKey::core`, or individual targets: `CKey::scan`, `CKey::render`, `CKey::codec`, `CKey::certify`, `CKey::telemetry`.
+  * `examples/c/` has an encode → raster → PNG → scan example and a scan-only example. CI installs the package and builds and runs the example.
+* **Homebrew (proposed in spec §7):** `packaging/homebrew/ckey.rb.in` and `tools/release/make_homebrew_formula.py`, which fills in the tag and the source archive's SHA-256.
+* **Release workflow (`release.yml`, spec §7–8):**
+  * **Trigger:** runs only for `v*` tags. The tag must equal `v` + `VERSION` and sit on `Stable-Release`. The full test suite runs first.
+  * **Artifacts:**
+    * CLI and library archives for Linux x64, macOS arm64 and Windows x64;
+    * the source archive;
+    * the Homebrew formula;
+    * `support-matrix.json`;
+    * `SHA256SUMS`.
+  * **Provenance:** Sigstore build provenance through `actions/attest-build-provenance`.
+  * **Result:** a draft GitHub Release titled `CKey <version>`, for the maintainer to publish.
+* **Deprecate workflow (`deprecate-release.yml`, spec §8.2):** a manual run retitles a release `Deprecated - {release name}` and adds a notice naming the replacement and the reason. The tag and its source stay.
+* **Community workflow (`community.yml`, spec §8):**
+  * runs ASan/UBSan tests on pull requests and pushes to `community`;
+  * uses `pull_request` with a read-only token and no persisted credentials, so fork code never sees secrets;
+  * rejects changes to `VERSION` or to the release workflow, and warns when `CHANGELOG-COMMUNITY.md` has no entry.
+* **CI:** new jobs for the openckey.org service tests, and for synthetic benchmarks with QR Code and Data Matrix through zxing-cpp (uploaded as an artifact).
+* **Web SDK, npm `ckey` (`sdk/web/`):** an Emscripten build of codec, scan, render, telemetry and certify, plus a small C bridge and an ES module API. It matches the openckey.org renderer page:
+  * `encode`, `renderToCanvas`, `renderPixels`, `renderPNG`, `renderSVG` and `renderPDF`;
+  * `decodeImageData`, `createScanner`, `classifyPayload` and `certify`;
+  * `telemetry`, valued 0, 1 or 2, raising `RangeError` otherwise. The telemetry sender uses `fetch` with keepalive, sends no credentials or referrer, and never throws;
+  * TypeScript types.
+  * **Verified here:** 26 JS tests pass, and native bridge tests pass under ASan/UBSan.
+  * **Not verified here:** the wasm build and its tests run only in `sdk-web.yml`, because emsdk is not available in this environment.
+* **`tools/bump_version.py`** bumps every versioned file, including SDK manifests.
+
 ## 0.1.0-build.65 — 2026-11-05
 
 * **`.ckey` interchange v1 (spec §2.5; `spec/CKey-Interchange-v1.md`):** `ckey_write_interchange` and `ckey_read_interchange` store a Profile 0 or 0.1 codeword, an optional style and an optional logo reference.

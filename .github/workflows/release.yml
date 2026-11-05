@@ -1,0 +1,96 @@
+# Official releases (spec §7, §8): built only from immutable tags on a
+# Stable-Release commit. Produces checksummed artifacts with Sigstore build
+# provenance and a draft GitHub Release for the maintainer to publish.
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - id: v
+        name: Tag matches VERSION and is on Stable-Release
+        run: |
+          version="$(cat VERSION)"
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "tag ${GITHUB_REF_NAME} does not match VERSION ${version}"; exit 1; }
+          git fetch origin Stable-Release
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/Stable-Release || { echo "tag is not on Stable-Release"; exit 1; }
+          python3 tools/check_version.py
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Full test suite
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+
+  build:
+    needs: verify
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x64
+          - os: macos-14
+            name: macos-arm64
+          - os: windows-2022
+            name: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build and install
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCKEY_BUILD_TESTS=OFF
+          cmake --build build --config Release --parallel 2
+          cmake --install build --config Release --prefix "ckey-${{ needs.verify.outputs.version }}-${{ matrix.name }}"
+      - name: Archive
+        shell: bash
+        run: |
+          dir="ckey-${{ needs.verify.outputs.version }}-${{ matrix.name }}"
+          cp LICENSE README.md CHANGELOG.md "$dir/"
+          tar -czf "$dir.tar.gz" "$dir"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckey-${{ matrix.name }}
+          path: ckey-*.tar.gz
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # create the draft release
+      id-token: write        # Sigstore signing for provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Source archive and Homebrew formula
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          curl -fsSL -o "dist/ckey-${tag}-source.tar.gz" "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${tag}.tar.gz"
+          python3 tools/release/make_homebrew_formula.py "${tag}" "dist/ckey-${tag}-source.tar.gz" > dist/ckey.rb
+          cp docs/support-matrix.json dist/
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+      - name: Draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --draft --verify-tag \
+            --title "CKey ${{ needs.verify.outputs.version }}" \
+            --notes "See CHANGELOG-STABLE.md. Verify downloads with SHA256SUMS and 'gh attestation verify <file> --repo ${GITHUB_REPOSITORY}'."

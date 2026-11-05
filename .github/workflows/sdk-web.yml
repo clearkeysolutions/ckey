@@ -1,0 +1,70 @@
+# Web SDK (npm package `ckey`): the C core compiled to WebAssembly with
+# Emscripten, plus the JavaScript wrapper. Maintainers: pin these actions to
+# commit SHAs (as ci.yml does) before relying on this workflow.
+name: SDK Web
+on:
+  push:
+    paths:
+      - 'sdk/web/**'
+      - 'src/**'
+      - 'include/**'
+      - 'VERSION'
+      - '.github/workflows/sdk-web.yml'
+  pull_request:
+    paths:
+      - 'sdk/web/**'
+      - 'src/**'
+      - 'include/**'
+      - 'VERSION'
+      - '.github/workflows/sdk-web.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    working-directory: sdk/web
+jobs:
+  js-and-bridge:
+    name: JS units + native bridge
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Package version matches VERSION
+        run: test "$(node -p "require('./package.json').version")" = "$(cat ../../VERSION)"
+      - name: node --check
+        run: npm run check
+      - name: Unit tests (no WebAssembly)
+        run: npm test
+      - name: Native bridge test (g++, sanitizers)
+        env:
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+        run: npm run test:native
+
+  wasm:
+    name: Emscripten build + tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.10
+          actions-cache-folder: emsdk-cache
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build (emcmake + em++)
+        run: npm run build
+      - name: Tests against the built wasm
+        env:
+          CKEY_REQUIRE_WASM: '1'
+        run: npm test
+      - name: Package contents
+        run: npm pack --dry-run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckey-web-dist
+          path: sdk/web/dist
+          if-no-files-found: error

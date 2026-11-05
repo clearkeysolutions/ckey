@@ -1,0 +1,26 @@
+# Homebrew formula for the CKey command-line tool (spec §7: Homebrew is for
+# tooling, not a substitute for the Swift package). Generated per release by
+# tools/release/make_homebrew_formula.py from the tagged source archive;
+# publish it in a tap (e.g. clearkeysolutions/homebrew-tap).
+class Ckey < Formula
+  desc "Encode, render, print and verify CKey optical codes"
+  homepage "https://github.com/clearkeysolutions/ckey"
+  url "https://github.com/clearkeysolutions/ckey/archive/refs/tags/@TAG@.tar.gz"
+  sha256 "@SHA256@"
+  version "@VERSION@"
+  license "MIT"
+  head "https://github.com/clearkeysolutions/ckey.git", branch: "Stable-Release"
+
+  depends_on "cmake" => :build
+
+  def install
+    system "cmake", "-S", ".", "-B", "build", "-DCKEY_BUILD_TESTS=OFF", *std_cmake_args
+    system "cmake", "--build", "build"
+    system "cmake", "--install", "build"
+  end
+
+  test do
+    system bin/"ckey", "encode-scalable", "--utf8", "https://openckey.org", "--raster", "t.png", "--size-px", "128"
+    assert_predicate testpath/"t.png", :exist?
+  end
+end
