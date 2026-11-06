@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-  The core AAR declares no permissions. Telemetry (mode 1, the default) sends
-  aggregate batches only if the app itself holds android.permission.INTERNET;
-  without it sends fail quietly and nothing is ever retried more than hourly.
-  Opt out entirely with CKey.telemetry = 0.
--->
-<manifest />
