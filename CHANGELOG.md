@@ -10,9 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.81 — 2026-11-06
+
+The first published release, `v0.1.0-build.81`.
+
+* **.NET native library renamed to `ckeynative`** (`ckeynative.dll`, `libckeynative.so`, `libckeynative.dylib`). Windows file names ignore case, so the native `ckey.dll` and the managed `CKey.dll` were the same file in an application's output folder; one overwrote the other and P/Invoke found no `ckey_get_abi_version` (33 of 65 tests failed on Windows). Every Windows consumer of the package would have hit this. The CMake output name, `NativeLibraryName.Name`, the package's `runtimes/<rid>/native/` assets, the .NET Framework copy target and the CI checks all use the new name.
+* **Verified here:** 65 of 65 .NET tests pass against `libckeynative.so`; a local pack places every native asset and both target frameworks where the CI layout check expects them.
+
 ## 0.1.0-build.80 — 2026-11-06
 
-The first published release, `v0.1.0-build.80`.
 
 * **.NET SDK compiles again.** `CKeyPayload.cs` held a literal LINE SEPARATOR and PARAGRAPH SEPARATOR (U+2028, U+2029) inside a string. C# treats both as line breaks, so the string ended mid-line and the SDK had not compiled since build 67. They are written as `\u2028` and `\u2029`; no other source file holds either character.
 * **.NET certification test:** it still expected every modelled trial to pass. Since build 72 the photo sweep includes sizes too small to read, so a certified style passes some trials, not necessarily all; the test now checks that.

@@ -1,8 +1,8 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-build.80`
+**Current software version:** `0.1.0-build.81`
 **Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout)
-**Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Cleared after the v0.1.0-build.76 tag; v0.1.0-build.80 is the first published release: it holds only the versioning files, this record and the documentation. The code is on `Stable-Release`; start the next build from there. Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases; first published: v0.1.0-build.80), CHANGELOG-COMMUNITY.md (community merges).
+**Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Cleared after the v0.1.0-build.76 tag; v0.1.0-build.81 is the first published release: it holds only the versioning files, this record and the documentation. The code is on `Stable-Release`; start the next build from there. Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases; first published: v0.1.0-build.81), CHANGELOG-COMMUNITY.md (community merges).
 **Context updated:** 2026-11-06
 
 ## Mission
