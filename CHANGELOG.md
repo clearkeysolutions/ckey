@@ -10,9 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.80 — 2026-11-06
+
+The first published release, `v0.1.0-build.80`.
+
+* **.NET SDK compiles again.** `CKeyPayload.cs` held a literal LINE SEPARATOR and PARAGRAPH SEPARATOR (U+2028, U+2029) inside a string. C# treats both as line breaks, so the string ended mid-line and the SDK had not compiled since build 67. They are written as `\u2028` and `\u2029`; no other source file holds either character.
+* **.NET certification test:** it still expected every modelled trial to pass. Since build 72 the photo sweep includes sizes too small to read, so a certified style passes some trials, not necessarily all; the test now checks that.
+* **Verified here:** `dotnet build` of `CKey` and `CKey.Wpf` (net8.0 and netstandard2.0) with no errors or warnings, and `dotnet test`: 65 of 65 pass against the Linux native library.
+
 ## 0.1.0-build.79 — 2026-11-06
 
-The first published release, `v0.1.0-build.79`.
 
 * **macOS CI:** GitHub retired the `macos-14` runners ("The configuration 'macos-14-arm64-us-default' is not supported"), so every macOS job (the .NET natives for `osx-arm64` and `osx-x64`, the .NET tests, the Swift package and the release CLI build) was cancelled before it started. They run on `macos-15`.
 
