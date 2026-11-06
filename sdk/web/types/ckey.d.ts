@@ -1,4 +1,4 @@
-// Type declarations for the CKey Web SDK (npm package `ckey`).
+// Type declarations for the CKey Web SDK (npm package `openckey`).
 // Hand-written; copied to dist/ckey.d.ts by scripts/assemble.mjs.
 
 export type Level = 'L' | 'M' | 'Q' | 'H';

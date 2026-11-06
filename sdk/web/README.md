@@ -10,7 +10,7 @@ Encode, render and scan [CKey](https://openckey.org) optical codes in the browse
 ## Install
 
 ```sh
-npm install ckey
+npm install openckey
 ```
 
 The package is ESM only. `dist/ckey.mjs` loads `dist/ckey.wasm` from its own directory, and bundlers that understand `new URL('./ckey.wasm', import.meta.url)` copy the binary for you (Vite, webpack 5, Rollup with a URL plugin, esbuild with a file loader). To serve the binary from somewhere else, pass `wasmUrl`. You can also pass the bytes as `wasmBinary`.
@@ -24,7 +24,7 @@ const ckey = await loadCKey({ wasmUrl: '/static/ckey.wasm' });
 ### Make a code
 
 ```js
-import { loadCKey } from 'ckey';
+import { loadCKey } from 'openckey';
 
 const ckey = await loadCKey();
 

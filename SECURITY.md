@@ -7,7 +7,7 @@ CKey reads untrusted images and untrusted bytes, so parser and decoder bugs are 
 Report a suspected vulnerability privately through GitHub: **Security → Report a vulnerability** on this repository. Please include:
 
 - the CKey version (`VERSION`, or `ckey_software_version()`),
-- the platform and package (C library, npm `ckey`, NuGet `CKey`, Maven `org.openckey:ckey`, Swift package, CLI),
+- the platform and package (C library, npm `openckey`, NuGet `CKey`, Maven `org.openckey:ckey`, Swift package, CLI),
 - the smallest input that shows the problem (an image, a `.ckey` file or the payload bytes).
 
 Do not open a public issue for a vulnerability. You will get a reply within seven days.

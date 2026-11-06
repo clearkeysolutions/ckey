@@ -1,4 +1,4 @@
-# Web SDK (npm package `ckey`): the C core compiled to WebAssembly with
+# Web SDK (npm package `openckey`): the C core compiled to WebAssembly with
 # Emscripten, plus the JavaScript wrapper. Maintainers: pin these actions to
 # commit SHAs (as ci.yml does) before relying on this workflow.
 name: SDK Web
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ckey-npm
-          path: sdk/web/ckey-*.tgz
+          path: sdk/web/openckey-*.tgz
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

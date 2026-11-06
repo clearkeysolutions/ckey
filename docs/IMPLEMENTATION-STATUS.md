@@ -1,6 +1,6 @@
 # Implementation status against the Rendering, SDK, Distribution & Telemetry Specification
 
-This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.82`, the first published release (`v0.1.0-build.82` on `Stable-Release`).
+This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.83`, the first published release (`v0.1.0-build.83` on `Stable-Release`).
 
 **Status key:**
 
@@ -27,7 +27,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | `.ckey` interchange (§2.5) | **Done** (draft v1) | `spec/CKey-Interchange-v1.md`. A strict reader, fuzzed. |
 | Transparent output, alpha 0 where unpainted (§2) | **Done** | `transparent = 1` in raster and PDF. |
 | Print backend: physical size, minimum features, compensation (§2.4) | **Partial** | Device-grid bitmaps, the Profile 0.1 print layout, PDF and a calibration sheet all exist. **Open:** measured printer/media profiles, which need real prints. |
-| Web canvas / WASM (§3) | **Done, CI-verified only** | `sdk/web` (npm `ckey`). Its JS and native bridge tests run here; the wasm build runs in `sdk-web.yml`. |
+| Web canvas / WASM (§3) | **Done, CI-verified only** | `sdk/web` (npm `openckey`). Its JS and native bridge tests run here; the wasm build runs in `sdk-web.yml`. |
 | Swift package / `CKeyView` (§3) | **Done, CI-verified only** | `Package.swift`, `sdk/swift`. Its C++ shims are verified here. |
 | Android (§3) | **Done, CI-verified only** | `sdk/android`. Its JNI bridge is verified on the JVM here. |
 | .NET (§3) | **Done, CI-verified only** | `sdk/dotnet`. Its native library and struct layouts are verified here. |
@@ -71,7 +71,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | SPM / AAR / npm / NuGet / CMake package / Homebrew (§7) | **Done** (manifests and CI); **Open** (publishing) | Publishing needs the maintainer's registry accounts. |
 | Signed, checksummed artifacts from tagged commits (§7) | **Done** | `release.yml`: the tag must match `VERSION` and be on `Stable-Release`. It produces `SHA256SUMS`, Sigstore provenance and a draft release. |
 | Branch model and community isolation (§8) | **Done** | `docs/BRANCHES-AND-RELEASES.md`, `community.yml` (no secrets). Branch protection is set in GitHub's settings by the maintainer. |
-| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. First published release: `v0.1.0-build.82`. |
+| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. First published release: `v0.1.0-build.83`. |
 | Version counter preserves history (§8.1) | **Done** | `0.1.0-build.N`, tags `v0.1.0-build.N`. |
 
 ## Telemetry (spec §9)

@@ -3,8 +3,8 @@
 # workflow attached to its draft GitHub Release. Nothing is rebuilt here: the
 # exact bytes in SHA256SUMS are what get published.
 #
-#   tools/release/publish.sh v0.1.0-build.82            # everything
-#   tools/release/publish.sh v0.1.0-build.82 npm nuget  # only some
+#   tools/release/publish.sh v0.1.0-build.83            # everything
+#   tools/release/publish.sh v0.1.0-build.83 npm nuget  # only some
 #
 # Targets: npm, nuget, maven, homebrew, release (un-drafts the GitHub Release).
 # Account setup and the environment variables each target needs are in
@@ -42,7 +42,7 @@ fi
 if want npm; then
   need npm "install Node.js 22"
   echo "==> npm"
-  tgz=$(ls ckey-*.tgz | head -1)
+  tgz=$(ls openckey-*.tgz | head -1)
   # A prerelease needs an explicit dist-tag; until 1.0 every build is "latest".
   npm publish "$tgz" --access public --tag latest
 fi

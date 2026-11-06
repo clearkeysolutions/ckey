@@ -1,6 +1,6 @@
-// CKey Web SDK entry point (npm package `ckey`).
+// CKey Web SDK entry point (npm package `openckey`).
 //
-//   import { loadCKey } from 'ckey';
+//   import { loadCKey } from 'openckey';
 //   const ckey = await loadCKey();
 //
 // loadCKey fetches ckey.wasm from next to this module unless told otherwise.

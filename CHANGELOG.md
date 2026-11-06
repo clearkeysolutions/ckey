@@ -10,9 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.83 — 2026-11-06
+
+The release that goes to every registry, `v0.1.0-build.83`.
+
+* **npm package renamed `openckey`.** The name `ckey` on npm belongs to an unrelated package published in 2018, so `v0.1.0-build.82` could not be published there. Install with `npm install openckey` and import from `'openckey'`; the API is unchanged. The release tarball is `openckey-<version>.tgz`.
+* No change to the core, formats or other packages.
+
 ## 0.1.0-build.82 — 2026-11-06
 
-The release that goes to every registry, `v0.1.0-build.82`.
+Tagged `v0.1.0-build.82`; superseded by build.83 (the npm name `ckey` was taken).
 
 * **Style validation without undefined behaviour.** The structural check read `policy`, `modules`, `rings` and `rays` as their enum types before range-checking them, so a caller passing an out-of-range value (the certification test passes 9) was undefined behaviour, and the sanitizer CI job stopped on it. The check now reads each field's raw integer and refuses unknown values as before.
 * **Android host check:** `jni-host-test/run.sh` looked up optional jars in the Gradle distribution with `ls`, and under `set -euo pipefail` a missing jar ended the script with exit code 2 before the Kotlin step. Missing optional jars are now ignored.
