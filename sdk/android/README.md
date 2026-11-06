@@ -8,7 +8,7 @@ Kotlin/NDK SDK for [CKey](../../README.md) optical codes. It is a thin wrapper o
 | `org.openckey:ckey-compose` | `@Composable CKeyImage` | `ckey`, Compose UI/Foundation |
 | `org.openckey:ckey-camerax` | `CKeyAnalyzer` (`ImageAnalysis.Analyzer`) | `ckey`, CameraX core |
 
-minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.66`).
+minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.76`).
 
 ## Install
 
@@ -18,9 +18,9 @@ dependencyResolutionManagement { repositories { google(); mavenCentral() } }
 
 // app/build.gradle.kts
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.66")
-    implementation("org.openckey:ckey-compose:0.1.0-build.66")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.66")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.76")
+    implementation("org.openckey:ckey-compose:0.1.0-build.76")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.76")   // optional: CKeyAnalyzer
 }
 ```
 

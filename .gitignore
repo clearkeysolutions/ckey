@@ -14,3 +14,12 @@ xcuserdata/
 tools/__pycache__/
 /.build/
 /.swiftpm/
+.DS_Store
+node_modules/
+/sdk/android/jni-host-test/build/
+/sdk/android/.gradle/
+/sdk/android/**/build/
+/sdk/dotnet/**/bin/
+/sdk/dotnet/**/obj/
+/sdk/web/dist/
+/dist/

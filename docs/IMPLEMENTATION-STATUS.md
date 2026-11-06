@@ -1,6 +1,6 @@
 # Implementation status against the Rendering, SDK, Distribution & Telemetry Specification
 
-This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.74`, on branch `scratch`.
+This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.76`, the first release (`v0.1.0-build.76` on `Stable-Release`).
 
 **Status key:**
 
@@ -71,7 +71,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | SPM / AAR / npm / NuGet / CMake package / Homebrew (§7) | **Done** (manifests and CI); **Open** (publishing) | Publishing needs the maintainer's registry accounts. |
 | Signed, checksummed artifacts from tagged commits (§7) | **Done** | `release.yml`: the tag must match `VERSION` and be on `Stable-Release`. It produces `SHA256SUMS`, Sigstore provenance and a draft release. |
 | Branch model and community isolation (§8) | **Done** | `docs/BRANCHES-AND-RELEASES.md`, `community.yml` (no secrets). Branch protection is set in GitHub's settings by the maintainer. |
-| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. No release has been tagged yet. |
+| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. First release: `v0.1.0-build.76`. |
 | Version counter preserves history (§8.1) | **Done** | `0.1.0-build.N`, tags `v0.1.0-build.N`. |
 
 ## Telemetry (spec §9)
@@ -108,4 +108,4 @@ No real-device, real-print or platform claim is made unless it was measured.
 - Create the registry accounts (npm, Maven Central `org.openckey`, NuGet, a Homebrew tap) and publish from tagged releases.
 - Protect `Stable-Release` and the tags in GitHub, and create `community`.
 - Make real prints and real-camera captures. These are the evidence for print compensation, latency targets, and any comparison with QR.
-- Pin GitHub Actions to commit SHAs in the SDK workflows. They use major-version tags because SHAs could not be looked up here.
+- Apply the repository settings in `docs/REPOSITORY-SETTINGS.md` (branch and tag protection, private vulnerability reporting).

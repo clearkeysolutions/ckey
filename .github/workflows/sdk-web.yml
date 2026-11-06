@@ -29,8 +29,8 @@ jobs:
     name: JS units + native bridge
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Package version matches VERSION
@@ -48,12 +48,12 @@ jobs:
     name: Emscripten build + tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
           version: 4.0.10
           actions-cache-folder: emsdk-cache
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
       - name: Build (emcmake + em++)
@@ -64,12 +64,12 @@ jobs:
         run: npm test
       - name: Package
         run: npm pack
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ckey-npm
           path: sdk/web/ckey-*.tgz
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ckey-web-dist
           path: sdk/web/dist

@@ -2,7 +2,7 @@
 
 This log lists the releases tagged on the `Stable-Release` branch, newest first. Each release is one immutable tag. The per-build history is in [CHANGELOG.md](CHANGELOG.md), and the [release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) explains how to cut and deprecate a release.
 
-**Releases so far: none.** The first release will be promoted from `scratch`.
+**Releases so far: 1.**
 
 ## Entry template
 
@@ -16,7 +16,7 @@ Copy this block to the top of the list for each release, and fill it in.
 * **Builds included:** build.A to build.N (see CHANGELOG.md)
 * **Formats emitted:** P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0
 * **Formats read:** the emitted formats, plus the legacy formats listed in the map
-* **C ABI:** 3
+* **C ABI:** 4
 * **Highlights:** …
 * **Known limits:** …
 ```
@@ -28,4 +28,18 @@ When a release is deprecated:
 
 ## Releases
 
-_None yet._
+### CKey 0.1.0-build.76 — 2026-11-06
+
+* **Tag:** `v0.1.0-build.76`
+* **Status:** supported
+* **Builds included:** dev.1 to build.76 (see CHANGELOG.md)
+* **Formats emitted:** P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0
+* **Formats read:** the emitted formats, plus the legacy formats listed in the map
+* **C ABI:** 4
+* **Highlights:**
+  * Profile 0, the scalable family: 31 versions, L/M/Q/H correction, version identified from the symbol; Profile 0.1 print layout.
+  * Native rendering to RGBA and gray pixels, PNG, SVG and vector PDF; styles with strict, adaptive and override policies; certification through a modelled camera sweep.
+  * Full-frame scanning separate from the renderer, so a scanner can ship without it.
+  * SDKs: Swift package (`CKey`, scan-only `CKeyScanner`), npm `ckey` (WebAssembly), Maven `org.openckey:ckey` (+ `ckey-compose`, `ckey-camerax`), NuGet `CKey` (+ `CKey.Wpf`), CLI with Homebrew formula, CMake package.
+  * Optional aggregate telemetry (modes 0/1/2), never content or identifiers.
+* **Known limits:** experimental. Formats are drafts and may change before 1.0. Decoding is verified on rendered and simulated captures only: real-camera robustness, latency and print compensation are not yet measured. No independent security review yet.

@@ -85,62 +85,64 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.74 | (this commit) | 2026-11-05 | Swift SDK payload and camera fixes |
-| build.73 | `84fa68d` | 2026-11-05 | Sweep decides certification; contrast below 3:1 is a warning |
-| build.72 | `38dbab3` | 2026-11-05 | Certification by modelled photo sweep; Profile 0.1 reader regression test |
-| build.71 | `52c7e0f` | 2026-11-05 | Remove the openckey.org prototype service |
-| build.70 | `3f44787` | 2026-11-05 | openckey.org separated; release attaches every SDK package |
-| build.69 | `946793a` | 2026-11-05 | Android SDK |
-| build.68 | `71d20d6` | 2026-11-05 | Implementation status, platform integration guide, README and context |
-| build.67 | `97f304d` | 2026-11-05 | Swift package and .NET SDK |
-| build.66 | `b8fa90b` | 2026-11-05 | CMake package, Homebrew formula, release/community/deprecate workflows, Web SDK |
-| build.65 | `bb934da` | 2026-11-05 | `.ckey` interchange v1, conformance suite, support matrix, benchmark harness |
-| build.64 | `83f972d` | 2026-11-05 | Style policies and optical certification; ABI 4 |
-| build.63 | `d2acc2b` | 2026-11-05 | Core split into codec/scan/render/telemetry libraries; telemetry core; openckey.org service |
-| build.62 | `ecfd29a` | 2026-11-05 | Canonical geometry API; direct raster, PNG and PDF backends |
-| build.61 | `ad5e295` | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
-| dev.60 | `817e365` | 2026-11-05 | Changelogs, repository README and the release and versioning map |
-| dev.59 | `58f0066` | 2026-11-05 | Add rendering/SDK/telemetry specification, status map, branch guide |
-| dev.58 | `8d5a42a` | 2026-11-04 | Add Profile 0.1 print-robust layout and print output |
-| dev.57 | `a3cc66c` | 2026-11-04 | Add the Profile 0 design system |
-| dev.56 | `987301f` | 2026-11-04 | Add Profile 0, the scalable family (Format 0.27) |
-| dev.55 | `b3d14f9` | 2026-11-04 | Payload conventions and reader actions, incl. address: |
-| dev.54 | `a458282` | 2026-11-04 | Reader: show decoded payloads as text with tappable links |
-| dev.53 | `7b71e23` | 2026-11-04 | Move full-frame localization into the core; fix reader orientation |
-| dev.52 | `7804eba` | 2026-11-04 | Ignore macOS xcodebuild output |
-| dev.51 | `86ddaeb` | 2026-11-04 | Reader: 4K capture so Profile 3 can decode; renderer reports density |
-| dev.50 | `059dd64` | 2026-11-04 | Resolve independent review of dev.49; gate dense decoders |
-| dev.49 | `036d19c` | 2026-11-04 | Fix P2/P3 decoding, dead space, and safe area |
-| dev.48 | `608783b` | 2026-11-03 | Add finder safety moats and fix live diagnostics |
-| dev.47 | `a64d4e4` | 2026-11-03 | Show live scanner fit diagnostics |
-| dev.46 | `f448a7e` | 2026-11-03 | Calibrate Profile 2 against its own keys |
-| dev.45 | `ed5c0fa` | 2026-11-03 | Fix Profile 2/3 geometry and profile-specific scan calibration |
-| dev.43 | `0180be9` | 2026-11-03 | Use calibrated key fitting for camera localization |
-| dev.42 | `037c28f` | 2026-11-03 | Add tiered dense profiles and renderer decode checks |
-| dev.41 | `aa610fc` | 2026-11-03 | Optimize iOS scanner profile detection and timing |
-| dev.40 | `424384e` | 2026-11-03 | Fix Swift C string buffer handling in Mac renderer |
-| dev.39 | `385f1c1` | 2026-11-03 | Finalize renderer project build settings |
-| dev.38 | `f3fef9f` | 2026-11-03 | Add native renderer lab and dense profile scanner paths |
-| dev.37 | `3138168` | 2026-11-03 | Correct canonical finders across CKey profiles |
-| dev.32 | `6ed139e` | 2026-11-03 | Border-matched finder arcs |
-| dev.31 | `36ee090` | 2026-11-03 | Correct Profile 3 calibration and finder geometry |
-| dev.28 | `3b7da13` | 2026-11-03 | Add 2,048-byte extended CKey profile |
-| dev.26 | `bb2bf7a` | 2026-11-03 | Add 200-byte CKey text profile |
-| dev.25 | `e29da8b` | 2026-11-03 | Refine CKey geometry from calibration keys |
-| dev.24 | `b049a1d` | 2026-11-02 | Restore scanning reliability and use 1080p capture |
-| dev.23 | `9a5910d` | 2026-11-02 | Bound live CKey localization work |
-| dev.22 | `4453d0d` | 2026-11-02 | Add border-first distant CKey locator |
-| dev.21 | `98490a5` | 2026-11-02 | Prioritize small CKey square candidates |
-| dev.20 | `ac659e7` | 2026-11-02 | Expand CKey far-range diagnostics and search |
-| dev.19 | `3c15fbd` | 2026-11-02 | Expand far-distance CKey candidate search |
-| dev.18 | `871e6a0` | 2026-11-02 | Fix Swift build in CKey Reader |
-| dev.17 | `79c31da` | 2026-11-02 | Improve CKey far-distance camera localization |
-| dev.16 | `d86b94d` | 2026-11-02 | Fix CKey Reader camera candidate geometry |
-| dev.15 | `dff8334` | 2026-11-02 | Fix reader candidate status updates |
-| dev.14 | `fa9d391` | 2026-11-02 | Improve iPhone reader localization diagnostics |
-| dev.13 | `7b6e300` | 2026-11-02 | Fix SwiftUI reader color type inference |
-| dev.12 | `6a92126` | 2026-11-02 | Add experimental iPhone CKey reader |
-| dev.11 | `9c6f0d1` | 2026-11-02 | Add quadrilateral-assisted grayscale decoding |
+| build.76 | tag `v0.1.0-build.76` | 2026-11-06 | First release: README, gallery, publishing, lock-down |
+| build.75 | `ea162ae` | 2026-11-05 | Swift package keeps `include/` in header-less targets |
+| build.74 | `d220563` | 2026-11-05 | Swift SDK payload and camera fixes |
+| build.73 | `3c5505f` | 2026-11-05 | Sweep decides certification; contrast below 3:1 is a warning |
+| build.72 | `f3fb2f2` | 2026-11-05 | Certification by modelled photo sweep; Profile 0.1 reader regression test |
+| build.71 | `180ff88` | 2026-11-05 | Remove the openckey.org prototype service |
+| build.70 | `1bf71af` | 2026-11-05 | openckey.org separated; release attaches every SDK package |
+| build.69 | `36f922a` | 2026-11-05 | Android SDK |
+| build.68 | `251d3a2` | 2026-11-05 | Implementation status, platform integration guide, README and context |
+| build.67 | `8771985` | 2026-11-05 | Swift package and .NET SDK |
+| build.66 | `5c60b9c` | 2026-11-05 | CMake package, Homebrew formula, release/community/deprecate workflows, Web SDK |
+| build.65 | `d3098f3` | 2026-11-05 | `.ckey` interchange v1, conformance suite, support matrix, benchmark harness |
+| build.64 | `25b1578` | 2026-11-05 | Style policies and optical certification; ABI 4 |
+| build.63 | `ea17c49` | 2026-11-05 | Core split into codec/scan/render/telemetry libraries; telemetry core; openckey.org service |
+| build.62 | `783d3fa` | 2026-11-05 | Canonical geometry API; direct raster, PNG and PDF backends |
+| build.61 | `6c950b5` | 2026-11-05 | Version scheme `0.1.0-build.N`; black-on-white default style; style presets |
+| dev.60 | `36ec860` | 2026-11-05 | Changelogs, repository README and the release and versioning map |
+| dev.59 | `bf47525` | 2026-11-05 | Add rendering/SDK/telemetry specification, status map, branch guide |
+| dev.58 | `47f80a9` | 2026-11-04 | Add Profile 0.1 print-robust layout and print output |
+| dev.57 | `fa445c7` | 2026-11-04 | Add the Profile 0 design system |
+| dev.56 | `bd45001` | 2026-11-04 | Add Profile 0, the scalable family (Format 0.27) |
+| dev.55 | `e9f6a26` | 2026-11-04 | Payload conventions and reader actions, incl. address: |
+| dev.54 | `6289fcc` | 2026-11-04 | Reader: show decoded payloads as text with tappable links |
+| dev.53 | `d21f898` | 2026-11-04 | Move full-frame localization into the core; fix reader orientation |
+| dev.52 | `4f15b4a` | 2026-11-04 | Ignore macOS xcodebuild output |
+| dev.51 | `4dd0b0b` | 2026-11-04 | Reader: 4K capture so Profile 3 can decode; renderer reports density |
+| dev.50 | `20e926b` | 2026-11-04 | Resolve independent review of dev.49; gate dense decoders |
+| dev.49 | `76328c9` | 2026-11-04 | Fix P2/P3 decoding, dead space, and safe area |
+| dev.48 | `a1ea48d` | 2026-11-03 | Add finder safety moats and fix live diagnostics |
+| dev.47 | `7ba4ec3` | 2026-11-03 | Show live scanner fit diagnostics |
+| dev.46 | `13c084d` | 2026-11-03 | Calibrate Profile 2 against its own keys |
+| dev.45 | `5cde557` | 2026-11-03 | Fix Profile 2/3 geometry and profile-specific scan calibration |
+| dev.43 | `a5218cb` | 2026-11-03 | Use calibrated key fitting for camera localization |
+| dev.42 | `87e2829` | 2026-11-03 | Add tiered dense profiles and renderer decode checks |
+| dev.41 | `8c07cf1` | 2026-11-03 | Optimize iOS scanner profile detection and timing |
+| dev.40 | `1a83dbd` | 2026-11-03 | Fix Swift C string buffer handling in Mac renderer |
+| dev.39 | `1a9d5c8` | 2026-11-03 | Finalize renderer project build settings |
+| dev.38 | `1327fce` | 2026-11-03 | Add native renderer lab and dense profile scanner paths |
+| dev.37 | `24541a8` | 2026-11-03 | Correct canonical finders across CKey profiles |
+| dev.32 | `9b81dde` | 2026-11-03 | Border-matched finder arcs |
+| dev.31 | `9eb5758` | 2026-11-03 | Correct Profile 3 calibration and finder geometry |
+| dev.28 | `98cdcb9` | 2026-11-03 | Add 2,048-byte extended CKey profile |
+| dev.26 | `fb7fa5a` | 2026-11-03 | Add 200-byte CKey text profile |
+| dev.25 | `db403e3` | 2026-11-03 | Refine CKey geometry from calibration keys |
+| dev.24 | `74d24a1` | 2026-11-02 | Restore scanning reliability and use 1080p capture |
+| dev.23 | `3b111bf` | 2026-11-02 | Bound live CKey localization work |
+| dev.22 | `407a655` | 2026-11-02 | Add border-first distant CKey locator |
+| dev.21 | `a222ef8` | 2026-11-02 | Prioritize small CKey square candidates |
+| dev.20 | `44f7a15` | 2026-11-02 | Expand CKey far-range diagnostics and search |
+| dev.19 | `ac3f41d` | 2026-11-02 | Expand far-distance CKey candidate search |
+| dev.18 | `d22beb0` | 2026-11-02 | Fix Swift build in CKey Reader |
+| dev.17 | `624d717` | 2026-11-02 | Improve CKey far-distance camera localization |
+| dev.16 | `11ccf1d` | 2026-11-02 | Fix CKey Reader camera candidate geometry |
+| dev.15 | `a26f5fe` | 2026-11-02 | Fix reader candidate status updates |
+| dev.14 | `648246a` | 2026-11-02 | Improve iPhone reader localization diagnostics |
+| dev.13 | `89bf68c` | 2026-11-02 | Fix SwiftUI reader color type inference |
+| dev.12 | `c7805fe` | 2026-11-02 | Add experimental iPhone CKey reader |
+| dev.11 | `fe01f26` | 2026-11-02 | Add quadrilateral-assisted grayscale decoding |
 
 ## Branches and the release flow
 
@@ -185,7 +187,7 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 
 | Release | Tag | Builds | Formats emitted | ABI | Status |
 |---|---|---|---|---|---|
-| none yet | | | | | |
+| CKey 0.1.0-build.76 | `v0.1.0-build.76` | dev.1 to build.76 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
 
 ### Tag and version form
 

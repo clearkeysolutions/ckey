@@ -51,6 +51,9 @@ if(CKEY_BENCH_ZXING)
   target_link_libraries(ckey-bench PRIVATE ZXing::ZXing)
   target_compile_definitions(ckey-bench PRIVATE CKEY_BENCH_ZXING)
 endif()
+add_executable(ckey-gallery tools/gallery/ckey_gallery.cpp)
+target_link_libraries(ckey-gallery PRIVATE ckey_core)
+
 add_executable(ckey cli/main.cpp)
 target_link_libraries(ckey PRIVATE ckey_core)
 

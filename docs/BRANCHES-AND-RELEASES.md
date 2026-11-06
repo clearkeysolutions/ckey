@@ -6,11 +6,10 @@
 | `community` | Anyone (through the maintainer's chosen controls) | Experimental community work. **Unstable:** do not depend on it in production. |
 | `Stable-Release` | Maintainer only; anyone may fork | The supported source. Official releases are built and tagged only from here. |
 
-`main` is being renamed by the maintainer, and `community` is being created manually.
 
 ## How changes flow
 
-1. **Scratch:** work lands on `scratch`, with every commit versioned (`VERSION`, `CHANGELOG.md`, `CONTEXT.md`) and CI passing.
+1. **Scratch:** work lands on `scratch`, with every commit versioned (`VERSION`, `CHANGELOG.md`, `CONTEXT.md`) and CI passing. `CONTEXT.md`, the engineering record, lives only on `scratch`.
 2. **Stable-Release:** reviewed work is promoted from `scratch` to `Stable-Release`.
 3. **Community:** contributors fork or branch from `Stable-Release`, test locally, and propose changes to `community`.
 

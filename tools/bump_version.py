@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bump the build number in every versioned node (CONTRIBUTING_VERSIONING.md).
+"""Bump the build number in every versioned file (CONTRIBUTING_VERSIONING.md).
 
     tools/bump_version.py            # 0.1.0-build.N -> 0.1.0-build.N+1
     tools/bump_version.py --check    # list the files that carry the version
@@ -16,6 +16,7 @@ FILES = [
     "VERSION", "CONTEXT.md", "include/ckey/ckey.h", "tests/vectors/locator-v14.json",
     "ios/README.md", "macos/README.md", "docs/support-matrix.json",
     "sdk/web/package.json", "sdk/android/gradle.properties", "sdk/dotnet/README.md",
+    "sdk/android/README.md", "sdk/swift/README.md", "sdk/web/README.md", "README.md",
 ]
 old = (root / "VERSION").read_text().strip()
 m = re.fullmatch(r"(\d+\.\d+\.\d+)-build\.(\d+)", old)

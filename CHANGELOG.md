@@ -8,7 +8,17 @@ Related logs:
 * [CHANGELOG-COMMUNITY.md](CHANGELOG-COMMUNITY.md): changes merged into `community`.
 * [Release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md): which build introduced each format and ABI.
 
-Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`9c6f0d1`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
+Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
+
+## 0.1.0-build.76 — 2026-11-06
+
+The first release, promoted to `Stable-Release` as `v0.1.0-build.76`.
+
+* **README:** rewritten for people using CKey: a gallery of rendered codes, install lines and a short example for every package (Swift, npm, Maven, NuGet, Homebrew, CMake), what CKey can do, and an index of the documentation. The former README's technical walk-through moved, almost unchanged, to `docs/OVERVIEW.md`.
+* **Gallery:** `docs/gallery/` holds eight codes rendered by the core (plain, print layout, custom colours, Concept, dotted rings, accents, light on dark and a dense v17). `tools/gallery/ckey_gallery.cpp` (target `ckey-gallery`) renders them, reads each one back with the real decoder, certifies it and writes the gallery page. All eight read back and certify.
+* **Publishing:** `tools/release/publish.sh <tag>` publishes a release from the Release workflow's draft (npm, NuGet, Maven Central, Homebrew tap, then the GitHub Release), after checking `SHA256SUMS` and provenance. It rebuilds nothing. `docs/PUBLISHING.md` covers registry accounts and the release procedure.
+* **Lock-down:** every GitHub Action is pinned to a commit SHA with its tag as a comment; `.github/CODEOWNERS` added; `docs/REPOSITORY-SETTINGS.md` lists the branch, tag and security settings to apply in GitHub.
+* **Repository:** `CONTRIBUTING.md` and `SECURITY.md` added; `.gitignore` covers SDK build outputs. `tools/check_version.py` checks `CONTEXT.md` only where it exists, since release branches ship without it. `tools/bump_version.py` also updates the README and SDK READMEs, whose install lines name the version.
 
 ## 0.1.0-build.75 — 2026-11-05
 
@@ -318,7 +328,7 @@ Swift SDK fixes, found while building the Open CKey Scanner iPhone app:
 
 ## 0.1.0-dev.59 — 2026-11-05
 
-* Work moves to the maintainer-only `scratch` branch. It was created from `main` at `8d5a42a`; `community` and `Stable-Release` are being set up by the maintainer.
+* Work moves to the maintainer-only `scratch` branch. It was created from `main` at `47f80a9`; `community` and `Stable-Release` are being set up by the maintainer.
 * Added the consolidated **Rendering, SDK, Distribution, Adoption & Telemetry Specification** (`docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md`), as written by the maintainer.
 * Added `docs/IMPLEMENTATION-STATUS.md`, which maps every section of that specification to the current code. It also flags five conflicts:
   * the print path rasterizes through SVG;
@@ -561,7 +571,7 @@ An independent second review of dev.49 was run under rule 7 and every verified f
 
 ## 0.1.0-dev.30, dev.29, dev.28, dev.27 — 2026-11-03
 
-* **dev.28** (`3b7da13`) first added Profile 3, Format 0.10.0. That entry was folded into the dev.31 entry above when dev.31 corrected it, so its text appears there.
+* **dev.28** (`98cdcb9`) first added Profile 3, Format 0.10.0. That entry was folded into the dev.31 entry above when dev.31 corrected it, so its text appears there.
 * **dev.27, dev.29 and dev.30** have no commit that changed `VERSION` and no recorded entry. They were not published builds.
 
 ## 0.1.0-dev.26 — 2026-11-03

@@ -20,7 +20,7 @@ jobs:
             cxx_flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
     name: core (${{ matrix.name }})
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_CXX_FLAGS="${{ matrix.cxx_flags }}"
       - name: Build
@@ -39,7 +39,7 @@ jobs:
     name: optical benchmarks (synthetic, with QR/Data Matrix via zxing-cpp)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install zxing-cpp
         run: sudo apt-get update && sudo apt-get install -y libzxing-dev
       - name: Build
@@ -48,7 +48,7 @@ jobs:
           cmake --build build --target ckey-bench --parallel 2
       - name: Run
         run: ./build/ckey-bench --quick --md benchmarks.md --json benchmarks.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: benchmarks
           path: benchmarks.*
