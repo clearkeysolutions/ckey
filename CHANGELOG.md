@@ -10,9 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.78 — 2026-11-06
+
+The first published release, `v0.1.0-build.78`.
+
+* **Windows .NET build:** the struct-layout check compared the probe's output (carriage returns stripped) with an expected file that the Windows runner had checked out with CRLF endings, so every line differed although every offset and size matched. The check now uses `diff --strip-trailing-cr`, and `.gitattributes` keeps LF endings for the expected layout and the test vectors on every platform.
+
 ## 0.1.0-build.77 — 2026-11-06
 
-Fixes for the release build, which failed at the `v0.1.0-build.76` tag. Build 77 is the first published release.
+Fixes for the release build, which failed at the `v0.1.0-build.76` tag.
 
 * **Windows (.NET native library):** MSVC has no `__int128`, which the telemetry core used for exact 128-bit multiply-divides. A `mul_div` helper keeps `__int128` where the compiler has it and otherwise uses a portable 64×64→128 multiply and long division (checked against `__int128` on 3.5 million random and edge-case inputs). The bound check on a histogram's sum no longer needs 128 bits.
 * **Linux (.NET native library):** `libckey.so` exported C++ standard-library template instantiations under GCC 11. A linker version script (`sdk/dotnet/native/exports.map`) now exports `ckey_*` only (57 symbols); there is still no libstdc++ dependency.

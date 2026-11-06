@@ -85,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.77 | tag `v0.1.0-build.77` | 2026-11-06 | Release build fixes: MSVC telemetry, Linux exports, Debug link |
+| build.78 | tag `v0.1.0-build.78` | 2026-11-06 | Windows layout check ignores CRLF; LF for compared files |
+| build.77 | `f7b3be2` | 2026-11-06 | Release build fixes: MSVC telemetry, Linux exports, Debug link |
 | build.76 | `442fbae` | 2026-11-06 | README, gallery, publishing, lock-down (tagged; release build failed) |
 | build.75 | `ea162ae` | 2026-11-05 | Swift package keeps `include/` in header-less targets |
 | build.74 | `d220563` | 2026-11-05 | Swift SDK payload and camera fixes |
@@ -188,7 +189,7 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 
 | Release | Tag | Builds | Formats emitted | ABI | Status |
 |---|---|---|---|---|---|
-| CKey 0.1.0-build.77 | `v0.1.0-build.77` | dev.1 to build.77 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.78 | `v0.1.0-build.78` | dev.1 to build.78 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
 | CKey 0.1.0-build.76 | `v0.1.0-build.76` | dev.1 to build.76 | the same | 4 | not released: its release build failed; nothing was published |
 
 ### Tag and version form

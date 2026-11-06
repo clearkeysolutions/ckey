@@ -56,7 +56,7 @@ jobs:
         if: matrix.run_probe
         run: |
           ./build-dotnet/ckey_layout_probe | tr -d '\r' > layout.txt
-          diff -u sdk/dotnet/native/tools/layout_expected.txt layout.txt
+          diff -u --strip-trailing-cr sdk/dotnet/native/tools/layout_expected.txt layout.txt
       - name: Check exported symbols
         if: matrix.rid == 'linux-x64'
         run: |

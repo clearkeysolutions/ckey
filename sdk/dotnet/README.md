@@ -17,7 +17,7 @@ dotnet add package CKey.Wpf   # optional, WPF only
 ```
 
 ```xml
-<PackageReference Include="CKey" Version="0.1.0-build.77" />
+<PackageReference Include="CKey" Version="0.1.0-build.78" />
 ```
 
 The namespace is `OpenCKey`.

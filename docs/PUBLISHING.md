@@ -6,8 +6,8 @@ A release is published in two steps:
 2. **Publish (on the maintainer's machine).** `tools/release/publish.sh <tag>` downloads that draft, verifies every checksum and provenance attestation, and publishes the same bytes to each registry. It rebuilds nothing.
 
 ```sh
-tools/release/publish.sh v0.1.0-build.77                 # every registry, then un-draft the release
-tools/release/publish.sh v0.1.0-build.77 npm nuget       # only some
+tools/release/publish.sh v0.1.0-build.78                 # every registry, then un-draft the release
+tools/release/publish.sh v0.1.0-build.78 npm nuget       # only some
 ```
 
 Targets: `npm`, `nuget`, `maven`, `homebrew`, `release`. Swift needs no publishing: the tag is the release.
@@ -57,7 +57,7 @@ gh auth login
 
 ### Swift
 
-Nothing to publish. SwiftPM resolves the tag directly: `.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.77")`. Optionally add the package at <https://swiftpackageindex.com/add-a-package> so it can be found.
+Nothing to publish. SwiftPM resolves the tag directly: `.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.78")`. Optionally add the package at <https://swiftpackageindex.com/add-a-package> so it can be found.
 
 ## Cutting a release
 
