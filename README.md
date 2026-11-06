@@ -18,13 +18,13 @@ Every image above is rendered by the core and read back by the real decoder. See
 
 ## Install
 
-The current release is **`0.1.0-build.76`**. Every package wraps the same C core.
+The current release is **`0.1.0-build.77`**. Every package wraps the same C core.
 
 | Platform | Package | Install |
 |---|---|---|
 | iOS, macOS (Swift) | Swift package `CKey` | Xcode: **File → Add Package Dependencies…** → `https://github.com/clearkeysolutions/ckey` |
 | Web, Node (WebAssembly) | npm `ckey` | `npm install ckey` |
-| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.76")` |
+| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.77")` |
 | .NET | NuGet `CKey` | `dotnet add package CKey` |
 | Command line | Homebrew `ckey` | `brew install clearkeysolutions/ckey/ckey` |
 | C and C++ | CMake package `CKey` | Build from source (below), then `find_package(CKey)` |
@@ -35,7 +35,7 @@ Release archives for every package, with `SHA256SUMS` and build provenance, are 
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.76"),
+.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.77"),
 .target(name: "MyApp", dependencies: [.product(name: "CKey", package: "ckey")]),
 ```
 
@@ -67,9 +67,9 @@ See [sdk/web](sdk/web/README.md).
 
 ```kotlin
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.76")
-    implementation("org.openckey:ckey-compose:0.1.0-build.76")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.76")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.77")
+    implementation("org.openckey:ckey-compose:0.1.0-build.77")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.77")   // optional: CKeyAnalyzer
 }
 ```
 
@@ -144,7 +144,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 
 | Branch | Purpose |
 |---|---|
-| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.76`. Fork from here. |
+| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.77`. Fork from here. |
 | `community` | Experimental contributions. Unstable: do not depend on it in production. |
 | `scratch` | The maintainer's working branch. |
 
