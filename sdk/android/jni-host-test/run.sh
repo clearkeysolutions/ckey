@@ -76,7 +76,8 @@ if [ -z "$KOTLINC_JAR" ] || [ ! -f "$KOTLINC_JAR" ]; then
   echo "skip: no Kotlin compiler (set KOTLINC_JAR or put Gradle on PATH)"; exit 0
 fi
 LIB="$(dirname "$KOTLINC_JAR")"
-jar_of() { ls "$LIB"/$1-*.jar 2>/dev/null | head -n1; }
+# Optional jars may be missing from a Gradle distribution; never fail on that.
+jar_of() { { ls "$LIB"/$1-*.jar 2>/dev/null || true; } | head -n1; }
 KCP="$KOTLINC_JAR:$(jar_of kotlin-stdlib):$(jar_of kotlin-script-runtime):$(jar_of kotlin-reflect):$(jar_of kotlin-daemon-embeddable):$(jar_of trove4j):$(jar_of annotations):$(jar_of kotlinx-coroutines-core-jvm)"
 STDLIB="$(jar_of kotlin-stdlib)"
 JUNIT="$(jar_of junit):$(jar_of hamcrest-core)"

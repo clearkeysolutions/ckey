@@ -10,9 +10,17 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.82 — 2026-11-06
+
+The release that goes to every registry, `v0.1.0-build.82`.
+
+* **Style validation without undefined behaviour.** The structural check read `policy`, `modules`, `rings` and `rays` as their enum types before range-checking them, so a caller passing an out-of-range value (the certification test passes 9) was undefined behaviour, and the sanitizer CI job stopped on it. The check now reads each field's raw integer and refuses unknown values as before.
+* **Android host check:** `jni-host-test/run.sh` looked up optional jars in the Gradle distribution with `ls`, and under `set -euo pipefail` a missing jar ended the script with exit code 2 before the Kotlin step. Missing optional jars are now ignored.
+* **Verified here:** the full suite under AddressSanitizer and UBSan with `-fno-sanitize-recover=all` (13 of 13), and the Android host check (JNI signatures, exports, 60 harness checks, Kotlin API checks, 17 JUnit tests).
+
 ## 0.1.0-build.81 — 2026-11-06
 
-The first published release, `v0.1.0-build.81`.
+Tagged `v0.1.0-build.81`; superseded by build.82 (two CI checks stopped its release workflow).
 
 * **.NET native library renamed to `ckeynative`** (`ckeynative.dll`, `libckeynative.so`, `libckeynative.dylib`). Windows file names ignore case, so the native `ckey.dll` and the managed `CKey.dll` were the same file in an application's output folder; one overwrote the other and P/Invoke found no `ckey_get_abi_version` (33 of 65 tests failed on Windows). Every Windows consumer of the package would have hit this. The CMake output name, `NativeLibraryName.Name`, the package's `runtimes/<rid>/native/` assets, the .NET Framework copy target and the CI checks all use the new name.
 * **Verified here:** 65 of 65 .NET tests pass against `libckeynative.so`; a local pack places every native asset and both target frameworks where the CI layout check expects them.

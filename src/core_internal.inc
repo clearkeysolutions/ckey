@@ -1304,10 +1304,22 @@ void fill_default_style(ckey_style &st) {
 // Values a renderer cannot draw at all, whatever the policy.
 std::string structural_problem(const ScalableLayout &L, const ckey_style &st) {
     const auto finite01 = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
-    if (st.policy > CKEY_POLICY_OVERRIDE) return "unknown style policy";
-    if (st.modules < CKEY_MODULE_ROUNDED || st.modules > CKEY_MODULE_DIAMOND) return "unknown module shape";
-    if (st.rings < CKEY_RING_JOINED || st.rings > CKEY_RING_DOTS) return "unknown ring style";
-    if (st.rays < CKEY_RAY_ROUND || st.rays > CKEY_RAY_FLAT) return "unknown ray cap";
+    // A caller can store any integer in an enum field. Read the raw bytes so an
+    // out-of-range value is refused without loading it as the enum type.
+    const auto raw = [](const auto &field) {
+        using T = std::remove_cvref_t<decltype(field)>;
+        if constexpr (std::is_enum_v<T>) {
+            std::underlying_type_t<T> v;
+            std::memcpy(&v, &field, sizeof v);
+            return static_cast<long long>(v);
+        } else {
+            return static_cast<long long>(field);
+        }
+    };
+    if (raw(st.policy) < CKEY_POLICY_STRICT || raw(st.policy) > CKEY_POLICY_OVERRIDE) return "unknown style policy";
+    if (raw(st.modules) < CKEY_MODULE_ROUNDED || raw(st.modules) > CKEY_MODULE_DIAMOND) return "unknown module shape";
+    if (raw(st.rings) < CKEY_RING_JOINED || raw(st.rings) > CKEY_RING_DOTS) return "unknown ring style";
+    if (raw(st.rays) < CKEY_RAY_ROUND || raw(st.rays) > CKEY_RAY_FLAT) return "unknown ray cap";
     if (st.accent_count > 4 || st.accent_percent > 100) return "accents: at most 4 colours and 100%";
     if (!finite01(st.bevel) || !finite01(st.shadow) || !finite01(st.texture)) return "bevel, shadow, and texture must be 0..1";
     if (!std::isfinite(st.logo_radius) || st.logo_radius < 0) return "logo radius must be 0 or positive";
