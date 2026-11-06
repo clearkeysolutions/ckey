@@ -1,0 +1,9 @@
+/* libckey.so exports the C API only. Hidden visibility does not cover
+   template instantiations from the C++ standard headers, which older GCC
+   versions emit with default visibility; this script keeps them local. */
+{
+  global:
+    ckey_*;
+  local:
+    *;
+};

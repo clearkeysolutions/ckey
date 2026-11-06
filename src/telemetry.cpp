@@ -130,7 +130,32 @@ uint64_t take_scalar(uint64_t &v) {
     return t;
 }
 
-using u128 = unsigned __int128;
+// floor(a * b / c) for c > 0, exact for any 64-bit a and b, with a 128-bit
+// intermediate. The callers only ask for quotients that fit in 64 bits.
+// MSVC has no __int128, so it gets a portable multiply and long division.
+uint64_t mul_div(uint64_t a, uint64_t b, uint64_t c) {
+#if defined(__SIZEOF_INT128__) && !defined(CKEY_TELEMETRY_PORTABLE_MULDIV)
+    return static_cast<uint64_t>(static_cast<unsigned __int128>(a) * b / c);
+#else
+    const uint64_t a_lo = a & 0xFFFFFFFFu, a_hi = a >> 32, b_lo = b & 0xFFFFFFFFu, b_hi = b >> 32;
+    const uint64_t p0 = a_lo * b_lo, p1 = a_lo * b_hi, p2 = a_hi * b_lo, p3 = a_hi * b_hi;
+    const uint64_t mid = (p0 >> 32) + (p1 & 0xFFFFFFFFu) + (p2 & 0xFFFFFFFFu);
+    const uint64_t lo = (p0 & 0xFFFFFFFFu) | (mid << 32);
+    const uint64_t hi = p3 + (p1 >> 32) + (p2 >> 32) + (mid >> 32);
+    uint64_t q = 0, r = 0;
+    for (int i = 127; i >= 0; --i) {
+        const uint64_t bit = i >= 64 ? (hi >> (i - 64)) & 1u : (lo >> i) & 1u;
+        const bool carry = (r >> 63) != 0;
+        r = (r << 1) | bit;
+        q <<= 1;
+        if (carry || r >= c) {
+            r -= c;
+            q |= 1u;
+        }
+    }
+    return q;
+#endif
+}
 
 ckey_telemetry_histogram take_hist(ckey_telemetry_histogram &h) {
     ckey_telemetry_histogram part{};
@@ -142,8 +167,8 @@ ckey_telemetry_histogram take_hist(ckey_telemetry_histogram &h) {
         return part;
     }
     uint64_t n = eff < CKEY_TELEMETRY_MAX_COUNT ? eff : CKEY_TELEMETRY_MAX_COUNT;
-    if (static_cast<u128>(h.sum) * n / eff > CKEY_TELEMETRY_MAX_SUM)
-        n = static_cast<uint64_t>(static_cast<u128>(CKEY_TELEMETRY_MAX_SUM) * eff / h.sum);
+    if (mul_div(h.sum, n, eff) > CKEY_TELEMETRY_MAX_SUM)
+        n = mul_div(CKEY_TELEMETRY_MAX_SUM, eff, h.sum);
     if (n == 0) n = 1; // unreachable with per-observation values <= 2^32-1
     if (n == eff) {
         part = h;
@@ -153,7 +178,7 @@ ckey_telemetry_histogram take_hist(ckey_telemetry_histogram &h) {
     }
     uint64_t taken = 0;
     for (size_t i = 0; i < CKEY_TELEMETRY_BUCKETS; ++i) {
-        part.buckets[i] = static_cast<uint64_t>(static_cast<u128>(h.buckets[i]) * n / eff);
+        part.buckets[i] = mul_div(h.buckets[i], n, eff);
         taken += part.buckets[i];
     }
     for (size_t i = 0; i < CKEY_TELEMETRY_BUCKETS && taken < n; ++i) {
@@ -163,7 +188,7 @@ ckey_telemetry_histogram take_hist(ckey_telemetry_histogram &h) {
         }
     }
     part.count = n;
-    part.sum = static_cast<uint64_t>(static_cast<u128>(h.sum) * n / eff);
+    part.sum = mul_div(h.sum, n, eff);
     if (part.sum > CKEY_TELEMETRY_MAX_SUM) part.sum = CKEY_TELEMETRY_MAX_SUM;
     for (size_t i = 0; i < CKEY_TELEMETRY_BUCKETS; ++i) h.buckets[i] -= part.buckets[i];
     h.sum -= part.sum;
@@ -315,7 +340,9 @@ bool parse_hist(Parser &p, const char *name, ckey_telemetry_histogram &h) {
         total += b;
     }
     if (total != h.count) return false;
-    if (static_cast<u128>(h.sum) > static_cast<u128>(h.count) * kMaxObservation) return false;
+    // sum > count * kMaxObservation, without overflow: a product that does
+    // not fit in 64 bits exceeds every 64-bit sum.
+    if (h.count <= UINT64_MAX / kMaxObservation && h.sum > h.count * kMaxObservation) return false;
     return true;
 }
 

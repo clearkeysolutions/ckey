@@ -1579,11 +1579,5 @@ double border_rank(double aspect_error, double fill_ratio, double relative_side)
 // Profiles 1/2 and 0.7..115.3 in Profile 3: both 1.0122x inside the field.
 constexpr double kBorderToField = 29.0 / 28.65;
 
-double field_score(int field, const uint8_t *gray, size_t width, size_t height, size_t stride, const double q[8]) {
-    if (field == CKEY_FIELD_SCALABLE) return frame_edge_score(gray, width, height, stride, q, 4.0);
-    if (field == CKEY_FIELD_LOCATOR) return ckey_calibration_score_gray8(gray, width, height, stride, q);
-    if (field == CKEY_FIELD_TEXT) return ckey_calibration_score_text_gray8(gray, width, height, stride, q);
-    return ckey_calibration_score_extended_gray8(gray, width, height, stride, q);
-}
 
 }  // namespace

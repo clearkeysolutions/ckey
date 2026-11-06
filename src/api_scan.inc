@@ -498,6 +498,18 @@ size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_t height,
     return count;
 }
 
+namespace {
+// Scores a refined quadrilateral by the field it claims to be. It calls the
+// scan library's calibration scores, so it lives here rather than in the
+// shared internals, which the codec and render libraries also compile.
+double field_score(int field, const uint8_t *gray, size_t width, size_t height, size_t stride, const double q[8]) {
+    if (field == CKEY_FIELD_SCALABLE) return frame_edge_score(gray, width, height, stride, q, 4.0);
+    if (field == CKEY_FIELD_LOCATOR) return ckey_calibration_score_gray8(gray, width, height, stride, q);
+    if (field == CKEY_FIELD_TEXT) return ckey_calibration_score_text_gray8(gray, width, height, stride, q);
+    return ckey_calibration_score_extended_gray8(gray, width, height, stride, q);
+}
+}  // namespace
+
 double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                               const double border_quad[8], ckey_field field, double out_quad[8]) {
     if (!out_quad || (field != CKEY_FIELD_SCALABLE && field != CKEY_FIELD_LOCATOR && field != CKEY_FIELD_TEXT && field != CKEY_FIELD_EXTENDED) ||

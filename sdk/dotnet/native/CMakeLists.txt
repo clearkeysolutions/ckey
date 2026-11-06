@@ -56,6 +56,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # Portable across distributions: no libstdc++/libgcc runtime dependency,
   # and their symbols stay hidden; refuse unresolved symbols at link time.
   target_link_options(ckey PRIVATE -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,--no-undefined)
+  # Export the C API and nothing else (see exports.map).
+  target_link_options(ckey PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map")
+  set_property(TARGET ckey APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/exports.map")
 endif()
 if(CKEY_DOTNET_TELEMETRY)
   find_package(Threads REQUIRED)
