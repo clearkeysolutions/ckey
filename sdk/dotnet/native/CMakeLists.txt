@@ -1,5 +1,5 @@
 # Native library for the CKey .NET SDK: one shared library named `ckey`
-# (ckey.dll / libckey.so / libckey.dylib) built from the repository's core
+# (ckeynative.dll / libckeynative.so / libckeynative.dylib) built from the repository's core
 # sources (codec, scan, render, certify, telemetry). The NuGet package ships it as runtimes/<rid>/native/ assets.
 #
 #   cmake -S sdk/dotnet/native -B build-dotnet -DCMAKE_BUILD_TYPE=Release -DCKEY_DOTNET_RID=linux-x64
@@ -35,12 +35,12 @@ target_include_directories(ckey PRIVATE ${CKEY_ROOT}/include ${CKEY_ROOT}/src)
 # Windows and visibility("default") with GCC/Clang. Everything else is hidden.
 target_compile_definitions(ckey PRIVATE CKEY_SHARED CKEY_BUILDING)
 set_target_properties(ckey PROPERTIES
-  OUTPUT_NAME ckey
+  OUTPUT_NAME ckeynative
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES
   POSITION_INDEPENDENT_CODE YES)
 if(WIN32)
-  # ckey.dll, also under MinGW (which would otherwise name it libckey.dll).
+  # ckeynative.dll, also under MinGW (which would otherwise name it libckeynative.dll).
   set_target_properties(ckey PROPERTIES PREFIX "")
 endif()
 if(MSVC)

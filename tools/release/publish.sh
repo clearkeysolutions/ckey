@@ -3,8 +3,8 @@
 # workflow attached to its draft GitHub Release. Nothing is rebuilt here: the
 # exact bytes in SHA256SUMS are what get published.
 #
-#   tools/release/publish.sh v0.1.0-build.80            # everything
-#   tools/release/publish.sh v0.1.0-build.80 npm nuget  # only some
+#   tools/release/publish.sh v0.1.0-build.81            # everything
+#   tools/release/publish.sh v0.1.0-build.81 npm nuget  # only some
 #
 # Targets: npm, nuget, maven, homebrew, release (un-drafts the GitHub Release).
 # Account setup and the environment variables each target needs are in

@@ -2,7 +2,7 @@
   <!-- .NET Framework does not resolve runtimes/<rid>/native assets from
        packages.config or PackageReference; copy the 64-bit Windows library
        next to the application. (.NET Core / .NET 5+ need nothing here.) -->
-  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework' And Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ckey.dll')">
-    <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ckey.dll" Link="ckey.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework' And Exists('$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ckeynative.dll')">
+    <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/ckeynative.dll" Link="ckeynative.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 </Project>

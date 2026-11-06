@@ -85,7 +85,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.80 | tag `v0.1.0-build.80` | 2026-11-06 | .NET SDK compiles: escaped line separators; certification test updated |
+| build.81 | tag `v0.1.0-build.81` | 2026-11-06 | .NET native library renamed `ckeynative` (Windows name clash with CKey.dll) |
+| build.80 | `ab07f7e` | 2026-11-06 | .NET SDK compiles: escaped line separators; certification test updated |
 | build.79 | `8ff77e6` | 2026-11-06 | macOS CI on macos-15 (macos-14 retired) |
 | build.78 | `c674688` | 2026-11-06 | Windows layout check ignores CRLF; LF for compared files |
 | build.77 | `f7b3be2` | 2026-11-06 | Release build fixes: MSVC telemetry, Linux exports, Debug link |
@@ -191,7 +192,7 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 
 | Release | Tag | Builds | Formats emitted | ABI | Status |
 |---|---|---|---|---|---|
-| CKey 0.1.0-build.80 | `v0.1.0-build.80` | dev.1 to build.80 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.81 | `v0.1.0-build.81` | dev.1 to build.81 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
 | CKey 0.1.0-build.76 | `v0.1.0-build.76` | dev.1 to build.76 | the same | 4 | not released: its release build failed; nothing was published |
 
 ### Tag and version form

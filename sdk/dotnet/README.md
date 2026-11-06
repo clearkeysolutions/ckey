@@ -7,7 +7,7 @@ CKey optical codes for .NET. The package encodes payloads, renders native pixels
 | `CKey` | `net8.0`, `netstandard2.0` | Headless core: encode, render, certify, scan, payload helpers, telemetry. No UI dependency. |
 | `CKey.Wpf` | `net8.0-windows` | Optional adapter: `WriteableBitmap` output and `BitmapSource` scanning. |
 
-Native libraries ship inside the package as `runtimes/<rid>/native/` assets for `win-x64`, `linux-x64`, `osx-x64` and `osx-arm64`. On `net8.0` the bindings use `[LibraryImport]` and are trim- and AOT-compatible. On `netstandard2.0` they use `[DllImport]`. .NET Framework apps get `ckey.dll` (win-x64) copied by the package's build targets.
+Native libraries ship inside the package as `runtimes/<rid>/native/` assets for `win-x64`, `linux-x64`, `osx-x64` and `osx-arm64`. On `net8.0` the bindings use `[LibraryImport]` and are trim- and AOT-compatible. On `netstandard2.0` they use `[DllImport]`. .NET Framework apps get `ckeynative.dll` (win-x64) copied by the package's build targets.
 
 ## Install
 
@@ -17,7 +17,7 @@ dotnet add package CKey.Wpf   # optional, WPF only
 ```
 
 ```xml
-<PackageReference Include="CKey" Version="0.1.0-build.80" />
+<PackageReference Include="CKey" Version="0.1.0-build.81" />
 ```
 
 The namespace is `OpenCKey`.

@@ -11,8 +11,8 @@ namespace OpenCKey.Interop
 {
     internal static class NativeLibraryName
     {
-        /// <summary>ckey.dll / libckey.so / libckey.dylib (sdk/dotnet/native).</summary>
-        internal const string Name = "ckey";
+        /// <summary>ckeynative.dll / libckeynative.so / libckeynative.dylib (sdk/dotnet/native).</summary>
+        internal const string Name = "ckeynative";
     }
 
     /// <summary>Codec, scan, render and certify functions of the ckey native library.</summary>
