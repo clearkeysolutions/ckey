@@ -10,9 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.79 — 2026-11-06
+
+The first published release, `v0.1.0-build.79`.
+
+* **macOS CI:** GitHub retired the `macos-14` runners ("The configuration 'macos-14-arm64-us-default' is not supported"), so every macOS job (the .NET natives for `osx-arm64` and `osx-x64`, the .NET tests, the Swift package and the release CLI build) was cancelled before it started. They run on `macos-15`.
+
 ## 0.1.0-build.78 — 2026-11-06
 
-The first published release, `v0.1.0-build.78`.
 
 * **Windows .NET build:** the struct-layout check compared the probe's output (carriage returns stripped) with an expected file that the Windows runner had checked out with CRLF endings, so every line differed although every offset and size matched. The check now uses `diff --strip-trailing-cr`, and `.gitattributes` keeps LF endings for the expected layout and the test vectors on every platform.
 

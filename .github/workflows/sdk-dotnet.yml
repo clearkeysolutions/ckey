@@ -36,11 +36,11 @@ jobs:
             cmake_args: "-A x64"
             run_probe: true
           - rid: osx-arm64
-            os: macos-14
+            os: macos-15
             cmake_args: "-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
             run_probe: true
           - rid: osx-x64
-            os: macos-14              # cross-compiled on Apple silicon
+            os: macos-15              # cross-compiled on Apple silicon
             cmake_args: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
             run_probe: false
     defaults:
@@ -87,7 +87,7 @@ jobs:
           - rid: win-x64
             os: windows-2022
           - rid: osx-arm64
-            os: macos-14
+            os: macos-15
     defaults:
       run:
         shell: bash
