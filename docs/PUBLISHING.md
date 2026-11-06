@@ -6,8 +6,8 @@ A release is published in two steps:
 2. **Publish (on the maintainer's machine).** `tools/release/publish.sh <tag>` downloads that draft, verifies every checksum and provenance attestation, and publishes the same bytes to each registry. It rebuilds nothing.
 
 ```sh
-tools/release/publish.sh v0.1.0-build.81                 # every registry, then un-draft the release
-tools/release/publish.sh v0.1.0-build.81 npm nuget       # only some
+tools/release/publish.sh v0.1.0-build.83                 # every registry, then un-draft the release
+tools/release/publish.sh v0.1.0-build.83 npm nuget       # only some
 ```
 
 Targets: `npm`, `nuget`, `maven`, `homebrew`, `release`. Swift needs no publishing: the tag is the release.
@@ -22,11 +22,11 @@ brew install --cask dotnet-sdk
 gh auth login
 ```
 
-### npm: package `ckey`
+### npm: package `openckey`
 
 1. Create an account at <https://www.npmjs.com/signup> and turn on two-factor authentication.
 2. `npm login` on the Mac.
-3. The first `npm publish` claims the name `ckey`. If the name is taken, the package becomes `@clearkeysolutions/ckey`: change `name` in `sdk/web/package.json` and the install line in the README before tagging.
+3. The package is `openckey`. The unscoped name `ckey` belongs to an unrelated 2018 package, so it cannot be used.
 
 ### NuGet: packages `CKey` and `CKey.Wpf`
 
@@ -57,7 +57,7 @@ gh auth login
 
 ### Swift
 
-Nothing to publish. SwiftPM resolves the tag directly: `.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.81")`. Optionally add the package at <https://swiftpackageindex.com/add-a-package> so it can be found.
+Nothing to publish. SwiftPM resolves the tag directly: `.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.83")`. Optionally add the package at <https://swiftpackageindex.com/add-a-package> so it can be found.
 
 ## Cutting a release
 

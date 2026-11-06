@@ -53,7 +53,7 @@ The core is C++20 behind a C ABI ([`include/ckey/ckey.h`](../include/ckey/ckey.h
 | SDK | Package | Location | Verified |
 |---|---|---|---|
 | Swift (iOS, macOS) | SwiftPM `CKey` (this repository's URL) | [`sdk/swift`](../sdk/swift) | in CI on macOS |
-| Web (WASM) | npm `ckey` | [`sdk/web`](../sdk/web) | JS here; wasm in CI |
+| Web (WASM) | npm `openckey` | [`sdk/web`](../sdk/web) | JS here; wasm in CI |
 | Android | Maven `org.openckey:ckey` | [`sdk/android`](../sdk/android) | JNI here; Gradle in CI |
 | .NET | NuGet `CKey` | [`sdk/dotnet`](../sdk/dotnet) | native library here; C# in CI |
 | CLI | Homebrew `ckey` (formula generated per release) | [`packaging/homebrew`](../packaging/homebrew) | |
