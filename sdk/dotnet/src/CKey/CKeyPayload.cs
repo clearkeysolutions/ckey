@@ -178,7 +178,7 @@ namespace OpenCKey
                 {
                     // CKey convention: free-text postal address (UTF-8, no
                     // percent-encoding); line breaks separate address lines.
-                    var lines = rest.Split(new[] { "\r\n", "\n", "\r", "\u0085", " ", " " }, StringSplitOptions.None);
+                    var lines = rest.Split(new[] { "\r\n", "\n", "\r", "\u0085", "\u2028", "\u2029" }, StringSplitOptions.None);
                     var sb = new StringBuilder();
                     foreach (string line in lines)
                     {
