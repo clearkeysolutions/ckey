@@ -1,6 +1,6 @@
 # Implementation status against the Rendering, SDK, Distribution & Telemetry Specification
 
-This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.77`, the first published release (`v0.1.0-build.77` on `Stable-Release`).
+This document maps each section of [the specification](SPECIFICATION-rendering-sdk-distribution-telemetry.md) to the repository as of `0.1.0-build.78`, the first published release (`v0.1.0-build.78` on `Stable-Release`).
 
 **Status key:**
 
@@ -71,7 +71,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | SPM / AAR / npm / NuGet / CMake package / Homebrew (§7) | **Done** (manifests and CI); **Open** (publishing) | Publishing needs the maintainer's registry accounts. |
 | Signed, checksummed artifacts from tagged commits (§7) | **Done** | `release.yml`: the tag must match `VERSION` and be on `Stable-Release`. It produces `SHA256SUMS`, Sigstore provenance and a draft release. |
 | Branch model and community isolation (§8) | **Done** | `docs/BRANCHES-AND-RELEASES.md`, `community.yml` (no secrets). Branch protection is set in GitHub's settings by the maintainer. |
-| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. First published release: `v0.1.0-build.77`. |
+| Immutable tags, deprecation titles (§8.1–8.2) | **Done** (tooling) | `deprecate-release.yml`, `docs/support-matrix.json`. First published release: `v0.1.0-build.78`. |
 | Version counter preserves history (§8.1) | **Done** | `0.1.0-build.N`, tags `v0.1.0-build.N`. |
 
 ## Telemetry (spec §9)
