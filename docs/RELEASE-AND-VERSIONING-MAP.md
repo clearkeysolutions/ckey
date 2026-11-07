@@ -85,6 +85,7 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
+| build.84 | `scratch` and `Stable-Release` | 2026-11-07 | Field-test suite, generated docs and GitHub issue form; no core change |
 | build.83 | tag `v0.1.0-build.83` | 2026-11-06 | npm package renamed `openckey` (`ckey` is taken on npm) |
 | build.82 | tag `v0.1.0-build.82` | 2026-11-06 | Style validation reads enum fields as raw integers; Android host check tolerates missing jars |
 | build.81 | tag `v0.1.0-build.81` | 2026-11-06 | .NET native library renamed `ckeynative` (Windows name clash with CKey.dll) |
