@@ -8,7 +8,7 @@ Kotlin/NDK SDK for [CKey](../../README.md) optical codes. It is a thin wrapper o
 | `org.openckey:ckey-compose` | `@Composable CKeyImage` | `ckey`, Compose UI/Foundation |
 | `org.openckey:ckey-camerax` | `CKeyAnalyzer` (`ImageAnalysis.Analyzer`) | `ckey`, CameraX core |
 
-minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.84`).
+minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.85`).
 
 ## Install
 
@@ -18,9 +18,9 @@ dependencyResolutionManagement { repositories { google(); mavenCentral() } }
 
 // app/build.gradle.kts
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.84")
-    implementation("org.openckey:ckey-compose:0.1.0-build.84")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.84")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.85")
+    implementation("org.openckey:ckey-compose:0.1.0-build.85")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.85")   // optional: CKeyAnalyzer
 }
 ```
 
@@ -106,6 +106,27 @@ when (val action = CKeyPayload.classify(text)) {
 ```
 
 Only the allowlisted forms in `spec/CKey-Payload-Conventions.md` produce an action. They are `http(s)` (with a host), `mailto` (with an `@`), `tel` and `sms` (at least 3 digits), `geo` (with a valid range), `address` (non-empty) and complete vCards. The URI schemes `javascript:`, `data:`, `file:` and `intent:`, and every other scheme, stay plain text. Always keep the payload visible next to the action.
+
+## Safe Actions
+
+A Safe Action (`ckey-action:1:…`) is a signed code from a known site for this app. `CKeySafeActions` verifies it with the core and decides whether it runs; the app only pins keys and registers handlers.
+
+```kotlin
+val actions = CKeySafeActions("com.viadere")
+    .trust("citeory.com", "2026-11", "<64 hex digits>", requestInfo = "https://citeory.com/api/ckey/requests/{request_id}")
+    .register("open.library", listOf("citeory.com")) { action -> openItem(action.paramsText) }
+    .register("signin.request", listOf("citeory.com"), CKeySafeActionScope.CROSS_DEVICE) { action -> approveSignIn(action) }
+
+// Off the main thread: cross-device actions fetch the issuer's request information.
+when (val outcome = actions.handle(text)) {
+    CKeySafeActionOutcome.NotASafeAction -> showPayload(text)          // the ordinary payload rules
+    is CKeySafeActionOutcome.Performed -> Unit                          // same-device: already ran
+    is CKeySafeActionOutcome.NeedsConfirmation -> runOnUiThread { CKeySafeActionPrompt.show(activity, outcome.request) }
+    is CKeySafeActionOutcome.Rejected -> showUnverified(outcome.reason)
+}
+```
+
+Same-device actions run at once. Cross-device actions run only from `CKeySafeActionPrompt`, which shows the verified issuer and who is asking; there is no other way to approve one. Anything that fails a check runs nothing; show that the code claims to be a Safe Action but could not be verified, with the reason. See [spec/CKey-Safe-Actions.md](../../spec/CKey-Safe-Actions.md).
 
 ## Telemetry
 

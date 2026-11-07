@@ -18,6 +18,7 @@ import {
 import { classifyPayload, readableText } from './payload.mjs';
 import { TelemetrySender, installBackgroundSend, monotonicNow, utcDay } from './telemetry.mjs';
 import { makeScanner } from './scanner.mjs';
+import { SafeActions } from './safe-actions.mjs';
 
 const PROFILES = ['0', '0.1', '1', '2', '3']; // indexed by the core's profile code
 const ADJUSTMENTS = ['ink', 'accents', 'effects', 'logo', 'background', 'materials'];
@@ -77,6 +78,29 @@ export function createCKey(M, options = {}) {
   };
   const u32s = (p, n) => Array.from(new Uint32Array(heap().buffer, p, n));
   const f64s = (p, n) => Array.from(new Float64Array(heap().buffer, p, n));
+
+  // ---- Safe Actions (verification is the core's) -----------------------------
+  const safeActionCall = (bytes, key, nowSeconds, maxLifetime) => {
+    if (typeof M._ckw_safe_action !== 'function') throw new Error('this CKey core has no Safe Actions');
+    const p = copyIn(bytes);
+    const k = key ? copyIn(key) : 0;
+    try {
+      const out = M._ckw_safe_action(p, bytes.length, k, nowSeconds, maxLifetime);
+      if (!out) throw new Error(lastError('not a valid Safe Action'));
+      const fields = JSON.parse(cstring(out));
+      M._ckw_free(out);
+      fields.scope = fields.scope === 1 ? 'cross-device' : 'same-device';
+      fields.params = Uint8Array.from((fields.params.match(/../g) || []).map((b) => parseInt(b, 16)));
+      return fields;
+    } finally {
+      M._ckw_free(p);
+      if (k) M._ckw_free(k);
+    }
+  };
+  const safeActionCore = {
+    parse: (bytes) => safeActionCall(bytes, null, 0, 0),
+    verify: (bytes, key, nowSeconds, maxLifetime) => safeActionCall(bytes, key, nowSeconds, maxLifetime),
+  };
 
   // ---- symbols -------------------------------------------------------------
   const registry =
@@ -411,6 +435,15 @@ export function createCKey(M, options = {}) {
       } finally {
         M._ckw_free(p);
       }
+    },
+    /**
+     * Safe Actions for this app (spec/CKey-Safe-Actions.md): pin issuer keys with
+     * trust(), register actions with register(), and pass decoded text to
+     * handle(). Same-device actions run at once; cross-device ones only after
+     * request.present() and the person's approval.
+     */
+    safeActions(appId, safeActionOptions) {
+      return new SafeActions(safeActionCore, appId, safeActionOptions);
     },
     /** Attempts a telemetry send now if one is due (mode 1). Never rejects. */
     flushTelemetry() {

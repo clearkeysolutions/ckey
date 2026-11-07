@@ -76,3 +76,14 @@ ckey_telemetry_counters.frames 24
 ckey_telemetry_counters.decoded 32
 ckey_telemetry_counters.time_to_decode_ms 72
 ckey_telemetry_counters.frame_ms 168
+ckey_safe_action size 1736
+ckey_safe_action.scope 4
+ckey_safe_action.issuer 8
+ckey_safe_action.app 262
+ckey_safe_action.action 518
+ckey_safe_action.key_id 583
+ckey_safe_action.request_id 616
+ckey_safe_action.issued_at 688
+ckey_safe_action.expires_at 696
+ckey_safe_action.params 704
+ckey_safe_action.params_len 1728

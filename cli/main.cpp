@@ -1,6 +1,8 @@
 #include "ckey/ckey.h"
 #include "print_output.h"
 #include <cstdint>
+#include <cstring>
+#include <ctime>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -219,9 +221,107 @@ static int print_sheet(int argc, char **argv) {
     return 0;
 }
 
+// Safe Actions (spec/CKey-Safe-Actions.md) for issuers: make a key, sign, verify.
+static std::string to_hex(const uint8_t *p, size_t n) {
+    static const char d[] = "0123456789abcdef";
+    std::string s;
+    for (size_t i = 0; i < n; ++i) { s.push_back(d[p[i] >> 4]); s.push_back(d[p[i] & 15]); }
+    return s;
+}
+
+static bool read_seed(const std::string &path, std::vector<uint8_t> &seed) {
+    std::ifstream f(path);
+    std::string text;
+    if (!(f >> text) || !from_hex(text, seed) || seed.size() != 32) return false;
+    return true;
+}
+
+static int safe_action(int argc, char **argv) {
+    const std::string sub = argc >= 3 ? argv[2] : "";
+    auto opt = [&](const char *name, const char *fallback = nullptr) -> std::string {
+        for (int i = 3; i + 1 < argc; i += 2) if (std::string(argv[i]) == name) return argv[i + 1];
+        return fallback ? fallback : "";
+    };
+    if (sub == "keygen") {
+        const std::string out = opt("--out");
+        if (out.empty()) { std::cerr << "usage: ckey action keygen --out issuer.key\n"; return 2; }
+        std::ifstream urandom("/dev/urandom", std::ios::binary);
+        uint8_t seed[32];
+        if (!urandom.read(reinterpret_cast<char *>(seed), 32)) { std::cerr << "no system random source\n"; return 1; }
+        std::ofstream f(out);
+        f << to_hex(seed, 32) << "\n";
+        if (!f) { std::cerr << "could not write " << out << "\n"; return 1; }
+        uint8_t pk[32];
+        ckey_ed25519_public_key(seed, pk);
+        std::cout << "private seed written to " << out << " (keep it on the issuer's server only)\n"
+                  << "public key (hex): " << to_hex(pk, 32) << "\n";
+        return 0;
+    }
+    if (sub == "public-key") {
+        std::vector<uint8_t> seed;
+        if (!read_seed(opt("--key"), seed)) { std::cerr << "usage: ckey action public-key --key issuer.key\n"; return 2; }
+        uint8_t pk[32];
+        ckey_ed25519_public_key(seed.data(), pk);
+        std::cout << to_hex(pk, 32) << "\n";
+        return 0;
+    }
+    if (sub == "sign") {
+        std::vector<uint8_t> seed;
+        auto fields = std::make_unique<ckey_safe_action>();
+        const std::string issuer = opt("--issuer"), app = opt("--app"), action = opt("--action"), key_id = opt("--key-id"),
+                          request = opt("--request"), scope = opt("--scope", "same-device"), params = opt("--params"),
+                          ttl = opt("--ttl", "120"), now = opt("--now");
+        if (!read_seed(opt("--key"), seed) || issuer.empty() || app.empty() || action.empty() || key_id.empty() || request.empty() ||
+            (scope != "same-device" && scope != "cross-device")) {
+            std::cerr << "usage: ckey action sign --key issuer.key --issuer citeory.com --app com.viadere --action signin.request\n"
+                         "                        --key-id 2026-11 --request <single-use id> [--scope same-device|cross-device]\n"
+                         "                        [--params '{\"json\":true}'] [--ttl 120] [--now <unix seconds>]\n";
+            return 2;
+        }
+        auto copy = [](char *dst, size_t cap, const std::string &v) { if (v.size() >= cap) return false; std::memcpy(dst, v.data(), v.size()); dst[v.size()] = 0; return true; };
+        if (!copy(fields->issuer, sizeof(fields->issuer), issuer) || !copy(fields->app, sizeof(fields->app), app) ||
+            !copy(fields->action, sizeof(fields->action), action) || !copy(fields->key_id, sizeof(fields->key_id), key_id) ||
+            !copy(fields->request_id, sizeof(fields->request_id), request) || params.size() > sizeof(fields->params)) {
+            std::cerr << "a field is too long\n";
+            return 2;
+        }
+        fields->scope = scope == "cross-device" ? CKEY_SCOPE_CROSS_DEVICE : CKEY_SCOPE_SAME_DEVICE;
+        fields->issued_at = now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now);
+        fields->expires_at = fields->issued_at + std::stoull(ttl);
+        std::memcpy(fields->params, params.data(), params.size());
+        fields->params_len = params.size();
+        size_t need = 0;
+        ckey_diagnostics diag{};
+        ckey_safe_action_sign(fields.get(), seed.data(), nullptr, 0, &need, &diag);
+        std::vector<char> out(need + 1);
+        if (ckey_safe_action_sign(fields.get(), seed.data(), out.data(), out.size(), &need, &diag) != CKEY_OK) { std::cerr << diag.message << "\n"; return 1; }
+        std::cout << out.data() << "\n";
+        return 0;
+    }
+    if (sub == "verify") {
+        const std::string payload = opt("--payload"), key = opt("--public-key"), now = opt("--now"), max = opt("--max-lifetime", "600");
+        std::vector<uint8_t> pk;
+        if (payload.empty() || !from_hex(key, pk) || pk.size() != 32) { std::cerr << "usage: ckey action verify --payload 'ckey-action:1:...' --public-key <64 hex> [--now <unix seconds>] [--max-lifetime 600]\n"; return 2; }
+        auto out = std::make_unique<ckey_safe_action>();
+        ckey_diagnostics diag{};
+        const ckey_status st = ckey_safe_action_verify(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), pk.data(),
+                                                       now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now),
+                                                       static_cast<uint32_t>(std::stoul(max)), out.get(), &diag);
+        std::cout << diag.message << "\n";
+        if (st == CKEY_OK || st == CKEY_EXPIRED)
+            std::cout << "issuer " << out->issuer << ", app " << out->app << ", action " << out->action << ", key " << out->key_id
+                      << ", request " << out->request_id << ", " << (out->scope ? "cross-device" : "same-device") << ", valid " << out->issued_at
+                      << ".." << out->expires_at << ", params " << std::string(reinterpret_cast<const char *>(out->params), out->params_len) << "\n";
+        return st == CKEY_OK ? 0 : 1;
+    }
+    std::cerr << "usage: ckey action (keygen | public-key | sign | verify) ...\n";
+    return 2;
+}
+
 int main(int argc, char **argv) {
     if (argc >= 2 && std::string(argv[1]) == "encode-scalable") return encode_scalable(argc, argv);
     if (argc >= 2 && std::string(argv[1]) == "print-sheet") return print_sheet(argc, argv);
+    if (argc >= 2 && std::string(argv[1]) == "action") return safe_action(argc, argv);
     const bool tierOption = argc == 8 && std::string(argv[2]) == "--tier";
     const int modeIndex = tierOption ? 4 : 2;
     const int outIndex = tierOption ? 6 : 4;
@@ -233,7 +333,8 @@ int main(int argc, char **argv) {
                   << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n"
                   << "  ckey encode-extended --utf8 <up-to-2048-byte-text> --out <extended.svg>\n"
                   << "  ckey encode-extended --tier <256|384|512|768|1024|1536|2048> --utf8 <text> --out <extended.svg>\n"
-                  << "  ckey encode-extended --hex <up-to-4096-hex-chars> --out <extended.svg>\n";
+                  << "  ckey encode-extended --hex <up-to-4096-hex-chars> --out <extended.svg>\n"
+                  << "  ckey action (keygen | public-key | sign | verify) ...   Safe Actions for issuers\n";
         return 2;
     }
     const std::string command = argv[1], mode = argv[modeIndex], value = argv[modeIndex+1], output = argv[outIndex+1];

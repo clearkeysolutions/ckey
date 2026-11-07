@@ -547,6 +547,60 @@ jintArray CKEY_JNI_FN(nativeSymbolInfo)(JNIEnv *env, jclass, jbyteArray blob) {
     });
 }
 
+// ---- Safe Actions (spec/CKey-Safe-Actions.md) ---------------------------
+// A refusal is an ordinary outcome here, not an exception: out_status[0]
+// receives the core status and the returned string is the core's diagnostic.
+// On CKEY_OK the string is the verified fields, one per line (every field is
+// restricted ASCII, params are hex): scope, issuer, app, action, key_id,
+// request_id, issued_at, expires_at, params. A null public key parses only;
+// CKeySafeActions never treats a parsed-only envelope as verified.
+
+jstring CKEY_JNI_FN(nativeSafeAction)(JNIEnv *env, jclass, jbyteArray payload, jbyteArray public_key, jlong now_seconds,
+                                       jint max_lifetime, jintArray out_status) {
+    return guarded<jstring>(env, nullptr, [&]() -> jstring {
+        if (!payload || !out_status) { throw_class(env, "java/lang/NullPointerException", "payload"); return nullptr; }
+        if (env->GetArrayLength(out_status) < 1) { throw_iae(env, "out_status needs one element"); return nullptr; }
+        if (public_key && env->GetArrayLength(public_key) != 32) { throw_iae(env, "a public key is 32 bytes"); return nullptr; }
+        if (now_seconds < 0 || max_lifetime < 1) { throw_iae(env, "invalid time or lifetime"); return nullptr; }
+        const jsize n = env->GetArrayLength(payload);
+        std::vector<uint8_t> bytes(static_cast<size_t>(n));
+        if (n) env->GetByteArrayRegion(payload, 0, n, reinterpret_cast<jbyte *>(bytes.data()));
+        uint8_t key[32];
+        if (public_key) env->GetByteArrayRegion(public_key, 0, 32, reinterpret_cast<jbyte *>(key));
+        auto sa = std::make_unique<ckey_safe_action>();
+        std::memset(sa.get(), 0, sizeof(ckey_safe_action));
+        ckey_diagnostics diag{};
+        diag.abi_version = CKEY_ABI_VERSION;
+        const ckey_status st = public_key
+            ? ckey_safe_action_verify(bytes.data(), bytes.size(), key, static_cast<uint64_t>(now_seconds),
+                                      static_cast<uint32_t>(max_lifetime), sa.get(), &diag)
+            : ckey_safe_action_parse(bytes.data(), bytes.size(), sa.get(), &diag);
+        const jint status = static_cast<jint>(st);
+        env->SetIntArrayRegion(out_status, 0, 1, &status);
+        if (st != CKEY_OK) {
+            const size_t len = strnlen(diag.message, sizeof(diag.message));
+            return new_utf8_string(env, diag.message, len);
+        }
+        std::string out;
+        out.reserve(1024 + 2 * sa->params_len);
+        auto line = [&](const std::string &v) { out += v; out += '\n'; };
+        line(std::to_string(sa->scope));
+        line(sa->issuer);
+        line(sa->app);
+        line(sa->action);
+        line(sa->key_id);
+        line(sa->request_id);
+        line(std::to_string(sa->issued_at));
+        line(std::to_string(sa->expires_at));
+        static const char digits[] = "0123456789abcdef";
+        for (size_t i = 0; i < sa->params_len && i < sizeof(sa->params); ++i) {
+            out += digits[sa->params[i] >> 4];
+            out += digits[sa->params[i] & 15];
+        }
+        return new_utf8_string(env, out.data(), out.size());
+    });
+}
+
 // ---- Rendering ----------------------------------------------------------
 #if CKEY_JNI_RENDER
 

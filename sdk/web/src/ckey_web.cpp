@@ -27,6 +27,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <new>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,33 @@ CKW_EXPORT const char *ckw_last_error(void) { return g_error; }
 CKW_EXPORT uint32_t ckw_last_len(void) { return static_cast<uint32_t>(g_last_len); }
 CKW_EXPORT const char *ckw_software_version(void) { return ckey_get_software_version(); }
 CKW_EXPORT uint32_t ckw_abi_version(void) { return ckey_get_abi_version(); }
+
+// ---- Safe Actions -------------------------------------------------------------
+
+// Parses (key == null) or verifies a Safe Action and returns a malloc'd JSON
+// object of its fields, or null with the reason in ckw_last_error(). The status
+// is in "status": 0 OK, 6 bad signature, 7 expired. Every text field is limited by
+// the core to a JSON-safe character set; params are hexadecimal.
+CKW_EXPORT char *ckw_safe_action(const uint8_t *payload, uint32_t len, const uint8_t *key, double now, uint32_t max_lifetime) {
+    auto sa = std::make_unique<ckey_safe_action>();
+    ckey_diagnostics diag{};
+    const ckey_status st = key
+        ? ckey_safe_action_verify(payload, len, key, static_cast<uint64_t>(now), max_lifetime, sa.get(), &diag)
+        : ckey_safe_action_parse(payload, len, sa.get(), &diag);
+    if (st != CKEY_OK) { set_error_diag(diag, "not a valid Safe Action"); return nullptr; }
+    static const char hexd[] = "0123456789abcdef";
+    std::string params;
+    for (size_t i = 0; i < sa->params_len; ++i) { params.push_back(hexd[sa->params[i] >> 4]); params.push_back(hexd[sa->params[i] & 15]); }
+    std::string json = std::string("{\"scope\":") + std::to_string(sa->scope) + ",\"issuer\":\"" + sa->issuer + "\",\"app\":\"" + sa->app +
+                       "\",\"action\":\"" + sa->action + "\",\"key_id\":\"" + sa->key_id + "\",\"request_id\":\"" + sa->request_id +
+                       "\",\"issued_at\":" + std::to_string(sa->issued_at) + ",\"expires_at\":" + std::to_string(sa->expires_at) +
+                       ",\"params\":\"" + params + "\"}";
+    char *out = static_cast<char *>(std::malloc(json.size() + 1));
+    if (!out) { set_error("out of memory"); return nullptr; }
+    std::memcpy(out, json.c_str(), json.size() + 1);
+    g_last_len = json.size();
+    return out;
+}
 
 // ---- Symbols ----------------------------------------------------------------
 

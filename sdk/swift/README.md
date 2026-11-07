@@ -131,6 +131,27 @@ if let text = result.text, let action = CKeyPayload.classify(text) {
 
 `classify` follows `spec/CKey-Payload-Conventions.md`. It never acts on a payload. Only the allowlisted forms get an action, and each one is validated first. Everything else returns `nil` and is shown as plain text, including `javascript:`, `data:`, `file:`, `intent:` and custom schemes. Act only when the user taps, and keep the payload visible.
 
+## Safe Actions
+
+A Safe Action (`ckey-action:1:…`) is a signed code from a known site for this app. `CKeySafeActions` verifies it with the core and decides whether it runs; the app only pins keys and registers handlers.
+
+```swift
+let actions = CKeySafeActions(appID: "com.viadere")
+    .trust(issuer: "citeory.com", keyID: "2026-11", publicKeyHex: "<64 hex digits>",
+           requestInfo: "https://citeory.com/api/ckey/requests/{request_id}")
+    .register("open.library", issuers: ["citeory.com"]) { action in openItem(action.paramsText) }
+    .register("signin.request", issuers: ["citeory.com"], scope: .crossDevice) { action in approveSignIn(action) }
+
+switch await actions.handle(text) {
+case .notASafeAction: showPayload(text)                  // the ordinary payload rules
+case .performed: break                                    // same-device: already ran
+case .needsConfirmation(let request): pending = request   // present CKeySafeActionPrompt(request: request)
+case .rejected(let reason): showUnverified(reason)
+}
+```
+
+Same-device actions run at once. Cross-device actions run only from `CKeySafeActionPrompt`, which shows the verified issuer and who is asking; there is no other way to approve one. Anything that fails a check runs nothing; show that the code claims to be a Safe Action but could not be verified, with the reason. See [spec/CKey-Safe-Actions.md](../../spec/CKey-Safe-Actions.md).
+
 ## Telemetry
 
 The `CKey` product keeps aggregate scan counters by default (mode 1) and sends them to `https://openckey.org/api/telemetry/v1/batch` at most once an hour. The normative rules are in [docs/adoption-and-telemetry.md](../../docs/adoption-and-telemetry.md).

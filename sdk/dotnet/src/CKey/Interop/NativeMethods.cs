@@ -20,6 +20,20 @@ namespace OpenCKey.Interop
     {
 #if NET7_0_OR_GREATER
         [LibraryImport(NativeLibraryName.Name)]
+        internal static partial int ckey_safe_action_parse(byte* payload, nuint length, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#else
+        [DllImport(NativeLibraryName.Name, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ckey_safe_action_parse(byte* payload, nuint length, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#endif
+#if NET7_0_OR_GREATER
+        [LibraryImport(NativeLibraryName.Name)]
+        internal static partial int ckey_safe_action_verify(byte* payload, nuint length, byte* publicKey, ulong now, uint maxLifetime, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#else
+        [DllImport(NativeLibraryName.Name, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ckey_safe_action_verify(byte* payload, nuint length, byte* publicKey, ulong now, uint maxLifetime, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#endif
+#if NET7_0_OR_GREATER
+        [LibraryImport(NativeLibraryName.Name)]
         internal static partial uint ckey_get_abi_version();
 #else
         [DllImport(NativeLibraryName.Name, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

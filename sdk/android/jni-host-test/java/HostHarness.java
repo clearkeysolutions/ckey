@@ -231,6 +231,52 @@ public final class HostHarness {
         check(!CKeyNative.nativeTelemetryShouldSend(t + 10_000_000), "mode 2 never sends");
         CKeyNative.nativeTelemetryResetForTesting();
 
+        safeActions();
         System.out.println("HostHarness: " + checks + " checks passed");
+    }
+
+    static String field(String block, String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + name + "\":\\s*(\"[^\"]*\"|[0-9]+)").matcher(block);
+        if (!m.find()) throw new AssertionError("vector without " + name);
+        String v = m.group(1);
+        return v.startsWith("\"") ? v.substring(1, v.length() - 1) : v;
+    }
+
+    /** tests/vectors/safe-actions-v1.json through nativeSafeAction (the bridge, not the policy). */
+    static void safeActions() throws Exception {
+        String path = System.getProperty("org.openckey.ckey.vectors");
+        if (path == null) { System.out.println("skip safe action vectors (no org.openckey.ckey.vectors)"); return; }
+        String json = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(path)), StandardCharsets.UTF_8);
+        String[] blocks = json.split("\\{\\s*\"name\":");
+        int n = 0;
+        for (int i = 1; i < blocks.length; i++) {
+            String b = blocks[i];
+            String name = b.substring(b.indexOf('"') + 1, b.indexOf('"', b.indexOf('"') + 1));
+            byte[] payload = field(b, "payload").getBytes(StandardCharsets.UTF_8);
+            String hex = field(b, "public_key");
+            byte[] key = new byte[32];
+            for (int k = 0; k < 32; k++) key[k] = (byte) Integer.parseInt(hex.substring(2 * k, 2 * k + 2), 16);
+            int[] status = new int[1];
+            String out = CKeyNative.nativeSafeAction(payload, key, Long.parseLong(field(b, "now")), Integer.parseInt(field(b, "max_lifetime")), status);
+            String expect = field(b, "expect");
+            boolean ok = switch (expect) {
+                case "ok" -> status[0] == 0 && out.split("\n", -1).length == 9 && out.contains("\n" + field(b, "request_id") + "\n");
+                case "integrity" -> status[0] == 6;
+                case "expired" -> status[0] == 7;
+                case "invalid" -> status[0] == 1;
+                case "invalid_or_integrity" -> status[0] == 1 || status[0] == 6;
+                default -> false;
+            };
+            if (!ok) throw new AssertionError("FAILED: safe action vector \"" + name + "\": expected " + expect + ", got " + status[0] + " " + out);
+            n++;
+        }
+        check(n >= 20, "safe action vectors: " + n + " verdicts match");
+        int[] status = new int[1];
+        String first = field(blocks[1], "payload");
+        String parsed = CKeyNative.nativeSafeAction(first.getBytes(StandardCharsets.UTF_8), null, 0, 3600, status);
+        check(status[0] == 0 && parsed.startsWith("0\ncitee".replace("citee", "citeory.com")), "parse only (no key)");
+        CKeyNative.nativeSafeAction("ckey-action:1:AAAA".getBytes(StandardCharsets.UTF_8), null, 0, 3600, status);
+        check(status[0] == 1, "malformed envelope -> invalid, no exception");
+        throwsType(IllegalArgumentException.class, () -> CKeyNative.nativeSafeAction(new byte[1], new byte[31], 0, 600, new int[1]), "short public key");
     }
 }

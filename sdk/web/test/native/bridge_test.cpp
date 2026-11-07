@@ -35,6 +35,7 @@ char *ckw_render_svg(const void *, const void *, uint32_t);
 uint8_t *ckw_render_pdf(const void *, const void *, double, uint32_t);
 uint8_t *ckw_decode_rgba(const uint8_t *, uint32_t, uint32_t, uint32_t, uint32_t *);
 uint8_t *ckw_decode_gray(const uint8_t *, uint32_t, uint32_t, uint32_t, uint32_t *);
+char *ckw_safe_action(const uint8_t *, uint32_t, const uint8_t *, double, uint32_t);
 int ckw_tel_set_mode(int);
 int ckw_tel_get_mode(void);
 int ckw_tel_set_client(const char *, const char *, const char *);
@@ -194,6 +195,31 @@ int main() {
     CHECK(ckw_tel_batch_result(id, 204, 62000) == 0);
     CHECK(ckw_tel_batch_result(id, 204, 62000) != 0);    // reported once
     ckw_tel_reset_for_testing();
+
+    {  // Safe Actions: sign with the core, then parse and verify through the bridge.
+        uint8_t seed[32] = {0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+                            0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60};
+        uint8_t pk[32];
+        ckey_ed25519_public_key(seed, pk);
+        ckey_safe_action f{};
+        f.scope = CKEY_SCOPE_SAME_DEVICE;
+        std::strcpy(f.issuer, "citeory.com"); std::strcpy(f.app, "com.viadere"); std::strcpy(f.action, "open.library");
+        std::strcpy(f.key_id, "k1"); std::strcpy(f.request_id, "req-12345678");
+        f.issued_at = 1000; f.expires_at = 1100; f.params[0] = 'h'; f.params[1] = 'i'; f.params_len = 2;
+        char text[1024]; size_t n = 0; ckey_diagnostics diag{};
+        CHECK(ckey_safe_action_sign(&f, seed, text, sizeof text, &n, &diag) == CKEY_OK);
+        const auto *t = reinterpret_cast<const uint8_t *>(text);
+        char *parsed = ckw_safe_action(t, static_cast<uint32_t>(n), nullptr, 0, 0);
+        CHECK(parsed && std::strstr(parsed, "\"action\":\"open.library\"") && std::strstr(parsed, "\"params\":\"6869\""));
+        ckw_free(parsed);
+        char *ok = ckw_safe_action(t, static_cast<uint32_t>(n), pk, 1050, 600);
+        CHECK(ok && std::strstr(ok, "\"request_id\":\"req-12345678\"") && std::strstr(ok, "\"scope\":0"));
+        ckw_free(ok);
+        CHECK(ckw_safe_action(t, static_cast<uint32_t>(n), pk, 1200, 600) == nullptr);
+        CHECK(std::strstr(ckw_last_error(), "expired") != nullptr);
+        uint8_t other[32] = {1};
+        CHECK(ckw_safe_action(t, static_cast<uint32_t>(n), other, 1050, 600) == nullptr);
+    }
 
     ckw_symbol_free(sym);
     if (failures) { std::fprintf(stderr, "%d failure(s)\n", failures); return 1; }

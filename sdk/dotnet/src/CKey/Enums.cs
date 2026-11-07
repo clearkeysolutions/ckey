@@ -19,6 +19,8 @@ namespace OpenCKey
         Uncorrectable = 5,
         /// <summary>CKEY_INTEGRITY_FAILURE: the CRC did not match.</summary>
         IntegrityFailure = 6,
+        /// <summary>CKEY_EXPIRED: a Safe Action outside its lifetime, or longer-lived than allowed.</summary>
+        Expired = 7,
     }
 
     /// <summary>Error-correction level of a Profile 0 symbol (<c>ckey_ecc_level</c>).</summary>

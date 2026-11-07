@@ -180,4 +180,21 @@ namespace OpenCKey.Interop
         public NativeTelemetryHistogram TimeToDecodeMs; // 72
         public NativeTelemetryHistogram FrameMs;        // 168
     }
+
+    /// <summary>ckey_safe_action: size 1736.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct NativeSafeAction
+    {
+        public uint AbiVersion;            // 0
+        public uint Scope;                 // 4    ckey_safe_action_scope
+        public fixed byte Issuer[254];     // 8
+        public fixed byte App[256];        // 262
+        public fixed byte Action[65];      // 518
+        public fixed byte KeyId[33];       // 583
+        public fixed byte RequestId[65];   // 616
+        public ulong IssuedAt;             // 688
+        public ulong ExpiresAt;            // 696
+        public fixed byte Params[1024];    // 704
+        public nuint ParamsLength;         // 1728
+    }
 }

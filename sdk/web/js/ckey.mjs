@@ -11,6 +11,7 @@ import { createCKey } from './api.mjs';
 
 export { classifyPayload, readableText, toHex } from './payload.mjs';
 export { CKEY_TELEMETRY_ENDPOINT } from './telemetry.mjs';
+export { SAME_DEVICE, CROSS_DEVICE, isSafeAction, SafeActions, SafeActionRequest } from './safe-actions.mjs';
 
 /** Telemetry modes (canonical numeric values shared by every CKey SDK). */
 export const TELEMETRY_OFF = 0;

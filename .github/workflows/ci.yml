@@ -32,6 +32,9 @@ jobs:
         run: |
           python3 tools/field_tests.py --check
           python3 tools/field_tests.py --verify-with build/ckey
+      - name: Safe Action vectors match their independent generator
+        if: matrix.name == 'release'
+        run: node tools/safe_actions_vectors.mjs --check
       - name: Install and consume the CMake package
         if: matrix.name == 'release'
         run: |

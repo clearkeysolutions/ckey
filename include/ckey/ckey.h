@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.84"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.85"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -57,7 +57,8 @@ typedef enum ckey_status {
     CKEY_INSUFFICIENT_BUFFER = 3,
     CKEY_INTERNAL_ERROR = 4,
     CKEY_UNCORRECTABLE = 5,
-    CKEY_INTEGRITY_FAILURE = 6
+    CKEY_INTEGRITY_FAILURE = 6,
+    CKEY_EXPIRED = 7
 } ckey_status;
 
 typedef struct ckey_symbol {
@@ -582,6 +583,53 @@ CKEY_API ckey_status ckey_render_text_svg(const ckey_text_symbol *symbol, uint32
 CKEY_API ckey_status ckey_render_extended_svg(const ckey_extended_symbol *symbol, uint32_t scale,
                                                char *out_utf8, size_t out_capacity,
                                                size_t *out_required);
+
+/*
+ * Safe Actions (spec/CKey-Safe-Actions.md): a signed request, carried as the
+ * text payload "ckey-action:1:<base64url envelope>", for an action the
+ * receiving app has registered. The core parses, signs and verifies it; the
+ * SDKs decide whether it runs. A payload that fails any check is ordinary text
+ * and falls back to the show-and-approve rule.
+ */
+typedef enum ckey_safe_action_scope {
+    CKEY_SCOPE_SAME_DEVICE = 0,   /* the result stays in the app on the scanning device */
+    CKEY_SCOPE_CROSS_DEVICE = 1   /* approves something elsewhere, e.g. signs in a browser */
+} ckey_safe_action_scope;
+
+typedef struct ckey_safe_action {
+    uint32_t abi_version;
+    uint32_t scope;              /* ckey_safe_action_scope */
+    char issuer[254];            /* issuing site's DNS name, lower case */
+    char app[256];               /* receiving app ID, e.g. com.viadere */
+    char action[65];             /* action name registered by the receiving app */
+    char key_id[33];             /* which issuer key signed it */
+    char request_id[65];         /* single-use request ID, 8..64 characters */
+    uint64_t issued_at;          /* Unix seconds */
+    uint64_t expires_at;         /* Unix seconds */
+    uint8_t params[1024];        /* action parameters; UTF-8 JSON recommended */
+    size_t params_len;
+} ckey_safe_action;
+
+/* 1 when the payload starts with "ckey-action:1:", else 0. Says nothing about validity. */
+CKEY_API int ckey_is_safe_action(const uint8_t *payload, size_t len);
+/* Reads the fields without checking the signature, e.g. to look up the issuer's key. */
+CKEY_API ckey_status ckey_safe_action_parse(const uint8_t *payload, size_t len, ckey_safe_action *out,
+                                            ckey_diagnostics *diag);
+/*
+ * CKEY_OK only when the Ed25519 signature matches public_key, the lifetime is at
+ * most max_lifetime_seconds (0 = 600) and now (Unix seconds) is within it, with
+ * 120 s of clock tolerance. CKEY_INTEGRITY_FAILURE for a bad signature,
+ * CKEY_EXPIRED for a valid but out-of-time envelope, CKEY_INVALID_ARGUMENT if
+ * malformed. Single use (request_id) is enforced by the issuer's server.
+ */
+CKEY_API ckey_status ckey_safe_action_verify(const uint8_t *payload, size_t len, const uint8_t public_key[32],
+                                             uint64_t now, uint32_t max_lifetime_seconds,
+                                             ckey_safe_action *out, ckey_diagnostics *diag);
+/* Issuer side: signs fields with a 32-byte Ed25519 seed into NUL-terminated text. */
+CKEY_API ckey_status ckey_safe_action_sign(const ckey_safe_action *fields, const uint8_t seed[32],
+                                           char *out, size_t out_capacity, size_t *out_len,
+                                           ckey_diagnostics *diag);
+CKEY_API void ckey_ed25519_public_key(const uint8_t seed[32], uint8_t out_public_key[32]);
 
 #ifdef __cplusplus
 }

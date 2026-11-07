@@ -27,6 +27,8 @@
   <ItemGroup>
     <AssemblyMetadata Include="CKeyVersion" Value="$(CKeyVersion)" />
     <InternalsVisibleTo Include="CKey.Tests" />
+    <!-- The WPF Safe Action confirmation is the only caller of CKeySafeActionRequest.Decide outside this assembly. -->
+    <InternalsVisibleTo Include="CKey.Wpf" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <!-- .NET Framework consumers do not probe runtimes/<rid>/native: copy the win-x64 library. -->
     <None Include="build/CKey.targets" Pack="true" PackagePath="build/;buildTransitive/" />

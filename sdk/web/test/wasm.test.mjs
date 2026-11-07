@@ -204,3 +204,19 @@ test('classifyPayload is exposed on the instance and the module', { skip }, asyn
   assert.equal(ckey.classifyPayload('tel:+15551234567').kind, 'tel');
   assert.equal(mod.classifyPayload('javascript:alert(1)').kind, 'text');
 });
+
+test('Safe Actions verify through the wasm core and agree with the conformance vectors', { skip }, async () => {
+  const { readFileSync } = await import('node:fs');
+  const { vectors } = JSON.parse(readFileSync(new URL('../../../tests/vectors/safe-actions-v1.json', import.meta.url), 'utf8'));
+  const { ckey } = await fresh();
+  for (const v of vectors.filter((x) => x.fields || x.expect === 'integrity')) {
+    const app = v.fields?.app ?? 'com.viadere';
+    let ran = 0;
+    const sa = ckey.safeActions(app, { now: () => v.now * 1000, maxLifetime: v.max_lifetime })
+      .trust(v.fields?.issuer ?? 'citeory.com', v.fields?.key_id ?? '2026-11', v.public_key)
+      .register(v.fields?.action ?? 'open.library', { issuer: v.fields?.issuer ?? 'citeory.com' }, () => ++ran);
+    const out = await sa.handle(v.payload);
+    if (v.expect === 'ok' && v.fields.scope === 0) assert.equal(out.kind, 'ran', v.name);
+    if (v.expect !== 'ok') assert.equal(out.kind, 'rejected', v.name);
+  }
+});

@@ -196,6 +196,8 @@ export interface CKey {
   decodeImageData(image: ImageLike | ImageData): DecodeResult | null;
   decodeGray(image: ImageLike): DecodeResult | null;
   classifyPayload(text: string | Uint8Array): PayloadAction;
+  /** Safe Actions for this app (spec/CKey-Safe-Actions.md). */
+  safeActions(appId: string, options?: SafeActionsOptions): SafeActions;
   createScanner(options?: { onResult?: (result: DecodeResult) => void; onError?: (error: unknown) => void }): Scanner;
   /** 0 off, 1 on (default), 2 local only. Any other value throws RangeError. */
   telemetry: TelemetryMode;
@@ -214,6 +216,57 @@ export interface LoadOptions {
 
 export function loadCKey(options?: LoadOptions): Promise<CKey>;
 export function classifyPayload(text: string | Uint8Array): PayloadAction;
+
+export type SafeActionScope = 'same-device' | 'cross-device';
+export const SAME_DEVICE: 'same-device';
+export const CROSS_DEVICE: 'cross-device';
+export function isSafeAction(text: string): boolean;
+
+export interface SafeActionsOptions {
+  /** Longest lifetime this app accepts, 1..3600 seconds (default 600). */
+  maxLifetime?: number;
+  /** Also look up keys at https://<issuer>/.well-known/ckey-safe-actions.json (default false: pinned keys only). */
+  keyFiles?: boolean;
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+export interface VerifiedSafeAction {
+  readonly issuer: string;
+  readonly app: string;
+  readonly action: string;
+  readonly keyId: string;
+  readonly requestId: string;
+  readonly scope: SafeActionScope;
+  readonly issuedAt: number;
+  readonly expiresAt: number;
+  readonly params: Uint8Array;
+  readonly paramsText: string | null;
+  readonly paramsJSON: unknown;
+}
+
+export class SafeActionRequest {
+  readonly issuer: string;
+  readonly action: string;
+  readonly title: string;
+  readonly requestInfo: { device: string | null; location: string | null; requestedAt: string | null };
+  readonly details: VerifiedSafeAction;
+  /** Shows the SDK's confirmation; the handler runs only if the person approves. */
+  present(options?: { document?: Document }): Promise<{ approved: boolean; result?: unknown; error?: unknown; reason?: string }>;
+}
+
+export type SafeActionOutcome =
+  | { kind: 'not-safe-action' }
+  | { kind: 'rejected'; reason: string; action?: { issuer: string; app: string; action: string } }
+  | { kind: 'ran'; action: VerifiedSafeAction; result: unknown }
+  | { kind: 'confirm'; request: SafeActionRequest };
+
+export class SafeActions {
+  trust(issuer: string, keyId: string, publicKey: string | Uint8Array, options?: { requestInfo?: string }): this;
+  register(action: string, options: { issuer?: string; issuers?: string[]; scope?: SafeActionScope; title?: string },
+           handler: (action: VerifiedSafeAction) => unknown): this;
+  handle(text: string): Promise<SafeActionOutcome>;
+}
 export function readableText(bytes: Uint8Array): string | null;
 export function toHex(bytes: Uint8Array): string;
 export const CKEY_TELEMETRY_ENDPOINT: string;

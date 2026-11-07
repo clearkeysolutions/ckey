@@ -56,6 +56,11 @@ internal object CKeyNative {
     @JvmStatic external fun nativeEncode(payload: ByteArray, version: Int, level: Int, layout: Int): ByteArray
     @JvmStatic external fun nativeSymbolInfo(symbol: ByteArray): IntArray
 
+    // ---- Safe Actions (always present; see CKeySafeActions)
+    @JvmStatic external fun nativeSafeAction(
+        payload: ByteArray, publicKey: ByteArray?, nowSeconds: Long, maxLifetime: Int, outStatus: IntArray,
+    ): String
+
     // ---- Rendering (FEATURE_RENDER)
     @JvmStatic external fun nativeStylePreset(preset: Int, outInts: IntArray, outDoubles: DoubleArray)
     @JvmStatic external fun nativeCheckStyle(symbol: ByteArray, ints: IntArray?, doubles: DoubleArray?, logoHref: String?): String

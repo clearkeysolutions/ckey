@@ -57,5 +57,9 @@ int main(void) {
     O(ckey_telemetry_counters, sessions_succeeded); O(ckey_telemetry_counters, sessions_failed);
     O(ckey_telemetry_counters, frames); O(ckey_telemetry_counters, decoded);
     O(ckey_telemetry_counters, time_to_decode_ms); O(ckey_telemetry_counters, frame_ms);
+    S(ckey_safe_action);
+    O(ckey_safe_action, scope); O(ckey_safe_action, issuer); O(ckey_safe_action, app); O(ckey_safe_action, action);
+    O(ckey_safe_action, key_id); O(ckey_safe_action, request_id); O(ckey_safe_action, issued_at);
+    O(ckey_safe_action, expires_at); O(ckey_safe_action, params); O(ckey_safe_action, params_len);
     return 0;
 }

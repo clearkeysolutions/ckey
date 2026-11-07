@@ -64,7 +64,7 @@ echo "exports: JNI_OnLoad + $(echo "$exported" | wc -l) native methods, nothing 
 
 echo "== 3. Java harness against the generated mirror"
 "$JAVA_HOME/bin/javac" -cp "$OUT/mirror" -d "$OUT/harness" "$HERE/java/HostHarness.java"
-"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" \
+"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" -Dorg.openckey.ckey.vectors="$REPO/tests/vectors/safe-actions-v1.json" \
   -cp "$OUT/mirror:$OUT/harness" HostHarness 2>&1 | grep -v -e '^WARNING' -e '^Picked up' | tail -n 3
 
 echo "== 4. Kotlin sources"
@@ -100,9 +100,9 @@ echo "Kotlin CKeyNative: $(wc -l < "$OUT/natives-kotlin.txt") static native meth
 RUN_CP="$STDLIB:$OUT/stubs:$OUT/kotlin-main"
 "$JAVA_HOME/bin/javac" -cp "$RUN_CP" -d "$OUT/harness-kt" "$HERE/java/HostHarness.java" "$HERE/java/KotlinApiCheck.java"
 echo "-- harness against the Kotlin-compiled CKeyNative"
-"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" -cp "$RUN_CP:$OUT/harness-kt" HostHarness 2>&1 | grep -v -e '^WARNING' -e '^Picked up' | tail -n 1
+"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" -Dorg.openckey.ckey.vectors="$REPO/tests/vectors/safe-actions-v1.json" -cp "$RUN_CP:$OUT/harness-kt" HostHarness 2>&1 | grep -v -e '^WARNING' -e '^Picked up' | tail -n 1
 echo "-- Kotlin public API from Java"
-"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" -cp "$RUN_CP:$OUT/harness-kt" KotlinApiCheck 2>&1 | grep -v -e '^WARNING' -e '^Picked up' | tail -n 4
+"$JAVA_HOME/bin/java" -Xcheck:jni -Dorg.openckey.ckey.library="$OUT/libckey_jni.so" -Dorg.openckey.ckey.vectors="$REPO/tests/vectors/safe-actions-v1.json" -cp "$RUN_CP:$OUT/harness-kt" KotlinApiCheck 2>&1 | grep -v -e '^WARNING' -e '^Picked up' | tail -n 4
 echo "-- JUnit unit tests (ckey/src/test)"
 kotlinc -module-name ckey_test -Xfriend-paths="$OUT/kotlin-main" -cp "$STDLIB:$OUT/stubs:$OUT/kotlin-main:$JUNIT" -d "$OUT/kotlin-test" \
   $(find "$ANDROID_DIR/ckey/src/test" -name '*.kt') 2>&1 | grep -v '^warning' || true

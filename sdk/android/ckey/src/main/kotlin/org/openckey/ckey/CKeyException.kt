@@ -5,7 +5,7 @@ package org.openckey.ckey
  *
  * [status] is the core's `ckey_status` (1 invalid argument, 2 unsupported
  * profile, 3 insufficient buffer, 4 internal error, 5 uncorrectable,
- * 6 integrity failure); the message is the core's diagnostic.
+ * 6 integrity failure, 7 expired); the message is the core's diagnostic.
  *
  * The (int, String) constructor is called from JNI; keep its signature.
  */
@@ -17,5 +17,6 @@ class CKeyException(val status: Int, message: String) : RuntimeException(message
         const val INTERNAL_ERROR = 4
         const val UNCORRECTABLE = 5
         const val INTEGRITY_FAILURE = 6
+        const val EXPIRED = 7
     }
 }

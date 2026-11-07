@@ -17,7 +17,7 @@ dotnet add package CKey.Wpf   # optional, WPF only
 ```
 
 ```xml
-<PackageReference Include="CKey" Version="0.1.0-build.84" />
+<PackageReference Include="CKey" Version="0.1.0-build.85" />
 ```
 
 The namespace is `OpenCKey`.
@@ -96,6 +96,29 @@ foreach (Frame f in camera.Frames)
 ```
 
 `CKeyPayload.Classify(text)` maps text to an action using spec/CKey-Payload-Conventions.md. Only `https`/`http`, `mailto`, `tel`, `sms`, `geo`, `address:` and vCards are recognized; anything else is plain text. `CKeyPayload.ReadableText(bytes)` applies the convention's text rule.
+
+## Safe Actions
+
+A Safe Action (`ckey-action:1:…`) is a signed code from a known site for this app. `CKeySafeActions` verifies it with the core and decides whether it runs; the app only pins keys and registers handlers.
+
+```csharp
+var actions = new CKeySafeActions("com.viadere")
+    .Trust("citeory.com", "2026-11", "<64 hex digits>", "https://citeory.com/api/ckey/requests/{request_id}")
+    .Register("open.library", new[] { "citeory.com" }, a => OpenItem(a.ParamsText))
+    .Register("signin.request", new[] { "citeory.com" }, CKeySafeActionScope.CrossDevice, null, a => ApproveSignInAsync(a));
+
+var outcome = await actions.HandleAsync(text);
+switch (outcome.Kind)
+{
+    case CKeySafeActionOutcomeKind.NotASafeAction: ShowPayload(text); break;          // the ordinary payload rules
+    case CKeySafeActionOutcomeKind.Performed: break;                                   // same-device: already ran
+    case CKeySafeActionOutcomeKind.NeedsConfirmation:
+        await OpenCKey.Wpf.CKeySafeActionPrompt.ShowAsync(window, outcome.Request!); break; // or CKeySafeActionConsolePrompt.AskAsync
+    case CKeySafeActionOutcomeKind.Rejected: ShowUnverified(outcome.Reason); break;
+}
+```
+
+Same-device actions run at once. Cross-device actions run only from an SDK prompt, which shows the verified issuer and who is asking; there is no other way to approve one. Anything that fails a check runs nothing; show that the code claims to be a Safe Action but could not be verified, with the reason. See [spec/CKey-Safe-Actions.md](../../spec/CKey-Safe-Actions.md).
 
 ## Telemetry
 

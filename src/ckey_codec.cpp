@@ -2,3 +2,4 @@
 #include "core_internal.inc"
 #include "api_codec.inc"
 #include "api_interchange.inc"
+#include "api_safe_actions.inc"

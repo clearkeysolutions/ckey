@@ -94,6 +94,24 @@ For a single image, call `ckey.decodeImageData(imageData)`. It returns `null` wh
 
 `classifyPayload(text)` follows the [CKey Payload Conventions](../../spec/CKey-Payload-Conventions.md). It returns `{ kind, target, label }`, where `kind` is one of `https`, `http`, `mailto`, `tel`, `sms`, `geo`, `address`, `vcard` or `text`. It only describes an action, such as `"Open openckey.org"` or `"Call +15551234567"`, and never performs it. Schemes that are not on the allowlist (`javascript:`, `data:`, `file:`, `intent:`, custom schemes) come back as plain text, as do forms that fail validation. The function is also exported from the module, so you can call it without loading the core.
 
+## Safe Actions
+
+A Safe Action (`ckey-action:1:…`) is a signed code from a known site for this app. `ckey.safeActions()` verifies it with the core and decides whether it runs; the page only pins keys and registers handlers.
+
+```js
+const actions = ckey.safeActions('com.viadere')
+  .trust('citeory.com', '2026-11', '<64 hex digits>', { requestInfo: 'https://citeory.com/api/ckey/requests/{request_id}' })
+  .register('open.library', { issuer: 'citeory.com' }, (action) => openItem(action.paramsJSON))
+  .register('signin.request', { issuer: 'citeory.com', scope: CROSS_DEVICE }, (action) => approveSignIn(action));
+
+const outcome = await actions.handle(text);
+if (outcome.kind === 'not-safe-action') showPayload(text);        // the ordinary payload rules
+else if (outcome.kind === 'confirm') await outcome.request.present(); // the SDK's own <dialog>
+else if (outcome.kind === 'rejected') showUnverified(outcome.reason);
+```
+
+Same-device actions run at once. Cross-device actions run only from `request.present()`, which shows the verified issuer and who is asking; there is no other way to approve one. Anything that fails a check runs nothing; show that the code claims to be a Safe Action but could not be verified, with the reason. See [spec/CKey-Safe-Actions.md](../../spec/CKey-Safe-Actions.md).
+
 ## Privacy and telemetry
 
 **Opt out with one line:**

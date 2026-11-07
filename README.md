@@ -18,13 +18,13 @@ Every image above is rendered by the core and read back by the real decoder. See
 
 ## Install
 
-The current release is **`0.1.0-build.84`**. Every package wraps the same C core.
+The current release is **`0.1.0-build.85`**. Every package wraps the same C core.
 
 | Platform | Package | Install |
 |---|---|---|
 | iOS, macOS (Swift) | Swift package `CKey` | Xcode: **File → Add Package Dependencies…** → `https://github.com/clearkeysolutions/ckey` |
 | Web, Node (WebAssembly) | npm `openckey` | `npm install openckey` |
-| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.84")` |
+| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.85")` |
 | .NET | NuGet `CKey` | `dotnet add package CKey` |
 | Command line | Homebrew `ckey` | `brew install clearkeysolutions/ckey/ckey` |
 | C and C++ | CMake package `CKey` | Build from source (below), then `find_package(CKey)` |
@@ -35,7 +35,7 @@ Release archives for every package, with `SHA256SUMS` and build provenance, are 
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.84"),
+.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.85"),
 .target(name: "MyApp", dependencies: [.product(name: "CKey", package: "ckey")]),
 ```
 
@@ -67,9 +67,9 @@ See [sdk/web](sdk/web/README.md).
 
 ```kotlin
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.84")
-    implementation("org.openckey:ckey-compose:0.1.0-build.84")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.84")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.85")
+    implementation("org.openckey:ckey-compose:0.1.0-build.85")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.85")   // optional: CKeyAnalyzer
 }
 ```
 
@@ -121,7 +121,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 - **Certification.** The core photographs a styled code in a model (tilted, blurred, noisy, under glare), reads it back with the real decoder, and grades it against plain black on white. A model, not a guarantee.
 - **Native output.** RGBA and grayscale pixels, PNG, SVG and vector PDF, rendered directly from the geometry.
 - **Scanning.** Full-frame localization and decoding of grayscale camera frames, separate from the renderer, so a scanner can ship without it.
-- **Safe payloads.** Readers show what a code holds and act only on a tap ([payload conventions](spec/CKey-Payload-Conventions.md)).
+- **Safe payloads.** Readers show what a code holds and act only on a tap ([payload conventions](spec/CKey-Payload-Conventions.md)). The one exception is a **Safe Action**: a code signed by a known site for a known app, which the official SDKs verify before anything runs, and which still needs the person's confirmation when it approves something on another device ([Safe Actions](spec/CKey-Safe-Actions.md)).
 - **Optional telemetry.** Aggregate scan counts, never content or identifiers; `CKey.telemetry = 0` turns it off ([details](docs/adoption-and-telemetry.md)).
 
 ## Documentation
@@ -135,6 +135,8 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 | [Profile 0.1 Format 0.28.0](spec/CKey-Format-v0.28.0.md) | The print layout |
 | [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) | The locator, text and extended profiles |
 | [`.ckey` interchange](spec/CKey-Interchange-v1.md) | The optional `.ckey` file |
+| [Payload conventions](spec/CKey-Payload-Conventions.md) | What a reader shows and offers for each kind of payload |
+| [Safe Actions](spec/CKey-Safe-Actions.md) | Signed actions a reader may run without asking first, and how they are verified |
 | [Rendering, SDK, distribution and telemetry specification](docs/SPECIFICATION-rendering-sdk-distribution-telemetry.md) | What the SDKs and releases must do; status in [implementation status](docs/IMPLEMENTATION-STATUS.md) |
 | [Platform integration](docs/platform-integration.md) | Adding the scanner to a camera platform |
 | [Release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) | Versions, formats, ABI history and the release procedure |
@@ -145,7 +147,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 
 | Branch | Purpose |
 |---|---|
-| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.84`. Fork from here. |
+| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.85`. Fork from here. |
 | `community` | Experimental contributions. Unstable: do not depend on it in production. |
 | `scratch` | The maintainer's working branch. |
 
