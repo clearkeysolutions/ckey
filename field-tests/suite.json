@@ -1,0 +1,910 @@
+{
+  "schema": 1,
+  "suite_version": "1.0",
+  "title": "CKey field tests",
+  "summary": "Repeatable checks of how CKey reads in the real world: printed sizes, distance, angle, light, screens, damage, styles, density, small labels, speed and payload safety. Each test states the claim it checks, how to set it up, what to record, and how to grade the result.",
+  "results_url": "https://openckey.org/tests",
+  "results_json": "https://openckey.org/api/field/results",
+  "report_on_github": "https://github.com/clearkeysolutions/ckey/issues/new?template=field-test-report.yml",
+  "environment": [
+    {
+      "id": "device",
+      "label": "Phone, tablet or camera",
+      "type": "text",
+      "required": true,
+      "help": "Model, for example iPhone 15 or Pixel 8a."
+    },
+    {
+      "id": "os",
+      "label": "Operating system and version",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "reader",
+      "label": "Reader",
+      "type": "choice",
+      "required": true,
+      "options": [
+        "Open CKey Scanner (iOS)",
+        "openckey.org scanner (web)",
+        "An app built with a CKey SDK",
+        "Other"
+      ]
+    },
+    {
+      "id": "reader_version",
+      "label": "Reader version",
+      "type": "text",
+      "required": false,
+      "help": "Shown in the app's Settings, or the SDK version."
+    },
+    {
+      "id": "medium",
+      "label": "Printer, paper or screen",
+      "type": "text",
+      "required": false,
+      "help": "For example: laser printer on plain paper, or a laptop screen."
+    }
+  ],
+  "outcomes": {
+    "pass": "Meets the pass criterion in the test's rubric.",
+    "partial": "Meets the partial criterion but not the pass criterion.",
+    "fail": "Meets neither."
+  },
+  "styles": {
+    "plain": {
+      "description": "The default: black on white.",
+      "ckey_style": {}
+    },
+    "concept": {
+      "description": "The core's Concept preset.",
+      "preset": "concept",
+      "ckey_style": {}
+    },
+    "dark": {
+      "description": "Paper-coloured ink on an ink-coloured background.",
+      "ckey_style": {
+        "ink": "#FCFAF6",
+        "background": "#18211A"
+      }
+    },
+    "accents": {
+      "description": "35% of the data marks in two accent colours.",
+      "ckey_style": {
+        "accents": [
+          "#9A3130",
+          "#215D3B"
+        ],
+        "accent_percent": 35
+      }
+    },
+    "dots": {
+      "description": "Dotted rings, circle modules and flat ray caps in navy.",
+      "ckey_style": {
+        "rings": "dots",
+        "modules": "circle",
+        "rays": "flat",
+        "ink": "#1C2B4A"
+      }
+    }
+  },
+  "tests": [
+    {
+      "id": "FT-01",
+      "title": "Smallest printed size",
+      "category": "Print",
+      "claim": "A standard-layout CKey holding a short link reads when printed at 1 inch (25 mm) wide.",
+      "rationale": "Print size is the first thing a designer chooses and the easiest mistake to make. The core's certification models camera photos down to a few pixels per module; this test checks that model against real printers and real cameras.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale (no \"fit to page\") on plain white paper.",
+        "Measure code F with a ruler: it must be 2.0 inches (51 mm) wide. If it is not, your printer scaled the sheet; fix the print settings and print again.",
+        "Hold the phone about 20 cm from the sheet in ordinary indoor light."
+      ],
+      "steps": [
+        "Open the reader.",
+        "Point it at each code from A (smallest) to F (largest), one at a time, for up to 5 seconds each.",
+        "Record whether it read and roughly how many seconds it took."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT01-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.4
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT01-B",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.5
+        },
+        {
+          "label": "C",
+          "payload": "https://openckey.org/t/FT01-C",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.75
+        },
+        {
+          "label": "D",
+          "payload": "https://openckey.org/t/FT01-D",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.0
+        },
+        {
+          "label": "E",
+          "payload": "https://openckey.org/t/FT01-E",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        },
+        {
+          "label": "F",
+          "payload": "https://openckey.org/t/FT01-F",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F"
+          ],
+          "required": true
+        },
+        {
+          "id": "seconds",
+          "label": "Seconds to read",
+          "type": "number",
+          "unit": "s",
+          "min": 0,
+          "max": 30,
+          "trials": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F"
+          ],
+          "required": false
+        }
+      ],
+      "rubric": {
+        "pass": "Code D (1 inch) and every larger code read.",
+        "partial": "Only code E (1.5 inches) or larger read.",
+        "fail": "Code F (2 inches) did not read."
+      }
+    },
+    {
+      "id": "FT-02",
+      "title": "Reading distance",
+      "category": "Distance",
+      "claim": "A 2-inch CKey reads from arm's length, about 60 cm.",
+      "rationale": "Posters, shelf labels and screens are read from further away than a business card. Distance shrinks the code in the image exactly as print size does, so this shows how far the size results stretch.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale and check that the code is 2.0 inches (51 mm) wide.",
+        "Tape it to a wall at eye level in even indoor light.",
+        "Mark distances of 15, 30, 60, 100 and 150 cm from the wall."
+      ],
+      "steps": [
+        "Stand at each distance in turn, holding the phone square to the sheet.",
+        "Allow up to 5 seconds at each distance without zooming.",
+        "Record whether it read."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT02-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "15 cm",
+            "30 cm",
+            "60 cm",
+            "100 cm",
+            "150 cm"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "It read at 15, 30 and 60 cm.",
+        "partial": "It read at 15 and 30 cm but not at 60 cm.",
+        "fail": "It did not read at 30 cm."
+      }
+    },
+    {
+      "id": "FT-03",
+      "title": "Viewing angle",
+      "category": "Angle",
+      "claim": "A CKey reads when seen at up to 45 degrees off square.",
+      "rationale": "People rarely hold a phone square to a label. The frame and four corner finders exist to undo perspective; this checks how far they stretch.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale; the code is 2.0 inches wide.",
+        "Lay it flat on a table in even light.",
+        "Hold the phone about 30 cm away."
+      ],
+      "steps": [
+        "Start square above the code (0 degrees), then tilt the phone to roughly 30, 45, 60 and 70 degrees from straight down, keeping the code centred.",
+        "Allow up to 5 seconds at each angle.",
+        "Record whether it read. A protractor app helps but an estimate is fine."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT03-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "0°",
+            "30°",
+            "45°",
+            "60°",
+            "70°"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "It read at 0, 30 and 45 degrees.",
+        "partial": "It read at 0 and 30 degrees but not at 45.",
+        "fail": "It did not read at 30 degrees."
+      }
+    },
+    {
+      "id": "FT-04",
+      "title": "Lighting",
+      "category": "Light",
+      "claim": "A printed CKey reads in daylight, ordinary indoor light, dim light and under a reflection.",
+      "rationale": "Low light adds noise and blur, warm light shifts colour, and glare washes out part of the code. The certification model includes noise and glare; this checks it against real rooms.",
+      "time_minutes": 15,
+      "setup": [
+        "Print the test sheet at 100% scale; the code is 2.0 inches wide.",
+        "Keep the phone about 25 cm from the sheet with the flash off."
+      ],
+      "steps": [
+        "Try the code in each condition: outdoor daylight (not direct sun on the screen), ordinary indoor light, a dim room lit by one distant lamp, warm lamp light close by, and with a bright reflection crossing part of the code (glossy paper or a sheet protector under a lamp).",
+        "Allow up to 5 seconds in each.",
+        "Record whether it read, and optionally the light level from a light-meter app."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT04-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "Daylight",
+            "Indoor",
+            "Dim",
+            "Warm lamp",
+            "Reflection"
+          ],
+          "required": true
+        },
+        {
+          "id": "lux",
+          "label": "Light level, if measured",
+          "type": "number",
+          "unit": "lux",
+          "min": 0,
+          "max": 200000,
+          "trials": [
+            "Daylight",
+            "Indoor",
+            "Dim",
+            "Warm lamp",
+            "Reflection"
+          ],
+          "required": false
+        }
+      ],
+      "rubric": {
+        "pass": "It read in daylight, indoor, dim and warm light.",
+        "partial": "It read in daylight and indoor light only.",
+        "fail": "It did not read in ordinary indoor light."
+      }
+    },
+    {
+      "id": "FT-05",
+      "title": "On a screen",
+      "category": "Screen",
+      "claim": "A CKey shown on a phone or computer screen reads, including at low brightness and in light-on-dark colours.",
+      "rationale": "Many codes are read off another screen: a ticket in a wallet app, a slide, a monitor. Screens add moiré, refresh banding and glare that paper does not.",
+      "time_minutes": 10,
+      "setup": [
+        "Open this test's sheet on a second device: another phone, a tablet or a computer.",
+        "Make each code about 2 inches (5 cm) wide on that screen."
+      ],
+      "steps": [
+        "Try code A (black on white) at full brightness, then at the lowest comfortable brightness.",
+        "Try code B (light on dark) at full brightness.",
+        "Try code A on a computer monitor at arm's length.",
+        "Allow up to 5 seconds each and record whether it read."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT05-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT05-B",
+          "level": "M",
+          "layout": "standard",
+          "style": "dark",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "A, full brightness",
+            "A, low brightness",
+            "B, full brightness",
+            "A, monitor"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "Every case read.",
+        "partial": "Code A at full brightness read, but another case did not.",
+        "fail": "Code A at full brightness did not read."
+      }
+    },
+    {
+      "id": "FT-06",
+      "title": "Damage",
+      "category": "Damage",
+      "claim": "Error correction lets a CKey read through marks, a covered patch and creasing, with more damage tolerated at higher levels.",
+      "rationale": "Reed–Solomon correction and the scrambled layout are meant to spread damage thinly across many bytes. This is the plainest way to see whether level H buys what it costs.",
+      "time_minutes": 20,
+      "setup": [
+        "Print the test sheet twice at 100% scale; each code is 2.0 inches wide. Code A is level M and code B is level H.",
+        "Keep the first copy clean for comparison."
+      ],
+      "steps": [
+        "On the second copy, damage both codes the same way, one step at a time, testing after each step:",
+        "1. Draw one pen line, about 2 mm wide, straight across the middle.",
+        "2. Cover the bottom-right corner area with a sticky note about 1/8 of the code's width.",
+        "3. Crumple the sheet into a ball, then flatten it.",
+        "Allow up to 5 seconds each and record whether each code read."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT06-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT06-B",
+          "level": "H",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read_m",
+          "label": "Code A (level M) read",
+          "type": "boolean",
+          "trials": [
+            "Clean",
+            "Pen line",
+            "Covered corner",
+            "Crumpled"
+          ],
+          "required": true
+        },
+        {
+          "id": "read_h",
+          "label": "Code B (level H) read",
+          "type": "boolean",
+          "trials": [
+            "Clean",
+            "Pen line",
+            "Covered corner",
+            "Crumpled"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "Code B read after every step.",
+        "partial": "Both read clean and after the pen line, but code B failed a later step.",
+        "fail": "Code B did not read after the pen line."
+      }
+    },
+    {
+      "id": "FT-07",
+      "title": "Styles in the real world",
+      "category": "Design",
+      "claim": "A style the core certifies reads in practice, and reads about as well as plain black on white.",
+      "rationale": "Certification photographs each style in a model before it is allowed. This is the check that the model's verdict holds on real paper and real cameras, style by style.",
+      "time_minutes": 15,
+      "setup": [
+        "Print the test sheet in colour at 100% scale; each code is 1.5 inches wide.",
+        "Use ordinary indoor light and hold the phone about 20 cm away."
+      ],
+      "steps": [
+        "Try each code, A to E, for up to 5 seconds.",
+        "Record whether it read and roughly how many seconds it took.",
+        "Note anything about a style that seemed harder, such as needing to move closer."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT07-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT07-B",
+          "level": "Q",
+          "layout": "standard",
+          "style": "concept",
+          "size_in": 1.5
+        },
+        {
+          "label": "C",
+          "payload": "https://openckey.org/t/FT07-C",
+          "level": "M",
+          "layout": "standard",
+          "style": "dark",
+          "size_in": 1.5
+        },
+        {
+          "label": "D",
+          "payload": "https://openckey.org/t/FT07-D",
+          "level": "M",
+          "layout": "standard",
+          "style": "accents",
+          "size_in": 1.5
+        },
+        {
+          "label": "E",
+          "payload": "https://openckey.org/t/FT07-E",
+          "level": "M",
+          "layout": "standard",
+          "style": "dots",
+          "size_in": 1.5
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 5 seconds",
+          "type": "boolean",
+          "trials": [
+            "A plain",
+            "B concept",
+            "C dark",
+            "D accents",
+            "E dots"
+          ],
+          "required": true
+        },
+        {
+          "id": "seconds",
+          "label": "Seconds to read",
+          "type": "number",
+          "unit": "s",
+          "min": 0,
+          "max": 30,
+          "trials": [
+            "A plain",
+            "B concept",
+            "C dark",
+            "D accents",
+            "E dots"
+          ],
+          "required": false
+        }
+      ],
+      "rubric": {
+        "pass": "Every style read.",
+        "partial": "The plain code and at least three styles read.",
+        "fail": "The plain code read but two or more styles did not."
+      }
+    },
+    {
+      "id": "FT-08",
+      "title": "Density",
+      "category": "Capacity",
+      "claim": "At a fixed 2-inch print size, denser versions need a closer, steadier camera; version 10 still reads.",
+      "rationale": "More data means smaller marks at the same size. This shows where, for an ordinary phone, a code should be printed larger to carry more.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale; each code is 2.0 inches wide.",
+        "Use ordinary indoor light."
+      ],
+      "steps": [
+        "Try each code, A (version 1) to E (version 20), from about 20 cm, moving closer if needed.",
+        "Allow up to 8 seconds each.",
+        "Record whether it read and the closest distance you needed."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT08-A",
+          "version": 1,
+          "level": "L",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT08-B",
+          "version": 5,
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "C",
+          "payload": "https://openckey.org/t/FT08-C",
+          "version": 10,
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "D",
+          "payload": "https://openckey.org/t/FT08-D",
+          "version": 15,
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        },
+        {
+          "label": "E",
+          "payload": "https://openckey.org/t/FT08-E",
+          "version": 20,
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 8 seconds",
+          "type": "boolean",
+          "trials": [
+            "v1",
+            "v5",
+            "v10",
+            "v15",
+            "v20"
+          ],
+          "required": true
+        },
+        {
+          "id": "distance",
+          "label": "Distance needed",
+          "type": "number",
+          "unit": "cm",
+          "min": 0,
+          "max": 200,
+          "trials": [
+            "v1",
+            "v5",
+            "v10",
+            "v15",
+            "v20"
+          ],
+          "required": false
+        }
+      ],
+      "rubric": {
+        "pass": "Versions 1, 5 and 10 read.",
+        "partial": "Versions 1 and 5 read but not 10.",
+        "fail": "Version 5 did not read."
+      }
+    },
+    {
+      "id": "FT-09",
+      "title": "Small labels: print layout",
+      "category": "Print",
+      "claim": "The print layout (Profile 0.1) reads at smaller sizes than the standard layout.",
+      "rationale": "The print layout uses larger marks and gaps for small labels, so a printer's dot gain and a camera's blur do not close the gaps. This checks that it earns its place.",
+      "time_minutes": 15,
+      "setup": [
+        "Print the test sheet at 100% scale on the best printer you have, ideally 600 dpi.",
+        "Codes A to C use the standard layout; D to F use the print layout, at the same three sizes."
+      ],
+      "steps": [
+        "From as close as your phone can focus, try each code for up to 8 seconds.",
+        "Record whether it read."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT09-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.3
+        },
+        {
+          "label": "B",
+          "payload": "https://openckey.org/t/FT09-B",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.4
+        },
+        {
+          "label": "C",
+          "payload": "https://openckey.org/t/FT09-C",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 0.5
+        },
+        {
+          "label": "D",
+          "payload": "https://openckey.org/t/FT09-D",
+          "level": "M",
+          "layout": "print",
+          "style": "plain",
+          "size_in": 0.3
+        },
+        {
+          "label": "E",
+          "payload": "https://openckey.org/t/FT09-E",
+          "level": "M",
+          "layout": "print",
+          "style": "plain",
+          "size_in": 0.4
+        },
+        {
+          "label": "F",
+          "payload": "https://openckey.org/t/FT09-F",
+          "level": "M",
+          "layout": "print",
+          "style": "plain",
+          "size_in": 0.5
+        }
+      ],
+      "measurements": [
+        {
+          "id": "read",
+          "label": "Read within 8 seconds",
+          "type": "boolean",
+          "trials": [
+            "A std 0.3 in",
+            "B std 0.4 in",
+            "C std 0.5 in",
+            "D print 0.3 in",
+            "E print 0.4 in",
+            "F print 0.5 in"
+          ],
+          "required": true
+        },
+        {
+          "id": "dpi",
+          "label": "Printer resolution",
+          "type": "number",
+          "unit": "dpi",
+          "min": 72,
+          "max": 4800,
+          "required": false
+        }
+      ],
+      "rubric": {
+        "pass": "A print-layout code read at a size where the standard layout did not.",
+        "partial": "Both layouts read at the same sizes.",
+        "fail": "The print layout read at no size where the standard layout read."
+      }
+    },
+    {
+      "id": "FT-10",
+      "title": "Time to read",
+      "category": "Speed",
+      "claim": "In ordinary conditions a CKey reads in under 2 seconds from pointing the camera.",
+      "rationale": "Speed decides whether people keep using a code. The decoder's speed on real phones has not been measured yet; this collects the first numbers.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale; the code is 2.0 inches wide.",
+        "Use ordinary indoor light. Open the reader and leave it on the camera view.",
+        "Use a stopwatch, or a second person to time."
+      ],
+      "steps": [
+        "Point away from the code, then start the stopwatch as you point at it from about 20 cm.",
+        "Stop it when the result appears.",
+        "Repeat 10 times and record each time."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT10-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 2.0
+        }
+      ],
+      "measurements": [
+        {
+          "id": "seconds",
+          "label": "Seconds to result",
+          "type": "number",
+          "unit": "s",
+          "min": 0,
+          "max": 60,
+          "trials": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "The median of the ten times is under 2 seconds.",
+        "partial": "The median is 2 to 5 seconds.",
+        "fail": "The median is over 5 seconds, or some attempts never read."
+      }
+    },
+    {
+      "id": "FT-11",
+      "title": "Payload safety",
+      "category": "Safety",
+      "claim": "A reader shows what a code holds and acts only on a tap, and flags content that is not a plain link.",
+      "rationale": "A code can hold anything, including a disguised link or a script-like string. The payload conventions say a reader must show the content and never act on its own; this checks that a reader does.",
+      "time_minutes": 10,
+      "setup": [
+        "Print the test sheet at 100% scale, or show it on a second screen."
+      ],
+      "steps": [
+        "Scan each code, A to D.",
+        "For each, record whether the reader showed the content before doing anything, and whether anything happened (a page opened, a call started) without your tap.",
+        "Do not tap through on code C."
+      ],
+      "codes": [
+        {
+          "label": "A",
+          "payload": "https://openckey.org/t/FT11-A",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        },
+        {
+          "label": "B",
+          "payload": "tel:+15550100",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        },
+        {
+          "label": "C",
+          "payload": "javascript:alert('field test FT-11')",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        },
+        {
+          "label": "D",
+          "payload": "Field test FT-11, code D. This is plain text: a reader should show it and offer to copy it, not open anything.",
+          "level": "M",
+          "layout": "standard",
+          "style": "plain",
+          "size_in": 1.5
+        }
+      ],
+      "measurements": [
+        {
+          "id": "shown",
+          "label": "Content shown before any action",
+          "type": "boolean",
+          "trials": [
+            "A link",
+            "B phone",
+            "C script",
+            "D text"
+          ],
+          "required": true
+        },
+        {
+          "id": "acted",
+          "label": "Something happened without a tap",
+          "type": "boolean",
+          "trials": [
+            "A link",
+            "B phone",
+            "C script",
+            "D text"
+          ],
+          "required": true
+        }
+      ],
+      "rubric": {
+        "pass": "Every code's content was shown first and nothing happened without a tap; code C offered no way to run it.",
+        "partial": "Every code's content was shown first and nothing happened without a tap, but code C could be run.",
+        "fail": "Anything happened without a tap."
+      }
+    }
+  ]
+}

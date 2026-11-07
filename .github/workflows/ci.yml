@@ -27,6 +27,11 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Field tests are valid, current and encodable
+        if: matrix.name == 'release'
+        run: |
+          python3 tools/field_tests.py --check
+          python3 tools/field_tests.py --verify-with build/ckey
       - name: Install and consume the CMake package
         if: matrix.name == 'release'
         run: |

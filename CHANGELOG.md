@@ -10,6 +10,11 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.84 — 2026-11-07
+
+* **Field tests.** `field-tests/suite.json` defines eleven real-world tests: smallest printed size, reading distance, viewing angle, lighting, screens, damage, styles, density, the print layout on small labels, time to read, and payload safety. Each states the claim it checks and why, the set-up and steps, the test codes (payload, version, level, layout, style and print size), what to record, and a pass / partial / fail rubric. `tools/field_tests.py` validates the suite and generates `field-tests/README.md`, one page per test in `field-tests/tests/`, and the GitHub issue form `.github/ISSUE_TEMPLATE/field-test-report.yml`; CI runs it with `--check` and encodes every test code with the CLI. openckey.org reads the same `suite.json` from the release it pins, prints the test sheets with the web SDK, and publishes every result, from the site or from GitHub issues, at openckey.org/tests.
+* No change to the core, formats or packages.
+
 ## 0.1.0-build.83 — 2026-11-06
 
 The release that goes to every registry, `v0.1.0-build.83`.

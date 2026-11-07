@@ -14,17 +14,17 @@ This repository holds the reference implementation: the C core, SDKs for Swift, 
 
 Every image above is rendered by the core and read back by the real decoder. See the [gallery](docs/gallery/README.md) for what each one holds and how it certifies.
 
-> **Status: experimental.** The formats are drafts and may change before 1.0. Decoding is tested on rendered and simulated camera images; real-camera robustness and speed have not been measured yet, so no claims are made about them.
+> **Status: experimental.** The formats are drafts and may change before 1.0. Decoding is tested on rendered and simulated camera images; real-camera robustness and speed have not been measured yet, so no claims are made about them. The [field tests](field-tests/README.md) are how they will be: run one and report what you find.
 
 ## Install
 
-The current release is **`0.1.0-build.83`**. Every package wraps the same C core.
+The current release is **`0.1.0-build.84`**. Every package wraps the same C core.
 
 | Platform | Package | Install |
 |---|---|---|
 | iOS, macOS (Swift) | Swift package `CKey` | Xcode: **File → Add Package Dependencies…** → `https://github.com/clearkeysolutions/ckey` |
 | Web, Node (WebAssembly) | npm `openckey` | `npm install openckey` |
-| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.83")` |
+| Android (Kotlin) | Maven `org.openckey:ckey` | `implementation("org.openckey:ckey:0.1.0-build.84")` |
 | .NET | NuGet `CKey` | `dotnet add package CKey` |
 | Command line | Homebrew `ckey` | `brew install clearkeysolutions/ckey/ckey` |
 | C and C++ | CMake package `CKey` | Build from source (below), then `find_package(CKey)` |
@@ -35,7 +35,7 @@ Release archives for every package, with `SHA256SUMS` and build provenance, are 
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.83"),
+.package(url: "https://github.com/clearkeysolutions/ckey", from: "0.1.0-build.84"),
 .target(name: "MyApp", dependencies: [.product(name: "CKey", package: "ckey")]),
 ```
 
@@ -67,9 +67,9 @@ See [sdk/web](sdk/web/README.md).
 
 ```kotlin
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.83")
-    implementation("org.openckey:ckey-compose:0.1.0-build.83")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.83")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.84")
+    implementation("org.openckey:ckey-compose:0.1.0-build.84")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.84")   // optional: CKeyAnalyzer
 }
 ```
 
@@ -130,6 +130,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 |---|---|
 | [Technical overview](docs/OVERVIEW.md) | The formats, libraries and tools, with commands |
 | [Gallery](docs/gallery/README.md) | Rendered examples and how to rebuild them |
+| [Field tests](field-tests/README.md) | Real-world tests anyone can run and report; results are public at [openckey.org/tests](https://openckey.org/tests) |
 | [Profile 0 Format 0.27.0](spec/CKey-Format-v0.27.0.md) | The scalable family |
 | [Profile 0.1 Format 0.28.0](spec/CKey-Format-v0.28.0.md) | The print layout |
 | [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) | The locator, text and extended profiles |
@@ -144,7 +145,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 
 | Branch | Purpose |
 |---|---|
-| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.83`. Fork from here. |
+| `Stable-Release` | The supported source. Every release is an immutable tag here, such as `v0.1.0-build.84`. Fork from here. |
 | `community` | Experimental contributions. Unstable: do not depend on it in production. |
 | `scratch` | The maintainer's working branch. |
 
