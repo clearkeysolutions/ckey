@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.74**, C ABI **4**.
+Build **0.1.0-build.85**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -85,6 +85,7 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
+| build.85 | `scratch` and `Stable-Release` | 2026-11-07 | Safe Actions: Ed25519 envelope verification in the core, CLI, spec, 22 independent vectors, and SDK-owned policy in every SDK; `CKEY_EXPIRED`; additive, ABI 4 |
 | build.84 | `scratch` and `Stable-Release` | 2026-11-07 | Field-test suite, generated docs and GitHub issue form; no core change |
 | build.83 | tag `v0.1.0-build.83` | 2026-11-06 | npm package renamed `openckey` (`ckey` is taken on npm) |
 | build.82 | tag `v0.1.0-build.82` | 2026-11-06 | Style validation reads enum fields as raw integers; Android host check tolerates missing jars |
