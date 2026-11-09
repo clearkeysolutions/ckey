@@ -187,6 +187,42 @@ The pipeline that works:
 
 Corner accuracy itself (1.4 and 1.7: the ring-ellipse-constrained fit) will make the brackets steadier still, and the tracking parameters should be re-tuned after it lands.
 
+### 1.9 "Styles with a vignette scan best": tested, and the real cause (2026-11-09)
+**Owner observation:** the best-scanning styles all have a vignette (Midnight, Ocean, Paper on Teal, Concept, Gold on Black), or an accent (Plum).
+
+**Test setup.** Build-85 core renderer and decoder, P0 v1 "https://openckey.org". Each code was placed on a bright page on a screen inside a room. The camera model:
+* auto-exposure on the whole frame, Gaussian blur of 0.6 px, photon and read noise;
+* then `ckey_find_borders_gray8`, `ckey_refine_quad_gray8` (`CKEY_FIELD_SCALABLE`) and `ckey_decode_scalable_gray8`.
+
+The measure is the smallest code width that reads in at least 9 of 12 tries. Screen moiré is not modelled.
+
+**The vignette itself is not the cause.**
+* On dark styles it makes no difference: Midnight reads from 100 px and Paper on Teal from 94 px, with or without one.
+* In the catalogue, every vignette style also has a dark background, so the observation reflects dark backgrounds.
+
+**The cause: the border search's whole-frame threshold.** Reads depend on the room around the screen, symmetrically:
+
+| Room brightness (page 0.92) | Plain / Plum (light) | Midnight (dark) |
+|---|---|---|
+| 0.03 (dark room) | **no read up to 130 px** (zero border candidates) | 100 px |
+| 0.10 | 124 px | 106 px |
+| 0.25 | 100–106 px | 124 px |
+| 0.50 | 94 px | **no read** |
+| 0.90 (bright room) | 112 px | **no read** |
+
+`frame_threshold` takes the 10th and 90th percentiles of the whole frame. When the surroundings are the opposite brightness from the code's background, no border candidate separates at all. A vignette on Plain helps a little (it reads from 118 px), because it shifts that histogram. This is the field complaint "bright screens fail", and it is fix 2 of 1.6 (local thresholds), now quantified.
+
+**Reading only the area around the code removes the effect.** Decoding only the code plus a margin of about 1/3 of its size (what the app's region decode does):
+* dark room: Plain and Plum read from 94 px, Midnight from 100 px;
+* bright room: Plain reads from 112 px, Plum from 106 px, Midnight from 118 px.
+
+Every case reads. This explains much of the app's field gain.
+
+**Actions:**
+* **Core:** compute the border-search threshold locally (per tile, or around each candidate), not from the whole-frame histogram. Re-run this test and the campaign's S09 (contrast) and S13 (screens) strata.
+* **SDK:** ship region-of-interest decoding by default (see 1.8).
+* **Styles:** do not add vignettes for scanning's sake. A dark background helps on screens in bright rooms only because of this same threshold effect, which the core fix removes.
+
 ## 2. Own the camera (ship it in the SDK, not app code)
 
 Industry scanners (Scandit, Dynamsoft, barKoder) run their own barcode-specific exposure and focus control rather than the OS's whole-scene auto-exposure. CKey should ship this **in the SDK**, so it works as a clean plug-in.
