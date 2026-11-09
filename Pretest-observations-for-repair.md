@@ -20,7 +20,7 @@
 | **Failure split: 71% sampling/decoding, 29% corner fitting** | `gt_quad_decodes` in the results separates the two. |
 | **Resolution:** success falls sharply below about 3 px/module | Roughly at parity with published QR results (about 3–3.5 px/module). |
 | **P0.1 outperforms P0** | Consistent with the build-58 print findings. |
-| **Burst fragility** | Bit-scattered placement lets a small blot damage many bytes. This is a design question: see section 3. |
+| **Burst fragility** | Bit-scattered placement lets a small blot damage many bytes. Plan in section 3. |
 
 ## 1. Reader hardening (blanket fixes; apply whatever the final numbers say)
 
@@ -86,21 +86,62 @@ Industry scanners (Scandit, Dynamsoft, barKoder) run their own barcode-specific 
 * **Multi-frame decoding:** try several frames, not one.
 * **Capture preset:** build 51 made the reader prefer 4K for P3's decode floor. P3 is out of scope, and the campaign tests P0/P0.1 at 1080p-class capture. Revisit whether 1080p (faster, lower latency) should be the default for P0, once the final per-density results are in.
 
-## 3. Burst fragility (format-level; decide after the final report)
+## 3. Burst fragility: the chosen plan
 
-Bits of each byte are scattered across the field (keyed hash ordering). A small blot (scratch, glare spot, finger) therefore touches a few bits of *many* bytes, and one bad bit ruins its byte. QR and Data Matrix do the opposite: each byte occupies a compact patch of about 8 modules, and RS blocks are interleaved across regions.
+**The problem.** Format 0.27 and 0.28 order data sites by `lowbias32(id XOR lowbias32(0x434B5030 XOR v))`, and site i carries codeword bit i. Each byte's 8 bits are therefore scattered across the whole field. A small blot (a scratch, a glare spot, a finger) touches a few bits of *many* bytes, and one bad bit ruins its byte, so a 5% blot can wreck far more than 5% of the bytes. QR and Data Matrix place each byte in a compact patch of about 8 modules.
 
-Options, in recommended order:
-1. **Reader-only, no format change:** erasure decoding (1.2) and soft retries (1.3). Works on every symbol already printed.
-2. **Format change (a new format version, e.g. 0.29):**
-   * **Byte-grouped placement:** keep SplitMix32 whitening as an XOR mask, but place each byte's 8 bits in adjacent sites.
-   * **Regional block interleaving:** each RS block is spread across the field so one blot hits every block a little.
+Owner decision (2026-11-09): pursue options 1, 2, 3 and 4. Option 6 is conditional. Option 5, higher default ECC, is not a code change. It stays a caller and renderer choice, but recommend Q or H whenever a logo covers data (3.3).
 
-   Build 57 already noted that byte-grouped placement would also allow larger logos. Needs a spec revision, encoder change, a decoder that reads both formats, and a compatibility review.
-3. **Higher default ECC (Q/H):** costs capacity.
-4. **Inner per-region code:** strongest, but complex. Probably not needed.
+### 3.1 Option 1: erasure decoding (reader only, do first)
+This is item 1.2. A byte the reader *knows* is bad costs 1 parity byte; an unknown error costs 2. It works on every symbol already printed. It is also the mechanism that makes 3.3 (logos over data) cheap.
 
-Go to option 2 only if the final S11 (occlusion) and S10 (glare) results show bursts dominate *after* option 1 is in.
+### 3.2 Option 2: soft-decision retries (reader only, do first)
+This is item 1.3. When hard decoding fails, erase the least-confident bytes and retry, Chase/GMD style. Cap the attempts.
+
+### 3.3 Option 3: byte-grouped placement (new format version; scoping)
+**The one rule that changes:** the site-ordering rule in the "Order and value" section of the 0.27 and 0.28 specs. Each byte's 8 bits go to 8 *neighbouring* sites instead of hash-scattered sites.
+
+**Everything else is unchanged:**
+* the skeleton (frame, rounded border, finders, split top-left arc);
+* the Grid, Ring and Ray Keys, and version identification from them;
+* the lattice, ring and dial geometry, mark shapes, site sets, and capacity per version and level, for all 31 versions in both layouts;
+* SplitMix32 whitening;
+* the frame layout, RS blocks, parity and CRC-32C;
+* the renderer and the design system.
+
+**The symbol looks the same to the eye.** Whitening still randomises every printed value; grouping only changes which sites belong to the same byte. The empty centre does not grow.
+
+**Design decisions to make in the spec:**
+1. **Clumps per site kind.** Define a deterministic path through each region and cut it into runs of 8:
+   * Cartesian: compact 2×4-style clumps, e.g. a serpentine walk over row pairs;
+   * rings: 8 consecutive slots on one ring;
+   * dial: 8 consecutive rays.
+
+   Define a rule for leftover sites near the curved border, finders and radial clearances. The existing "at most 7 trailing whitening-only sites" rule may absorb them. All boundaries must be decided with slack, so independent implementations agree.
+2. **Shuffle bytes, not bits.** Keep a keyed hash, but use it to permute *clumps* (which clump gets which codeword byte). This is option 4 (3.4).
+3. **Telling old from new.** The format byte sits inside the frame, so the reader must choose an ordering before it can read it. Recommended: sample the sites once, then try both orderings. Unscrambling, RS and CRC are cheap, and RS + CRC make a wrong guess fail safely. The alternative, a visible key change, is more invasive.
+4. **Keep each byte within one mark kind where possible.** Ring dots fail first in print (build 58). Grouping weak sites together *reduces* the expected number of bad bytes for random noise as well as for bursts. Expected bad bytes = Σ over bytes of (1 − Π(1 − p_site)), which is smaller when similar error rates share a byte.
+
+**Side benefit: logos over data.** Build 57 noted that a logo larger than the empty centre (radius about 3.2) "would need byte-grouped placement, a wire-format change". With grouping, a logo covers only the bytes under it, and the reader can mark them as erasures. The covered area comes out of the ECC budget, so a large logo needs level Q or H. The design-system checker should compute the remaining margin, not just test that the symbol decodes.
+
+**Cost:**
+* new format numbers for P0 and P0.1 (e.g. 0.29 and 0.30);
+* a rewritten placement section and new conformance hashes;
+* encoder and decoder ordering functions plus the dual-ordering attempt: on the order of a few hundred lines plus tests;
+* readers keep the old ordering, so printed codes still scan.
+
+### 3.4 Option 4: regional block interleaving (with option 3)
+The keyed clump permutation in 3.3 spreads each RS block's bytes across the field. A blot then costs every block a little instead of one block a lot. The existing byte interleave (j outer, b inner) already alternates blocks in codeword order. The clump permutation adds the spatial spreading. Verify with a test: for every version, each block's bytes cover every quadrant and site kind in proportion, as `tests/layout_tests.cpp` already checks for the codeword as a whole.
+
+### 3.5 Option 6: inner per-region code (conditional; probably not needed)
+A small parity code per region, whose main value is *flagging* which regions are bad so they become erasures.
+
+**Do it only if** the final results, with 3.1 to 3.4 in, show that the reader cannot flag damaged regions reliably from sampling confidence alone. That would show up as erasure-capable failures that the erasure decoder misses. It costs capacity in every region and adds spec complexity. Erasures (3.1) plus grouping (3.3) cover most of its benefit.
+
+### 3.6 Order of work and proof
+1. Implement 3.1 and 3.2 (reader only). Measure them with the key-test harness: `./ckt build-candidate`, then `./ckt regress`. Look first at S10 (glare), S11 (occlusion) and S16 (crops).
+2. Specify and implement 3.3 and 3.4 as the next format versions. Add the new layouts to the harness plan and compare against the 0.27 and 0.28 baseline on identical conditions.
+3. Revisit 3.5 only on the evidence described there.
 
 ## 4. Comparison baseline (key-test harness work, after the campaign)
 
