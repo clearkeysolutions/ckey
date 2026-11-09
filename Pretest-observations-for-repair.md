@@ -138,6 +138,36 @@ A small parity code per region, whose main value is *flagging* which regions are
 
 **Do it only if** the final results, with 3.1 to 3.4 in, show that the reader cannot flag damaged regions reliably from sampling confidence alone. That would show up as erasure-capable failures that the erasure decoder misses. It costs capacity in every region and adds spec complexity. Erasures (3.1) plus grouping (3.3) cover most of its benefit.
 
+### 3.5a Generative toughness option: a level above H, instead of option 6
+Owner question (2026-11-09): could option 6 be an opt-in encoder setting, off by default, for people who will trade payload for damage tolerance? Recommendation: offer that choice as **an extra ECC level above H**, not as an inner code.
+
+* **Readers still pay the full cost.** Optional *generation* does not make *support* optional: every reader must decode every mode, or those codes will not scan. An inner code would add spec, conformance tests, decoder machinery, and one more thing to guess before the format byte can be read.
+* **A higher level is the same machinery.** It is the same RS code with more parity: one more row in the level table, no new decoder path. Aztec takes this route and allows up to 95% error correction.
+* **Spending the capacity on outer RS parity is about as good as an inner code, or better,** for phone-camera damage (blobs, glare, scratches, moderate noise), especially with erasures (3.1) and grouped placement (3.3).
+
+**Percentages are defined differently.** CKey's `pct` is parity as a percentage of the block, and corrects `pct/2`% of unknown bad bytes. Aztec's percentage is error-correction codewords relative to *data*. CKey H (pct 60) is parity ≈ 150% of data, already beyond Aztec's 95% maximum (parity ≈ 95% of data, which would sit between CKey Q and H).
+
+**Example: 64-byte payload** (76-byte frame including the 8-byte header and 4-byte CRC), smallest fitting version, computed from the build-85 capacity table and the spec's parity rule:
+
+| Level (pct) | P0 version | Modules | Codeword | Parity | Unknown bad bytes fixed | Known-missing bytes fixed |
+|---|---|---|---|---|---|---|
+| L (14) | v4 | 36 | 90 | 12 | 6 | 12 |
+| M (28) | v6 | 41 | 137 | 38 | 19 | 38 |
+| Q (44) | v6 | 41 | 137 | 60 | 30 | 60 |
+| H (60) | v8 | 47 | 199 | 120 | 60 | 120 |
+| *new* (80) | v13 | 67 | 464 | 372 | 186 | 372 |
+| *new* (95) | v21 | 116 | 1,517 | 1,440 | 720 | 1,440 |
+
+P0.1 (print) needs a few more versions for the same payload: H is v10, pct 80 is v15, pct 95 is v24.
+
+**The cost grows quickly:**
+* Above H, the symbol grows very fast: pct 80 needs about 2× the modules across of H, and pct 95 about 2.5×.
+* A denser symbol needs more pixels, which works *against* robustness at the 1080p capture floor (about 3 px/module).
+
+The likely sweet spot is one extra level around pct 75–80, which corrects about 40% of the codeword. pct 95 is mainly useful for small payloads or very large prints.
+
+**Decide with data.** Add the level only if the final campaign shows level-H cases in S10 and S11 still failing with *recoverable* damage once 3.1 is in. A new level needs a new level code in the frame and spec, and a level is chosen at generation, so it does not need a new placement format.
+
 ### 3.6 Order of work and proof
 1. Implement 3.1 and 3.2 (reader only). Measure them with the key-test harness: `./ckt build-candidate`, then `./ckt regress`. Look first at S10 (glare), S11 (occlusion) and S16 (crops).
 2. Specify and implement 3.3 and 3.4 as the next format versions. Add the new layouts to the harness plan and compare against the 0.27 and 0.28 baseline on identical conditions.
