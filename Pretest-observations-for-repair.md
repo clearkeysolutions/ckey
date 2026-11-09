@@ -114,6 +114,43 @@ Test it on S04 (tilt), S05 (rotation) and S13 (screens), with `gt_quad_decodes` 
 
 Move these into the SDK camera layer (section 2) so every integrator gets them.
 
+### 1.8 iPhone app results and what the SDK camera layer should adopt (owner field tests, 2026-11-09)
+The changes are in the app only (clearkeysolutions/ckey-web `apps/ios`, merged to `main` at `28f5780`). The SDK is unchanged and still pinned to `0660391` (build 83).
+
+**Field results** (an older Samsung TV, code about 4 in wide, P0 v1, 20 bytes):
+
+| Before | After |
+|---|---|
+| Plain: about 3 in, only straight on | Plain: 30-38 in, reliable with considerable tilt |
+| Paper on Teal: — | Paper on Teal: 66 in with considerable tilt, a little slow but reliable |
+| Phone auto-locked mid-scan | Fixed |
+
+At distance, light marks on a dark background read about twice as far as Plain on a screen. Recommend dark-background styles for codes meant for display; keep Plain for print.
+
+**What the app does now** (move these into the SDK camera layer, section 2):
+1. **Region decoding.** Two of every three frames decode only the reticle area plus an 18% margin, at full resolution and in place. Every third frame is decoded whole, so codes closer than the reticle still read.
+2. **Focus and exposure on the code.** They follow the reticle centre, then the found code's centre, re-aiming only when it moves.
+3. **Real-detail zoom only.** Zoom is used only up to `videoZoomFactorUpscaleThreshold`, where the sensor is cropped at full resolution. On device, the app's 4K format reports 1.0, so there is no zoom there.
+   * Zoom that only enlarges was tried and dropped as unreliable.
+   * The main gain it would bring is a workaround for the core's sparse border search: at 4K, `ckey_find_borders_gray8` reads every 4th pixel. That is the same point as 1.6 fix 1.
+4. **Brackets on the code.** Candidates come from `ckey_find_borders_gray8`, refined by `ckey_refine_quad_gray8` (`CKEY_FIELD_SCALABLE`), and are gated on the calibration score.
+   * Measured on build 85: whole codes score 297–752 on clean renders, and every other rectangle (banners, cards, buttons, parts of the code) scores 0.
+   * The app's gate is 15. A score of 150 or more locks at once; weaker candidates need a second sighting.
+   * The top three candidates are each decoded in a tight crop, so the brackets lock onto the code that actually read, on its four refined corners (they lean with tilt).
+5. **No auto-lock while the camera runs** in the app.
+
+**Still open: tracking.** The brackets are wonky and do not follow a moving code the way QR readers do. Causes in the app:
+* candidates only come from frames that failed to decode, at most 15 fps;
+* after a read the scanner stops processing frames, so the brackets freeze;
+* motion between sightings fails the "same code" check.
+
+How QR readers stay smooth and live:
+* detection is cheap and runs every frame at 30–60 fps (AVFoundation and Vision report the code's corners for every frame, and keep doing so after a read);
+* between detections, a tracker such as Vision's `VNTrackRectangleRequest` follows the corners;
+* the UI interpolates on every display refresh with a low-pass filter.
+
+**SDK work:** a per-frame `ckey_track`-style API (or a cheap corner tracker seeded by the refined quad) that is separate from decoding. Corner accuracy itself (1.4, 1.7: the ring-ellipse-constrained fit) is what will make the brackets steady.
+
 ## 2. Own the camera (ship it in the SDK, not app code)
 
 Industry scanners (Scandit, Dynamsoft, barKoder) run their own barcode-specific exposure and focus control rather than the OS's whole-scene auto-exposure. CKey should ship this **in the SDK**, so it works as a clean plug-in.
