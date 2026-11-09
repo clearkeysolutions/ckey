@@ -79,6 +79,41 @@ Pull every S01 failure from the final report, reproduce it with `./ckt repro <ca
 * **Harness:** stratum S13 (screens: subpixel rendering, moiré, refresh) measures this directly. Compare S13 by `screen_px_per_module` bin and by P0 vs P0.1, before and after each fix: `./ckt build-candidate`, then `./ckt regress`.
 * **Real device:** the same monitor, recording the maximum decode distance for P0 and P0.1 before and after (target: decode at the distance where the code fills about half the scan frame).
 
+### 1.7 Viewing angle, perspective and circle flattening (owner field test, 2026-11-08)
+**Controlled colour test (same payload and size, round marks, one monitor):**
+
+| Candidate | Background (RGB) | Marks (RGB) | Contrast | Result |
+|---|---|---|---|---|
+| A | 246,246,246 | 28,28,28 | 15.8:1 | like D |
+| B | 246,246,246 | 36,36,36 | 14.4:1 | like D |
+| C | 248,248,248 | 43,43,43 | 13.4:1 | similar to D, less reliable |
+| D | 242,242,242 | 36,36,36 | 13.9:1 | fairly reliable up to ~24 in, only when perfectly straight on |
+| E | 238,238,238 | 44,44,44 | 12.0:1 | up to ~16 in, slow and unreliable |
+
+**Outcome:**
+* **Angle was the confound in the earlier style comparison.** Once the phone is held perfectly straight on, Plain (black on white, rounded squares) does about as well as A, B and D.
+* **Contrast matters at the low end only.** E (12:1) is clearly worse. Softening the default is not the main win, so keep Plain for now.
+* **Round marks helped Plain** before angle was controlled (2–4 in to ~10 in). Re-check them straight on.
+
+**What is left is angle sensitivity:** at a distance the reader needs the code almost perfectly square to the camera. Likely causes, which compound:
+1. **Moiré changes sharply with small tilts and rotations** of the screen grid against the sensor grid. Fixes: section 1.6 (area-averaged decimation, a pre-blur before sampling, multi-frame combining).
+2. **LCD contrast drops off-axis.** Fix: local thresholds (1.1, 1.6).
+3. **Corner fit under perspective.** About 29% of interim failures are corner fitting (1.4), and the harness's S04 stratum (tilt) measures it.
+
+**Core change to make the fit robust to trapezoid distortion and circle flattening:** both are the same projective transform, and the decoder already models it with a homography from four corners. But the fit uses only the corners, so a small corner error at an angle distorts the whole polar field, which is mapped through the same homography. Use the code's own circles as extra constraints:
+* Fit an ellipse to ring 0 (r = 3.4) and the Ring Key ring in the image. A circle under a homography is an ellipse, and its centre, axes and orientation constrain the homography independently of the corners.
+* Refine the homography jointly over the frame edges, the finder arcs and the ring ellipses (least squares, or robust IRLS), then sample.
+* Optionally, for strong tilt, re-render the expected mark layout under the current homography and refine by direct image alignment (a few Gauss-Newton or ECC iterations on the rectified field).
+
+Test it on S04 (tilt), S05 (rotation) and S13 (screens), with `gt_quad_decodes` showing how much is corner error.
+
+**Already done in the iPhone app** (clearkeysolutions/ckey-web, `apps/ios`; app code, the SDK unchanged):
+* region-of-interest decoding, alternating with whole frames;
+* focus and exposure on the reticle;
+* the phone no longer auto-locks while scanning.
+
+Move these into the SDK camera layer (section 2) so every integrator gets them.
+
 ## 2. Own the camera (ship it in the SDK, not app code)
 
 Industry scanners (Scandit, Dynamsoft, barKoder) run their own barcode-specific exposure and focus control rather than the OS's whole-scene auto-exposure. CKey should ship this **in the SDK**, so it works as a clean plug-in.
