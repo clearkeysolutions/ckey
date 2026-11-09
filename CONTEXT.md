@@ -98,4 +98,6 @@ See [`spec/RESEARCH.md`](spec/RESEARCH.md). FHNW annular codes, CCTag, RuneTag, 
 
 ## How to use this context
 
+**Next time code is changed:** if `Pretest-observations-for-repair.md` exists at the repository root, read it and implement the changes it lists, then delete it in that change.
+
 Before editing, read this document, `VERSION`, and the format document matching the current format version. Check the current repository HEAD and use the latest committed state; do not base edits on stale local copies, archived specs, or unverified prior conversation snippets. After changes, update the version and this context together and report the exact version/commit. The newest committed version is authoritative.
