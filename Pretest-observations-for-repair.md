@@ -139,17 +139,53 @@ At distance, light marks on a dark background read about twice as far as Plain o
    * The top three candidates are each decoded in a tight crop, so the brackets lock onto the code that actually read, on its four refined corners (they lean with tilt).
 5. **No auto-lock while the camera runs** in the app.
 
-**Still open: tracking.** The brackets are wonky and do not follow a moving code the way QR readers do. Causes in the app:
-* candidates only come from frames that failed to decode, at most 15 fps;
-* after a read the scanner stops processing frames, so the brackets freeze;
-* motion between sightings fails the "same code" check.
+**Tracking: solved in the app; ship it in the SDK as an optional flag.** After several iterations the owner rates the app's live brackets "pretty good" (ckey-web `main` at `223d6b5`, files `apps/ios/Shared/Scanning/RegionCameraScanner.swift`, `BracketOverlay.swift`, `ScannerController.swift`). What made it work, and what did not:
 
-How QR readers stay smooth and live:
-* detection is cheap and runs every frame at 30–60 fps (AVFoundation and Vision report the code's corners for every frame, and keep doing so after a read);
-* between detections, a tracker such as Vision's `VNTrackRectangleRequest` follows the corners;
-* the UI interpolates on every display refresh with a low-pass filter.
+| Tried | Result |
+|---|---|
+| Brackets from failed-decode frames only | frozen after a read, jumpy |
+| Vision `VNTrackObjectRequest` between core fits | drifted and grew on the flat, low-texture code |
+| Fixed exponential easing in SwiftUI | wobbly and steppy |
+| **Core re-detection on a small crop every frame** | true corners every frame, no drift |
+| **Corner correspondence between frames** | fixed the "diamond" twist |
+| **Size continuity in the tracker** | fixed jumps to a same-centred larger card |
+| **Capture timestamps + One Euro filter + critically damped spring, drawn by CADisplayLink on CAShapeLayers** | smooth |
 
-**SDK work:** a per-frame `ckey_track`-style API (or a cheap corner tracker seeded by the refined quad) that is separate from decoding. Corner accuracy itself (1.4, 1.7: the ring-ellipse-constrained fit) is what will make the brackets steady.
+The pipeline that works:
+1. **Detect every frame, separately from decoding**, on its own queue, and keep going after a read.
+   * Run `ckey_find_borders_gray8` and `ckey_refine_quad_gray8` (`CKEY_FIELD_SCALABLE`) on a crop around the last corners: the last box grown 35%, plus the region margin.
+   * Keep the best-scoring candidate whose centre moved less than half the code's size and whose size changed by less than 25%.
+   * Hold the last corners for up to 8 missed frames, then drop the track.
+   * A core fit re-seeds the track whenever a code is found or decoded.
+2. **Gate on the fit score.** `ckey_refine_quad_gray8` scored 297–752 for whole codes and exactly 0 for every other rectangle in renders, and real frames score lower. The app uses:
+   * a gate of 15;
+   * an immediate lock at 150 or more, or when the code just decoded;
+   * otherwise, a second agreeing sighting.
+3. **Corner correspondence.** The core reports a code's corners from any starting corner and in either winding. Before comparing, smoothing or tracking, reorder each set to the cyclic order (4 starts × 2 windings) with the least squared distance to the previous set.
+4. **Time by capture.** Carry each frame's presentation timestamp, converted to the host clock (`CMSyncConvertTime` from `session.synchronizationClock`).
+5. **Smooth in screen space, per display frame:**
+   * **One Euro filter** (Casiez et al., CHI 2012) on the 8 coordinates, timed by capture time: `minCutoff` 1.2 Hz, `beta` 0.02 per pt/s, derivative cutoff 6 Hz.
+   * **Latency projection:** project the filtered target along its velocity by 75% of (display target time − capture time), capped at 120 ms.
+   * **Critically damped spring** (ratio 1, response 0.08 s), integrated exactly per display frame.
+
+   In simulation this gives about 0.2 pt of wobble when still (against 1.5 pt of noise), about 14 pt of lag at 300 pt/s, and a few points of overshoot on an instant stop.
+6. **Draw outside the UI framework.** `CAShapeLayer`s stepped by a `CADisplayLink` (60–120 Hz). Only a "locked" flag goes through SwiftUI; the corners go through a lock-protected feed.
+
+**SDK work: make all of this optional, so integrators can draw their own.** Some developers will have their own overlay, branding or tracking. Proposed API for the SDK camera layer (Swift first, then Kotlin):
+* **`CKeyCameraScanner.tracking: Bool`** (default on). It runs the per-frame detection and tracking pipeline (1–4) and publishes tracked corners even when no overlay is shown.
+* **`CKeyCameraScanner.onTrack: ((CKeyTrack?) -> Void)?`**, the raw data for custom UIs. `CKeyTrack` holds:
+  * `corners` (4 points, normalized sensor coordinates, in a stable order across frames);
+  * `captureTime` (host seconds);
+  * `score`;
+  * `decoded` (Bool).
+
+  It is delivered on a caller-chosen queue. `nil` means the track was lost.
+* **`CKeyBracketOverlay`** (UIView / SwiftUI view), the built-in brackets (5–6), with tunable parameters (`minCutoff`, `beta`, `response`, `leadGain`) and styling (colours, line width, corner length, padding). It is opt-in: an integrator who wants their own drawing uses `onTrack` and never adds it.
+* **`CKeyCameraPreview` helper:** converts normalized sensor points to view points (`layerPointConverted(fromCaptureDevicePoint:)`) for custom overlays.
+* **Region, focus and zoom** (items 1–3 above) are also separate flags: `regionOfInterest`, `focusOnCode`, `realDetailZoom`, each on by default. An app that manages its own capture device can turn them off.
+* **Core C ABI (optional, later):** a `ckey_track_gray8(gray, …, prev_quad, out_quad, out_score)` helper that does step 1's crop, search and continuity check in C, so the Kotlin and WASM SDKs get the same tracking. Corner correspondence (step 3) belongs there too, or the core's refine should report corners in a canonical order.
+
+Corner accuracy itself (1.4 and 1.7: the ring-ellipse-constrained fit) will make the brackets steadier still, and the tracking parameters should be re-tuned after it lands.
 
 ## 2. Own the camera (ship it in the SDK, not app code)
 
