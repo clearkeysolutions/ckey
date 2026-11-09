@@ -51,6 +51,34 @@ When hard decoding fails, retry with the least-confident bytes erased, Chase/GMD
 ### 1.5 S01 clean misses
 Pull every S01 failure from the final report, reproduce it with `./ckt repro <case_id>`, and fix it. The clean reference must reach 100%.
 
+### 1.6 Screens with moiré: decodes only from a few inches away (owner field test, 2026-11-08)
+**Observation:** iPhone, the build-83 reader, a lower-resolution monitor showing a small P0 v1 code (`https://openckey.org`, 20 bytes).
+* The camera image shows strong moiré: the rainbow interference bands between the screen's pixel grid and the sensor's.
+* It decodes only when the code nearly fills the frame: about 3–4 in away for P0.1 and about 2–3 in for P0.
+* At a normal distance, with the code well inside the scan frame, nothing decodes.
+
+**Why it is not a resolution limit:**
+* At the failing distance the code spans roughly 400–500 px of a 1080p frame. For v1 (29 modules) that is about 14–17 px/module, far above the ~3 px/module floor.
+* Up close, the screen's pixels are resolved and the moiré disappears; further away they alias.
+* So the failure is aliasing, not missing pixels.
+* P0.1 working from further away fits this: its marks are bigger, and the fine P0 ring dots and rays alias first.
+
+**What the reader does today** (source at `ede38f5`):
+1. **Border search point-samples the frame.** `ckey_find_borders_gray8` reads one pixel every `step` pixels (2 at 1080p, 4 at 4K) with no averaging (`src/api_scan.inc`, the `is_mark` lambda). Point decimation is exactly what turns a screen's pixel grid into large moiré bands.
+2. **One global threshold.** `frame_threshold` (`src/core_internal.inc`) takes the 10th and 90th percentiles of the whole frame (every 8th pixel), so a bright screen inside a darker room, plus moiré bands of ±tens of grey levels, pushes parts of the code to the wrong side.
+3. **A small sampling footprint.** `gray_sample` uses a 3×3 bilinear footprint at ±`kLocatorSampleSpread`, too small to average out a moiré period that spans several modules.
+
+**Fixes, in order of expected value:**
+1. **Area-averaged decimation for border search:** average each step×step block, or build one box-filtered pyramid level, instead of reading one pixel. This is a cheap, local change, and it alone should remove most screen aliasing.
+2. **Local thresholds:** per-tile (e.g. 32×32 px) black and white levels, or levels taken from the candidate's own frame, finders and quiet zone (also 1.1). Not one percentile for the whole frame.
+3. **Moiré-aware module sampling:** once a candidate quad is found, low-pass the rectified region with σ ≈ 0.15–0.25 module, or widen the sampling footprint to about half a module, before reading sites. Do this always or when a periodic pattern is detected (a quick FFT peak check on the region). The modules are many pixels wide here, so the blur costs nothing.
+4. **Multi-frame soft combining:** moiré bands move with tiny hand motion, while the code does not. Register consecutive frames to the same quad and average each site's sampled value (or log-likelihood) over 3–5 frames before RS. It also helps noise, glare and erasures (1.2, 1.3), and fits the SDK-owned capture loop (section 2).
+5. **Capture side (section 2):** capture at a higher resolution, so the screen grid is closer to resolved, then decimate *with* area averaging. A slight intentional defocus also suppresses moiré, but is hard to control.
+
+**How to verify:**
+* **Harness:** stratum S13 (screens: subpixel rendering, moiré, refresh) measures this directly. Compare S13 by `screen_px_per_module` bin and by P0 vs P0.1, before and after each fix: `./ckt build-candidate`, then `./ckt regress`.
+* **Real device:** the same monitor, recording the maximum decode distance for P0 and P0.1 before and after (target: decode at the distance where the code fills about half the scan frame).
+
 ## 2. Own the camera (ship it in the SDK, not app code)
 
 Industry scanners (Scandit, Dynamsoft, barKoder) run their own barcode-specific exposure and focus control rather than the OS's whole-scene auto-exposure. CKey should ship this **in the SDK**, so it works as a clean plug-in.
