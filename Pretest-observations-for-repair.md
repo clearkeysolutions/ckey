@@ -153,10 +153,10 @@ Owner question (2026-11-09): could option 6 be an opt-in encoder setting, off by
 | M | 28 | (14%) | (28%) | existing |
 | Q | 44 | (22%) | (44%) | existing |
 | H | 60 | (30%) | (60%) | existing |
-| **U** *(provisional name)* | 80 | (40%) | (80%) | proposed |
-| **X** | 95 | (47.5%) | (95%) | proposed |
+| **U** (Ultra) | 80 | (40%) | (80%) | proposed |
+| **X** (Extreme) | 95 | (47.5%) | (95%) | proposed |
 
-The owner called the 80% level "M", but M is already Medium, the default level, so it needs another letter. "U" is a placeholder; the owner chooses the name.
+Names (owner decision, 2026-11-09): **U = Ultra** (80) and **X = Extreme** (95). The owner first called the 80% level "M" for Max, but M is already Medium, so it is U.
 
 **Effective payload, honestly.** P0 (standard) capacity in bytes for the same symbol at each level, computed from the build-85 capacity table and the spec's parity rule. Every symbol also spends 12 bytes on header and CRC.
 
