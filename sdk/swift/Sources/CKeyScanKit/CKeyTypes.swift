@@ -62,6 +62,18 @@ public enum CKeyLayout: Int, Sendable, CaseIterable {
     /// Format 0.28 ("P0.1"): larger marks and gaps for small prints, at a
     /// lower capacity per version.
     case print = 1
+    /// Format 0.29: the standard geometry with byte-grouped placement. Each
+    /// byte's eight bits sit on neighbouring sites, so a blot, glare spot or
+    /// logo costs only the bytes under it. Readers before 0.1.0-build.86
+    /// cannot read grouped symbols; encode them only when asked.
+    case standardGrouped = 2
+    /// Format 0.30: the print geometry with byte-grouped placement.
+    case printGrouped = 3
+
+    /// True for the print geometry ("P0.1"), grouped or not.
+    public var isPrint: Bool { self == .print || self == .printGrouped }
+    /// True for byte-grouped placement (Formats 0.29 and 0.30).
+    public var isGrouped: Bool { self == .standardGrouped || self == .printGrouped }
 }
 
 /// The optical profile a symbol was read as.
@@ -99,10 +111,11 @@ public struct CKeyResult: Equatable, Sendable {
     }
 
     /// The telemetry profile code (`ckey_telemetry_profile`): 0 = P0,
-    /// 1 = P0.1 (print layout), 2 = P1, 3 = P2, 4 = P3.
+    /// 1 = P0.1 (print geometry), 2 = P1, 3 = P2, 4 = P3. Grouped layouts
+    /// count with their geometry.
     public var telemetryProfileCode: UInt32 {
         switch profile {
-        case .scalable: return layout == .print ? 1 : 0
+        case .scalable: return layout?.isPrint == true ? 1 : 0
         case .locator: return 2
         case .text: return 3
         case .extended: return 4
@@ -112,7 +125,13 @@ public struct CKeyResult: Equatable, Sendable {
     /// A short human-readable profile name, e.g. "Profile 0 · v3".
     public var profileDescription: String {
         switch profile {
-        case .scalable: return layout == .print ? "Profile 0.1 · print · v\(version)" : "Profile 0 · v\(version)"
+        case .scalable:
+            switch layout ?? .standard {
+            case .standard: return "Profile 0 · v\(version)"
+            case .print: return "Profile 0.1 · print · v\(version)"
+            case .standardGrouped: return "Profile 0 · grouped · v\(version)"
+            case .printGrouped: return "Profile 0.1 · print · grouped · v\(version)"
+            }
         case .locator: return "Profile 1 · Locator"
         case .text: return "Profile 2 · Text"
         case .extended: return "Profile 3 · Extended"

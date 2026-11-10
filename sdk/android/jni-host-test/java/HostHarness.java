@@ -96,6 +96,25 @@ public final class HostHarness {
         byte[] invDecoded = CKeyNative.nativeDecodeArray(inverted, 0, 400, 400, 400, 6, info5(), new double[8]);
         check(invDecoded != null && Arrays.equals(invDecoded, utf8), "inverted polarity round trip");
 
+        // Levels U (4) and X (5), grouped layouts (2 = STANDARD_GROUPED, 3 = PRINT_GROUPED).
+        byte[] ultra = CKeyNative.nativeEncode(utf8, 0, 4, 2);
+        int[] uinfo = CKeyNative.nativeSymbolInfo(ultra);
+        check(uinfo[1] == 4 && uinfo[2] == 2, "encode level U, STANDARD_GROUPED: symbol info");
+        byte[] ugray = CKeyNative.nativeRenderRaster(ultra, null, null, null, 1200, 1, true, false, false, 4, 1.0, true, null, 0, 0);
+        int[] udec = info5();
+        byte[] ultraDecoded = CKeyNative.nativeDecodeArray(ugray, 0, 1200, 1200, 1200, 6, udec, new double[8]);
+        check(ultraDecoded != null && Arrays.equals(ultraDecoded, utf8) && udec[0] == 0 && udec[2] == 2, "STANDARD_GROUPED round trip, level U (profile P0, layout 2)");
+        byte[] extreme = CKeyNative.nativeEncode(utf8, 0, 5, 3);
+        int[] xinfo = CKeyNative.nativeSymbolInfo(extreme);
+        check(xinfo[1] == 5 && xinfo[2] == 3, "encode level X, PRINT_GROUPED: symbol info");
+        byte[] xgray = CKeyNative.nativeRenderRaster(extreme, null, null, null, 2000, 1, true, false, false, 4, 1.0, true, null, 0, 0);
+        int[] xdec = info5();
+        byte[] extremeDecoded = CKeyNative.nativeDecodeArray(xgray, 0, 2000, 2000, 2000, 6, xdec, new double[8]);
+        check(extremeDecoded != null && Arrays.equals(extremeDecoded, utf8) && xdec[0] == 1 && xdec[2] == 3, "PRINT_GROUPED round trip, level X (profile P0.1, layout 3)");
+        check(CKeyNative.nativeCapacity(1, 5, 0) == 0 && CKeyNative.nativeCapacity(1, 4, 0) == 0, "v1 carries nothing at U or X");
+        check(CKeyNative.nativeCapacity(8, 4, 0) > 0 && CKeyNative.nativeCapacity(8, 4, 0) == CKeyNative.nativeCapacity(8, 4, 2), "grouped capacity equals the scattered layout's");
+        check(CKeyNative.nativeCapacity(8, 6, 0) == 0 && CKeyNative.nativeCapacity(8, 1, 4) == 0, "out-of-range level or layout has no capacity");
+
         // Blank frame: no result, no exception.
         byte[] blank = new byte[320 * 240];
         Arrays.fill(blank, (byte) 0x80);
@@ -193,6 +212,9 @@ public final class HostHarness {
         throwsType(NullPointerException.class, () -> CKeyNative.nativeEncode(null, 0, 1, 0), "null payload");
         throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[20000], 0, 1, 0), "oversized payload");
         throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[100], 1, 3, 0), "payload over a fixed version's capacity");
+        throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 1, 5, 0), "level X at v1 (zero capacity)");
+        throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 0, 6, 0), "level out of range");
+        throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 0, 1, 4), "layout out of range");
 
         // ---- telemetry
         CKeyNative.nativeTelemetryResetForTesting();

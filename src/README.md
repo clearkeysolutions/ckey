@@ -14,6 +14,8 @@ Each library's translation unit is the shared internals plus its own public func
 
 - `core_internal.inc`: internal definitions shared by all three. It covers Reed–Solomon, CRC, layouts, sampling, the style checker and localization helpers, all with internal linkage.
 - `api_codec.inc`, `api_scan.inc`, `api_render.inc`: the `extern "C"` functions of each library.
+- `scan_internal.inc`: scan-library internals, included by `api_scan.inc`: the border search (area-averaged working image, local thresholds, perspective outline fit), the direct frame-edge fit and lens estimate, and the Profile 0 site reader (local levels, interference cancellation, ring sequence detection, per-byte reliabilities).
+- `api_camera.inc`: the one-call frame scan (`ckey_scan_frame_gray8`), tracking (`ckey_track_*`) and camera advice (`ckey_camera_*`). Part of the scan library.
 - `scalable_render.inc`: the Profile 0 geometry engine and its native backends. `api_render.inc` includes it.
 - `ckey.cpp`: the amalgamation, which includes all the parts once. The Xcode projects compile it as a single file, and the white-box tests include it.
 - `svg_raster.h`: the reference SVG rasterizer. It is used only by tests and tools; no library includes it.

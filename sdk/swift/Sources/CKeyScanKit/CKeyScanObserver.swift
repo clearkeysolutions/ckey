@@ -1,8 +1,9 @@
 import Foundation
 
-/// Receives scan-session events from `CKeyCameraScanner`, on the scanner's
-/// frame queue (begin and end on the main thread). Implementations must be
-/// fast and non-blocking: they run on the decode path.
+/// Receives scan-session events from `CKeyCameraScanner` (or a
+/// `CKeyFrameProcessor`), on the scanner's analysis queue (begin and end on
+/// the main thread). Implementations must be fast and non-blocking: they run
+/// on the decode path.
 ///
 /// The `CKey` product installs its aggregate telemetry through this protocol
 /// (see `CKeyScanner` there). The scan-only `CKeyScanner` product never

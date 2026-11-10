@@ -2,7 +2,7 @@
 
 `tests/vectors/conformance-v1.json` fixes inputs and expected outputs that every CKey implementation and SDK must reproduce exactly (specification §6, acceptance criterion 1). CTest runs `ckey-conformance --check` on every build.
 
-Each vector gives an input: `profile` ("0" covers both Profile 0 layouts; "1", "2" and "3" are the legacy profiles), `version` (0 = automatic), `level` (0–3 = L/M/Q/H), `layout` (0 standard, 1 print) and `payload_hex`.
+Each vector gives an input: `profile` ("0" covers both Profile 0 layouts; "1", "2" and "3" are the legacy profiles), `version` (0 = automatic), `level` (0–5 = L/M/Q/H/U/X), `layout` (0 standard, 1 print, 2 standard-grouped, 3 print-grouped) and `payload_hex`.
 
 It then lists the expected outputs:
 

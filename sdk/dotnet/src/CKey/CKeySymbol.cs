@@ -25,7 +25,7 @@ namespace OpenCKey
         /// <param name="text">The payload text; encoded as UTF-8 without a BOM.</param>
         /// <param name="version">1..31, or 0 for the smallest version that fits.</param>
         /// <param name="level">Error-correction level.</param>
-        /// <param name="layout">Standard (screen) or print layout.</param>
+        /// <param name="layout">Standard (screen) or print layout, or their byte-grouped forms (opt-in: readers before build 86 cannot read those).</param>
         public static CKeySymbol Encode(string text, int version = 0, EccLevel level = EccLevel.M, Layout layout = Layout.Standard)
         {
             if (text == null) throw new ArgumentNullException(nameof(text));
@@ -36,12 +36,12 @@ namespace OpenCKey
         /// <param name="payload">The payload bytes.</param>
         /// <param name="version">1..31, or 0 for the smallest version that fits.</param>
         /// <param name="level">Error-correction level.</param>
-        /// <param name="layout">Standard (screen) or print layout.</param>
+        /// <param name="layout">Standard (screen) or print layout, or their byte-grouped forms (opt-in: readers before build 86 cannot read those).</param>
         public static CKeySymbol Encode(ReadOnlySpan<byte> payload, int version = 0, EccLevel level = EccLevel.M, Layout layout = Layout.Standard)
         {
             if (version < 0 || version > MaxVersion) throw new ArgumentOutOfRangeException(nameof(version), "version must be 0 (auto) or 1..31.");
-            if (level < EccLevel.L || level > EccLevel.H) throw new ArgumentOutOfRangeException(nameof(level));
-            if (layout != Layout.Standard && layout != Layout.Print) throw new ArgumentOutOfRangeException(nameof(layout));
+            if (level < EccLevel.L || level > EccLevel.X) throw new ArgumentOutOfRangeException(nameof(level));
+            if (layout < Layout.Standard || layout > Layout.PrintGrouped) throw new ArgumentOutOfRangeException(nameof(layout));
             Native.EnsureAbi();
             var symbol = new CKeySymbol();
             NativeDiagnostics diagnostics = default;
@@ -56,7 +56,7 @@ namespace OpenCKey
             return symbol;
         }
 
-        /// <summary>Maximum payload bytes for a version, level and layout; 0 if invalid.</summary>
+        /// <summary>Maximum payload bytes for a version, level and layout; 0 if invalid or if the version carries nothing at that level (small versions at U or X).</summary>
         public static int Capacity(int version, EccLevel level = EccLevel.M, Layout layout = Layout.Standard)
         {
             if (version < 1 || version > MaxVersion) return 0;

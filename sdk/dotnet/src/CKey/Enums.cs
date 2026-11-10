@@ -34,6 +34,17 @@ namespace OpenCKey
         Q = 2,
         /// <summary>About 30%.</summary>
         H = 3,
+        /// <summary>
+        /// Ultra: about 40% (80% of each block is parity). Carries about half of
+        /// <see cref="H"/>'s payload. Readers before 0.1.0-build.86 reject it.
+        /// </summary>
+        U = 4,
+        /// <summary>
+        /// Extreme: about 47.5% (95% parity). Carries about 5% of <see cref="L"/>'s
+        /// payload, and nothing at all in the smallest versions (capacity 0;
+        /// encoding there fails). Readers before 0.1.0-build.86 reject it.
+        /// </summary>
+        X = 5,
     }
 
     /// <summary>Profile 0 layout family (<c>ckey_scalable_layout</c>).</summary>
@@ -43,6 +54,17 @@ namespace OpenCKey
         Standard = 0,
         /// <summary>Format 0.28 ("Profile 0.1"): every mark and gap at least about one module, for small prints.</summary>
         Print = 1,
+        /// <summary>
+        /// Format 0.29: <see cref="Standard"/>'s geometry and capacity with byte-grouped
+        /// placement, so a blot or logo costs only the bytes under it. Readers before
+        /// 0.1.0-build.86 cannot read it; opt-in.
+        /// </summary>
+        StandardGrouped = 2,
+        /// <summary>
+        /// Format 0.30: <see cref="Print"/>'s geometry and capacity, byte-grouped.
+        /// Readers before 0.1.0-build.86 cannot read it; opt-in.
+        /// </summary>
+        PrintGrouped = 3,
     }
 
     /// <summary>How the raster backend turns geometry into pixels (<c>ckey_raster_policy</c>).</summary>
@@ -110,7 +132,7 @@ namespace OpenCKey
     /// <summary>The CKey profile a symbol was decoded as.</summary>
     public enum CKeyProfile
     {
-        /// <summary>Profile 0, the scalable family (versions 1..31, standard or print layout).</summary>
+        /// <summary>Profile 0, the scalable family (versions 1..31, standard or print layout, scattered or byte-grouped).</summary>
         Scalable = 0,
         /// <summary>Profile 1, the 16-byte locator.</summary>
         Locator = 1,

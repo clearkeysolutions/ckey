@@ -20,8 +20,8 @@ SUITE = ROOT / "field-tests" / "suite.json"
 SITE = "https://openckey.org"
 REPO_BLOB = "https://github.com/clearkeysolutions/ckey/blob/Stable-Release/"
 FIELD_TYPES = {"text", "number", "boolean", "choice"}
-LEVELS = {"L", "M", "Q", "H"}
-LAYOUTS = {"standard", "print"}
+LEVELS = {"L", "M", "Q", "H", "U", "X"}
+LAYOUTS = {"standard", "print", "standard-grouped", "print-grouped"}
 STYLE_KEYS = {"ink", "background", "accents", "accent_percent", "rings", "modules", "rays"}
 
 

@@ -35,7 +35,7 @@ format_checks = {
     "format specification": "format=14" in format_text and "profile=1" in format_text,
     "public format byte": re.search(r"#define CKEY_FORMAT_VERSION (\d+)u", header).group(1) == "14",
     "fixture format": fixture["format_version"] == "0.14.0",
-    "current README links": all(f"spec/CKey-Format-v{v}.md" in readme for v in ("0.14.0", "0.25.0", "0.26.0", "0.27.0", "0.28.0")),
+    "current README links": all(f"spec/CKey-Format-v{v}.md" in readme for v in ("0.14.0", "0.25.0", "0.26.0", "0.27.0", "0.28.0", "0.29.0", "0.30.0")),
     "text format specification": "decimal 25" in text_format_text and "profile byte `0x02`" in text_format_text,
     "extended format specification": "decimal 26" in extended_format_text and "profile byte `0x03`" in extended_format_text,
     "public text format byte": re.search(r"#define CKEY_TEXT_FORMAT_VERSION (\d+)u", header).group(1) == "25",
@@ -45,6 +45,8 @@ format_checks = {
     "support matrix ABI": support["abi"] == int(re.search(r"#define CKEY_ABI_VERSION (\d+)u", header).group(1)),
     "release map and branch changelogs": all((root / f).exists() and f in readme for f in ("docs/RELEASE-AND-VERSIONING-MAP.md", "CHANGELOG-STABLE.md", "CHANGELOG-COMMUNITY.md")),
     "print format specification": "decimal 28" in print_format_text and "profile byte `0x00`" in print_format_text,
+    "grouped format specifications": "decimal 29" in (root / "spec/CKey-Format-v0.29.0.md").read_text() and "decimal 30" in (root / "spec/CKey-Format-v0.30.0.md").read_text(),
+    "public grouped format bytes": re.search(r"#define CKEY_SCALABLE_GROUPED_FORMAT_VERSION (\d+)u", header).group(1) == "29" and re.search(r"#define CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION (\d+)u", header).group(1) == "30",
     "public print format byte": re.search(r"#define CKEY_SCALABLE_PRINT_FORMAT_VERSION (\d+)u", header).group(1) == "28",
 }
 if context is not None:

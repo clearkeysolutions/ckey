@@ -8,7 +8,7 @@ Kotlin/NDK SDK for [CKey](../../README.md) optical codes. It is a thin wrapper o
 | `org.openckey:ckey-compose` | `@Composable CKeyImage` | `ckey`, Compose UI/Foundation |
 | `org.openckey:ckey-camerax` | `CKeyAnalyzer` (`ImageAnalysis.Analyzer`) | `ckey`, CameraX core |
 
-minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.85`).
+minSdk 24, compileSdk 34. Version = the repository's `VERSION` file (for example `0.1.0-build.86`).
 
 ## Install
 
@@ -18,9 +18,9 @@ dependencyResolutionManagement { repositories { google(); mavenCentral() } }
 
 // app/build.gradle.kts
 dependencies {
-    implementation("org.openckey:ckey:0.1.0-build.85")
-    implementation("org.openckey:ckey-compose:0.1.0-build.85")   // optional: CKeyImage
-    implementation("org.openckey:ckey-camerax:0.1.0-build.85")   // optional: CKeyAnalyzer
+    implementation("org.openckey:ckey:0.1.0-build.86")
+    implementation("org.openckey:ckey-compose:0.1.0-build.86")   // optional: CKeyImage
+    implementation("org.openckey:ckey-camerax:0.1.0-build.86")   // optional: CKeyAnalyzer
 }
 ```
 
@@ -31,6 +31,7 @@ To build from source, run `gradle -p sdk/android publishAllPublicationsToLocalRe
 ```kotlin
 val symbol = CKeySymbol.encode("https://openckey.org/tour")            // version 0 = smallest that fits, level M, STANDARD
 val sized  = CKeySymbol.encode(bytes, version = 0, level = EccLevel.H, layout = Layout.PRINT)
+val tough  = CKeySymbol.encode(bytes, level = EccLevel.U, layout = Layout.STANDARD_GROUPED)  // needs build 86+ readers
 
 val bitmap: Bitmap = symbol.toBitmap(sizePx = 600)                      // ARGB_8888, opaque, default style
 val clear  = symbol.toBitmap(600, RasterPolicy.HYBRID, transparent = true, style = CKeyStyle.CONCEPT)
@@ -40,6 +41,7 @@ val pdf: ByteArray = symbol.toPdf(widthPt = 144.0)                      // 2 inc
 val rgba = symbol.toRgba(512)                                           // straight-alpha RGBA8, no Bitmap
 ```
 
+* **Levels and layouts.** `EccLevel` is `L`, `M` (default), `Q`, `H`, `U` (Ultra, 80% parity) and `X` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity; the smallest versions carry nothing at those levels (`CKeySymbol.capacity` returns 0 and `encode` throws a `CKeyException`). `Layout` is `STANDARD` (default), `PRINT` (P0.1), and their byte-grouped forms `STANDARD_GROUPED` (Format 0.29) and `PRINT_GROUPED` (Format 0.30), which have the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. The decoder reports the layout it found; `PRINT_GROUPED` reports profile `P0_1`.
 * **Pixels.** The core renders straight (non-premultiplied) RGBA8. `toBitmap` premultiplies it in the bridge, because `Bitmap.copyPixelsFromBuffer` reads ARGB_8888 memory as premultiplied RGBA. With `transparent = true`, unpainted pixels have alpha 0.
 * **Styles.** Start from `CKeyStyle.DEFAULT` (black on white) or `CKeyStyle.CONCEPT` and use `copy(...)`. Colours are `0xRRGGBB`. `policy` takes one of three values:
   * `StylePolicy.STRICT` (the default) refuses a style that fails the safety rules with a `CKeyException` that carries the core's reason.

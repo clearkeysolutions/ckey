@@ -1,9 +1,9 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-build.85`
-**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout)
-**Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Cleared after the v0.1.0-build.76 tag; v0.1.0-build.83 is the first published release: it holds only the versioning files, this record and the documentation. The code is on `Stable-Release`; start the next build from there. Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases; first published: v0.1.0-build.83), CHANGELOG-COMMUNITY.md (community merges).
-**Context updated:** 2026-11-07
+**Current software version:** `0.1.0-build.86`
+**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout), plus the opt-in byte-grouped placements `0.29.0` (byte `1D`) and `0.30.0` (byte `1E`)
+**Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Cleared after the v0.1.0-build.76 tag; v0.1.0-build.83 is the first published release: it holds only the versioning files, this record and the documentation. From build 86 the source tree is back on `scratch` (restored from `Stable-Release` at `ede38f5`, by owner decision): changes are written and tested here, then promoted to `Stable-Release`. Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases; first published: v0.1.0-build.83), CHANGELOG-COMMUNITY.md (community merges).
+**Context updated:** 2026-11-10
 
 ## Mission
 
@@ -37,7 +37,7 @@ CKey is an independent, monochrome optical encoding standard that must work with
   * **openckey.org:** operated from a separate, proprietary repository. It provides telemetry ingestion, `/text/{id}` and `/sq/{id}` destinations, the hosted renderer and package downloads. The prototype `services/openckey` was removed from this repository in build 71.
 * RS parameters are primitive polynomial `0x11D`, primitive element 2, roots `α^0…α^50`, high-degree coefficient first, with parity appended. CRC-32C is integrity detection, separate from error correction.
 * Geometry is fixed at 29 × 29 for profile 1. The Grid, Ray, and Ring Keys are structural and reserved. The data sites alternate Cartesian and polar coordinate families; exact definitions live in the matching versioned format document. Format 0.14.0 uses one broad inboard arc per rounded corner, inside a continuous rounded-square border; each arc's mouth faces the central polar field. Only the top-left arc is split on its diagonal for orientation. The 6 × 6 corner envelopes are reserved to prevent finder/data collisions. Ring dots are a uniform 0.30 module diameter; the Ring Key arc has round ends and a four-slot visible length; data dial slots encode each bit using short and long rays; the codeword uses 51 parity bytes so 616 of 621 available sites carry RS-coded bits.
-* The C ABI now decodes 8-bit grayscale images when given a caller-supplied cyclic quadrilateral: it tries all corner starts/windings, rectifies a projective mapping, verifies Grid/Ray/Ring calibration evidence, samples the Cartesian and polar payload sites, normalizes light/dark polarity, and runs RS plus frame/CRC validation. It decodes committed browser-rendered captures and a 500×500 crop from the user's iPhone camera preview of a laptop display. Full-frame localization, lens-distortion correction, and live-device verification remain incomplete. No QR-parity or sub-200 ms end-to-end performance claim is made; the 2,048-byte profile is implemented but its physical-camera capacity is not characterized. Erasure decoding is not implemented.
+* The C ABI now decodes 8-bit grayscale images when given a caller-supplied cyclic quadrilateral: it tries all corner starts/windings, rectifies a projective mapping, verifies Grid/Ray/Ring calibration evidence, samples the Cartesian and polar payload sites, normalizes light/dark polarity, and runs RS plus frame/CRC validation. It decodes committed browser-rendered captures and a 500×500 crop from the user's iPhone camera preview of a laptop display. Full-frame localization, lens-distortion correction, and live-device verification remain incomplete. No QR-parity or sub-200 ms end-to-end performance claim is made; the 2,048-byte profile is implemented but its physical-camera capacity is not characterized. Erasure decoding is implemented for Profile 0 from build 86 (see "Build 86: the repair pass" below).
 
 ## Current repository state
 
@@ -96,8 +96,46 @@ Next engineering gates: (1) compile and validate the iPhone reader on physical d
 
 See [`spec/RESEARCH.md`](spec/RESEARCH.md). FHNW annular codes, CCTag, RuneTag, AprilTag, App Clip Code reverse engineering, HCC2D, PiCode, and IRIS inform comparison only. No external source code is incorporated.
 
-## How to use this context
+## Build 86: the repair pass (2026-11-10)
 
-**Next time code is changed:** if `Pretest-observations-for-repair.md` exists at the repository root, read it and implement the changes it lists, then delete it in that change.
+Build 86 implements `Pretest-observations-for-repair.md` (the repair notes from the CKTEST-RH-001 campaign, `clearkeysolutions/key-test`). That file is deleted; this section is its record. What changed is in `CHANGELOG.md`.
+
+**Owner decisions taken for this build (2026-11-10):**
+* The source tree returns to `scratch`.
+* Byte-grouped Formats 0.29/0.30 and levels U and X ship in both the reader and the encoder/renderer.
+* The print layout (P0.1) is **not** the default; it is the print version. The default stays Format 0.27, and the encoder already picks the lowest version that fits.
+* The SDK scanner takes control of the camera by default; the snapping brackets are an optional part of the SDK.
+* The iOS app (`clearkeysolutions/ckey-web`, `apps/ios`) is re-pinned to this build and its scanning code replaced by the SDK camera layer.
+
+**Result, honestly.** On the 2,000-case development subset (100 per stratum, same frames for both builds) the reader decoded 76.4% of physically recoverable frames, against 66.8% for build 85 (58.1% against 51.4% of all valid symbols). The 6,000-case table is in `CHANGELOG.md`.
+
+No wrong payload. The reader is still far from the 98–100% of recoverable frames the owner expects. Why, from the per-stage measurements made during this build:
+
+1. **Ring dots in the standard layout are the main limit.** They are 0.2 module wide and 0.3 module apart on the inner ring, so ring bits need about three times the resolution of the modules. In frames that fail with the true corners given, modules typically read with 0% bit errors while ring bits read 10–30% wrong, and with scattered placement almost every byte holds a ring bit. On the 2,000-case subset the standard layout read 85% of recoverable frames under 0.2 module of blur, 34% at 0.2–0.4 and 0% above; the print layout read 88%, 81% and 16%. The harness calls a frame recoverable from module-level physics, which these dots do not meet. A sequence detector for the rings (fit a blur model, find the most likely bit run) is in the reader and rescues some frames, but on the hard set it does not lower the mean ring error: the model does not match real frames well enough yet (sharpening, tone curve, neighbouring rings, registration). This needs either a better model or a format whose rings are not this fine. Grouped placement stops ring errors from spoiling every byte but does not make the dots readable.
+2. **Curved surfaces.** The perspective stratum (S04) bends the symbol on a cylinder. The reader models a plane plus radial lens distortion; it has no non-planar fit. Not done.
+3. **Heavy blur** (0.4 module and more) fails for both layouts.
+4. **Corner fit.** Much improved (direct frame-edge fit, lens term), but frames remain where the true corners decode and the reader's do not.
+
+**Reader speed regressed.** Median reader time on the development subset rose from 37 ms to roughly 60 to 170 ms depending on machine load; see `CHANGELOG.md` for the measured figures. The campaign's host P95 was already above the 200 ms gate. Failing frames cost most (several strategies and both placements are tried per candidate). Not yet measured on a device.
+
+**Repair-note items not done, or only partly done:**
+* 1.1/1.6 moiré pre-filter keyed on a detected periodic pattern: not done (area-averaged search and local levels are in).
+* 1.6 item 4 / 2.4 multi-frame soft combining: not done. Each frame is still decoded on its own.
+* 1.4/1.7 ring-ellipse-constrained homography and direct image alignment: not done; the frame-edge fit, lens estimate and lattice registration were done instead.
+* 1.10.2 partial crops: the decoder now reads a symbol partly out of frame when given its corners (missing sites become erasures), and the scan reports `CKEY_SCAN_FLAG_SYMBOL_CUT` so the SDK can say "move back"; the border search itself still requires the whole border in view.
+* 1.10.3 finder loss: no dedicated fallback. Key and skeleton fits now tolerate missing samples.
+* 1.10.1 lens: `k1` is estimated from the frame, or supplied to `ckey_scan_frame_gray8`; strong ultrawide distortion beyond about −0.15 (focal-normalised) is not handled by the supplied-`k1` path.
+* 1.10.8 memory: not measured for the reader alone.
+* 2 (own the camera): done for Swift, uncompiled. Kotlin/CameraX camera layer: not done. The core's advice policy is simple and untested on devices.
+* 3.3 logos over data: the design-system checker still limits logos to the empty centre; it does not yet compute the erasure margin for a larger logo on a grouped symbol.
+* 3.5 inner per-region code: not done, as the notes recommend.
+* 4 QR/Data Matrix/Aztec baseline and the harness items (per-case timeout, stall alarm): key-test work, not here.
+* The full campaign re-run (structured 1M, adaptive pool, holdout) has not been run on this build. Only the 6,000-case comparison above and the 2,000-case development subset were run, locally.
+
+**Not compiled or run here:** all Swift (SDK camera layer, reference reader, Renderer app, the iOS app in ckey-web), the .NET SDK, the wasm build, the Android instrumented tests.
+
+**Next:** build the Swift package and the iOS app in Xcode and field-test them; run the campaign's `./ckt build-candidate` and `./ckt regress` on the server with the locked design; decide what to do about the standard layout's ring dots (item 1) before more reader work.
+
+## How to use this context
 
 Before editing, read this document, `VERSION`, and the format document matching the current format version. Check the current repository HEAD and use the latest committed state; do not base edits on stale local copies, archived specs, or unverified prior conversation snippets. After changes, update the version and this context together and report the exact version/commit. The newest committed version is authoritative.

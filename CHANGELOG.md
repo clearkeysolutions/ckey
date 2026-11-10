@@ -10,6 +10,43 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.86 — 2026-11-10
+
+The repair pass for the CKTEST-RH-001 hardening campaign. It implements `Pretest-observations-for-repair.md` (now deleted; what remains open is listed in `CONTEXT.md`). The source tree is back on `scratch`, restored from `Stable-Release` at `ede38f5`.
+
+**Measured.** key-test harness (`clearkeysolutions/key-test` at `9ff83e3`), structured cases in plan order (the plan was regenerated locally and its shard hashes match the campaign's evidence), build 85 against this build on identical frames:
+
+* Development subset (first 100 cases per stratum, 2,000 cases; 1,802 valid symbols, 1,077 physically recoverable), measured during the build: decoded 58.1% of valid symbols (build 85: 51.4%) and 76.4% of recoverable ones (build 85: 66.8%). By stratum, recoverable: contrast S09 25% → 54%, colour S15 55% → 84%, perspective S04 46% → 66%, print dot gain S12 61% → 75%.
+* The 6,000-case comparison of the final code was still running when this entry was written; its table is added in the next commit.
+
+No wrong payload in either run. This is a simulated, host-side comparison on a subset, not the campaign's full regression or holdout, and it does not qualify the reader. The gap to 100% and its causes are in `CONTEXT.md`.
+
+**Reader (core)**
+
+* **Border search** (`ckey_find_borders_gray8`): works on an area-averaged reduction of the frame instead of reading one pixel per block (the cause of screen moiré bands), and adds two local-threshold passes to the whole-frame one, so a symbol separates whatever the rest of the frame looks like (bright screen in a dark room, low contrast, colour). Outlines are fitted as perspective quadrilaterals at any tilt. A strong candidate from the first pass skips the others.
+* **Corner refinement** (`ckey_refine_quad_gray8`): the frame stroke's edges are located directly (sub-pixel, as a paired stroke so a nearby lone edge is not taken for the frame) and fitted as four lines; three starting sizes are tried, because the border search sometimes returns the stroke's inner rim. Radial lens distortion is estimated from the bow of the sides and used for the rest of the call. Profile 0 then registers on the module lattice itself, each corner held near the frame fit. The unbounded key hill-climb is gone.
+* **Decoding** (`ckey_decode_scalable_gray8`): sites outside the image are unknown instead of failing the frame; levels are taken from the symbol's own modules; local levels and washed-out regions (glare, shadow, occlusion) are found per neighbourhood and washed-out sites become erasures; blur leak between neighbouring marks is measured by least squares and cancelled; ring dots have a sequence detector; dial rays are read at the radius that splits best (ink spread). Four reading strategies are tried on one set of samples, and Reed–Solomon and the CRC decide.
+* **Erasure and soft-decision decoding:** `ckey_decode_scalable_soft` takes a reliability per codeword byte. After plain correction fails, the least reliable bytes are erased in capped steps (2 × errors + erasures ≤ parity, with two spare syndromes kept as a check). `erasures_used` is reported.
+* **Work budget:** every image sample draws on a per-call allowance; when it runs out the call returns "no read". Candidate counts, refinement passes and decode attempts are capped.
+* **New calls:** `ckey_scan_frame_gray8` (one call for search, refine and decode, with a zero-copy region of interest and an optional caller-supplied lens `k1`), `ckey_track_gray8` / `ckey_track_seed` / `ckey_match_corner_order` (per-frame corner tracking with the continuity, lock and corner-order rules that worked in the iOS app), and `ckey_camera_advise_gray8` (exposure bias, zoom, metering point and user guidance, with the 0 / −1 / −2 EV cycle). Additive: the C ABI stays 4.
+* The acceptance path is unchanged: a payload is accepted only after Reed–Solomon and CRC-32C.
+
+**Formats and codec**
+
+* **Formats 0.29 and 0.30** ([spec](spec/CKey-Format-v0.29.0.md), [print](spec/CKey-Format-v0.30.0.md)): byte-grouped placement for both layouts (`CKEY_LAYOUT_STANDARD_GROUPED`, `CKEY_LAYOUT_PRINT_GROUPED`). Each byte's eight bits sit on neighbouring sites, and a keyed shuffle spreads each Reed–Solomon block over the field. Geometry, capacity and appearance do not change. The reader samples once and tries both placements. In `tests/hardening_tests.cpp` a 5% blot at level M reads 6 of 6 times grouped and 0 of 6 scattered. Opt-in: older readers cannot read them, and the default layout is still Format 0.27.
+* **Levels U (80% parity) and X (95%)** in the encoder, renderer and reader, for all four formats. Capacities match the table in the repair notes (v31: 1,285 and 303 bytes). Older readers reject them.
+
+**SDKs and tools**
+
+* **Swift:** the scanner now controls the camera by default (`CKeyCameraScanner.controlsCamera`, with `focusOnCode`, `exposureControl`, `realDetailZoom`, `regionOfInterest`, `tracking`, `keepsScreenAwake`); it never picks the ultrawide. Tracking is published through `onTrack`; `CKeyBracketOverlay` is the optional built-in overlay (One Euro filter, latency projection, critically damped spring, drawn by a display link); `CKeyCameraPreview` converts points for custom overlays; `CKeyFrameProcessor` and `CKeyCameraControl` serve hosts that own their camera. **Not compiled here** (no Swift toolchain).
+* **Android, web, .NET, CLI, macOS Renderer:** levels U and X and the grouped layouts. Android host checks, web tests, the native bridge test and the conformance vectors pass here; .NET, wasm and the Swift apps were not built here.
+* New test suite `ckey_reader_hardening`. All 16 CTest suites pass in Release.
+
+**Known costs and gaps**
+
+* The reader is slower than build 85: the time per frame is being measured in the same 6,000-case run and is added in the next commit; on the development subset the median reader time rose from 37 ms to roughly 60 to 170 ms depending on machine load, and frames that fail cost several times that. Region-of-interest scanning in the SDK reduces the per-frame cost on a phone, but the latency gate has not been measured on a device.
+* The standard layout's ring dots (0.2 module wide, 0.3 module apart) still fail first under blur; see `CONTEXT.md`.
+
 ## 0.1.0-build.85 — 2026-11-07
 
 * **Safe Actions** ([spec/CKey-Safe-Actions.md](spec/CKey-Safe-Actions.md)). A Safe Action is a code a reader may act on without asking first: `ckey-action:1:<base64url envelope>`, signed with Ed25519 by a site (the issuer, named by its domain) for one app and one action that app registered, with a single-use request ID and a short lifetime. Anything that does not verify runs nothing. Same-device actions run at once; cross-device actions (sign in a browser elsewhere, approve a payment) run only after a confirmation the SDK owns, which shows the issuer's account of who is asking (device, place, time) fetched from the issuer's own domain. The issuer's scope and the app's registration both count, and the stricter wins. This is the one exception to rule 1 of the [payload conventions](spec/CKey-Payload-Conventions.md) (now draft 0.2).

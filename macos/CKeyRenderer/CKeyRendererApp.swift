@@ -26,9 +26,9 @@ private final class RendererModel: ObservableObject {
     @Published var profile: RenderProfile = .scalable { didSet { scheduleRegenerate() } }
     /// Profile 0: 0 = smallest version that fits; otherwise 1...31.
     @Published var scalableVersion = 0 { didSet { scheduleRegenerate() } }
-    /// Profile 0 correction level: 0 L, 1 M, 2 Q, 3 H.
+    /// Profile 0 correction level: 0 L, 1 M, 2 Q, 3 H, 4 U (Ultra), 5 X (Extreme).
     @Published var scalableLevel = 1 { didSet { scheduleRegenerate() } }
-    /// Profile 0 layout: 0 standard, 1 print-robust (P0.1).
+    /// Profile 0 layout: 0 standard, 1 print-robust (P0.1), 2 standard grouped, 3 print grouped.
     @Published var scalableLayout = 0 { didSet { scheduleRegenerate() } }
     /// Print export width (inches) and printer resolution (dpi).
     @Published var printWidthInches = 1.0
@@ -127,7 +127,7 @@ private final class RendererModel: ObservableObject {
             guard checked == CKEY_OK else { svg = ""; status = "Design refused: \(styleStatus)"; return }
             let modules = ckey_scalable_modules_across(version)
             modulePitch = 29.0 / Double(max(modules, 1))
-            detail = "\(scalableLayout == 1 ? "P0.1 print · " : "")\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level, layout)) B"
+            detail = "\(["", "P0.1 print · ", "grouped · ", "P0.1 print grouped · "][scalableLayout])\(scalableVersion == 0 ? "auto" : "selected") v\(version) · \(modules) modules · level \(["L", "M", "Q", "H", "U", "X"][scalableLevel]) · capacity \(ckey_scalable_capacity(version, level, layout)) B"
         case .locator:
             guard input.count == Int(CKEY_LOCATOR_PAYLOAD_BYTES) else {
                 svg = ""; status = "Profile 1 requires exactly 16 UTF-8 bytes; entered \(input.count)."; return
@@ -331,10 +331,13 @@ private struct RendererView: View {
                     }
                     Picker("Correction", selection: $model.scalableLevel) {
                         Text("L · ~7%").tag(0); Text("M · ~14%").tag(1); Text("Q · ~22%").tag(2); Text("H · ~30%").tag(3)
-                    }.pickerStyle(.segmented)
+                        Text("U · Ultra (80% parity)").tag(4); Text("X · Extreme (95% parity)").tag(5)
+                    }
                     Picker("Layout", selection: $model.scalableLayout) {
                         Text("Standard").tag(0); Text("Print · P0.1").tag(1)
-                    }.pickerStyle(.segmented)
+                        Text("Standard grouped · needs build 86+ readers").tag(2)
+                        Text("Print grouped · P0.1 · needs build 86+ readers").tag(3)
+                    }
                     DisclosureGroup("Print") {
                         VStack(alignment: .leading, spacing: 10) {
                             LabSlider(title: "Width", value: $model.printWidthInches, range: 0.2...4.0, suffix: " in")
@@ -554,7 +557,7 @@ private struct SymbolPreview: NSViewRepresentable {
             if profile == .scalable {
                 // Profile 0 needs about 6 px per module at every version.
                 let pixelsPerModule = pixelsPerUnit * modulePitch
-                density = (scalableLayoutFound == 1 ? "P0.1 " : "") + "v\(scalableVersion) · " + String(format: "%.1f px/module", pixelsPerModule) +
+                density = (scalableLayoutFound == 1 ? "P0.1 " : scalableLayoutFound == 2 ? "grouped " : scalableLayoutFound == 3 ? "P0.1 grouped " : "") + "v\(scalableVersion) · " + String(format: "%.1f px/module", pixelsPerModule) +
                     (pixelsPerModule < 6.0 ? " (below the ~6 px/module decode floor — enlarge the window or raise Resolution)" : "")
             } else {
                 let decodeFloor = profile == .locator ? 6.0 : profile == .text ? 10.0 : 11.0

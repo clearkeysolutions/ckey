@@ -31,6 +31,40 @@ final class CKeyRoundTripTests: XCTestCase {
         XCTAssertEqual(result.text, "https://openckey.org")
     }
 
+    func testUltraAndExtremeLevelsAndGroupedLayouts() throws {
+        // The Swift values are the core's (ckey_ecc_level, ckey_scalable_layout).
+        XCTAssertEqual(CKeyErrorCorrection.l.rawValue, 0)
+        XCTAssertEqual(CKeyErrorCorrection.m.rawValue, 1)
+        XCTAssertEqual(CKeyErrorCorrection.q.rawValue, 2)
+        XCTAssertEqual(CKeyErrorCorrection.h.rawValue, 3)
+        XCTAssertEqual(CKeyErrorCorrection.u.rawValue, 4)   // CKEY_ECC_U
+        XCTAssertEqual(CKeyErrorCorrection.x.rawValue, 5)   // CKEY_ECC_X
+        XCTAssertEqual(CKeyErrorCorrection.allCases.count, 6)
+        XCTAssertEqual(CKeyLayout.standardGrouped.rawValue, 2)
+        XCTAssertEqual(CKeyLayout.printGrouped.rawValue, 3)
+
+        // More parity, less payload: U carries less than H, X less than U.
+        let h = CKeySymbol.capacity(version: 20, level: .h)
+        let u = CKeySymbol.capacity(version: 20, level: .u)
+        let x = CKeySymbol.capacity(version: 20, level: .x)
+        XCTAssertGreaterThan(u, 0)
+        XCTAssertLessThan(u, h)
+        XCTAssertLessThan(x, u)
+        // The defaults are unchanged.
+        let plain = try CKeySymbol.encode("CKey")
+        XCTAssertEqual(plain.level, .m)
+        XCTAssertEqual(plain.layout, .standard)
+
+        let ultra = try CKeySymbol.encode("CKey Ultra", level: .u)
+        XCTAssertEqual(ultra.level, .u)
+        let grouped = try CKeySymbol.encode("CKey grouped", level: .q, layout: .standardGrouped)
+        XCTAssertEqual(grouped.layout, .standardGrouped)
+        let image = try grouped.cgImage(size: 1024)
+        let result = try XCTUnwrap(CKeyDecoder.decode(cgImage: image))
+        XCTAssertEqual(result.text, "CKey grouped")
+        XCTAssertEqual(result.layout, .standardGrouped)
+    }
+
     func testEveryPolicyAndPrintLayoutRoundTrip() throws {
         for layout in CKeyLayout.allCases {
             for policy in CKeyRasterPolicy.allCases {

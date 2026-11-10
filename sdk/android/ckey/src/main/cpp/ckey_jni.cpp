@@ -182,7 +182,7 @@ bool read_symbol(JNIEnv *env, jbyteArray blob, ckey_scalable_symbol &symbol) {
     }
     env->GetByteArrayRegion(blob, 0, static_cast<jsize>(sizeof symbol), reinterpret_cast<jbyte *>(&symbol));
     if (symbol.abi_version != CKEY_ABI_VERSION || symbol.version < 1 || symbol.version > CKEY_SCALABLE_VERSION_COUNT ||
-        symbol.ecc_level > CKEY_ECC_H || symbol.codeword_length > CKEY_SCALABLE_MAX_CODEWORD_BYTES) {
+        symbol.ecc_level >= CKEY_ECC_LEVEL_COUNT || symbol.layout > CKEY_LAYOUT_PRINT_GROUPED || symbol.codeword_length > CKEY_SCALABLE_MAX_CODEWORD_BYTES) {
         throw_iae(env, "not a CKey symbol (header mismatch)");
         return false;
     }
@@ -380,7 +380,7 @@ size_t decode_frame(const uint8_t *gray, size_t w, size_t h, size_t stride, size
             out.last_status = st;
             if (st == CKEY_OK) {
                 out.bytes.assign(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(std::min(length, buffer.size())));
-                out.profile = layout == CKEY_LAYOUT_PRINT ? 1 : 0;
+                out.profile = (layout == CKEY_LAYOUT_PRINT || layout == CKEY_LAYOUT_PRINT_GROUPED) ? 1 : 0;  // P0.1 geometry
                 out.version = version;
                 out.layout = layout;
                 std::memcpy(out.quad, quad, sizeof quad);

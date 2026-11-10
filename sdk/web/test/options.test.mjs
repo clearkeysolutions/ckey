@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   encodeOptions, rasterOptions, svgOptions, pdfOptions, styleSpec, parseColour, telemetryMode, payloadBytes,
-  rgbaFrame, certifyOptions,
+  rgbaFrame, certifyOptions, LEVELS, LAYOUTS,
 } from '../js/options.mjs';
 
 test('encode options', () => {
@@ -12,7 +12,12 @@ test('encode options', () => {
   assert.equal(encodeOptions({ level: 'q' }).level, 2);
   assert.throws(() => encodeOptions({ version: 32 }), RangeError);
   assert.throws(() => encodeOptions({ version: 1.5 }), TypeError);
-  assert.throws(() => encodeOptions({ level: 'X' }), RangeError);
+  assert.deepEqual(encodeOptions({ level: 'U', layout: 'standard-grouped' }), { version: 0, level: 4, layout: 2 });
+  assert.deepEqual(encodeOptions({ version: 20, level: 'x', layout: 'Print-Grouped' }), { version: 20, level: 5, layout: 3 });
+  assert.deepEqual([...LEVELS], ['L', 'M', 'Q', 'H', 'U', 'X']);
+  assert.deepEqual([...LAYOUTS], ['standard', 'print', 'standard-grouped', 'print-grouped']);
+  assert.throws(() => encodeOptions({ level: 'Z' }), RangeError);
+  assert.throws(() => encodeOptions({ layout: 'grouped' }), RangeError);
   assert.throws(() => encodeOptions({ layout: 'poster' }), RangeError);
   assert.throws(() => encodeOptions('M'), TypeError);
 });

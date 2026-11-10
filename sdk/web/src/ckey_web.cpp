@@ -350,7 +350,8 @@ constexpr size_t kScalableOut = 65535;  // P0 reaches 4,619 bytes at v31/M; same
 
 // out_info[0] = profile code (0 P0, 1 P0.1 print, 2 P1, 3 P2, 4 P3: the
 // telemetry profile codes), out_info[1] = P0 version (0 for P1..P3),
-// out_info[2] = P0 layout (0 standard, 1 print; 0 for P1..P3),
+// out_info[2] = P0 layout (0 standard, 1 print, 2 standard grouped, 3 print
+// grouped; 0 for P1..P3),
 // out_info[3] = number of border candidates found.
 uint8_t *decode_gray(const uint8_t *gray, size_t w, size_t h, size_t stride, uint32_t *out_info) {
     if (!gray || !out_info || w == 0 || h == 0) { set_error("invalid frame"); return nullptr; }
@@ -369,7 +370,7 @@ uint8_t *decode_gray(const uint8_t *gray, size_t w, size_t h, size_t stride, uin
         uint32_t version = 0, layout = 0;
         if (ckey_refine_quad_gray8(gray, w, h, stride, border, CKEY_FIELD_SCALABLE, q) >= 0 &&
             ckey_decode_scalable_gray8(gray, w, h, stride, q, out.data(), out.size(), &len, &version, &layout, &d) == CKEY_OK) {
-            out_info[0] = layout == CKEY_LAYOUT_PRINT ? 1u : 0u;
+            out_info[0] = (layout == CKEY_LAYOUT_PRINT || layout == CKEY_LAYOUT_PRINT_GROUPED) ? 1u : 0u;  // P0.1 geometry
             out_info[1] = version;
             out_info[2] = layout;
             return dup_bytes(out.data(), len);

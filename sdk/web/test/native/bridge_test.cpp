@@ -69,8 +69,8 @@ static std::vector<uint8_t> pad(const uint8_t *px, uint32_t size, uint32_t margi
     return f;
 }
 
-static bool roundtrip(const std::string &text, uint32_t layout, uint32_t transparent, const void *style) {
-    void *sym = ckw_encode(reinterpret_cast<const uint8_t *>(text.data()), static_cast<uint32_t>(text.size()), 0, 1, layout);
+static bool roundtrip(const std::string &text, uint32_t layout, uint32_t transparent, const void *style, uint32_t level = 1) {
+    void *sym = ckw_encode(reinterpret_cast<const uint8_t *>(text.data()), static_cast<uint32_t>(text.size()), 0, level, layout);
     if (!sym) { std::fprintf(stderr, "encode: %s\n", ckw_last_error()); return false; }
     uint8_t *px = ckw_render_raster(sym, style, 512, 0, transparent, 4, 1.0, 1, 0, nullptr, 0, 0);
     if (!px) { std::fprintf(stderr, "raster: %s\n", ckw_last_error()); ckw_symbol_free(sym); return false; }
@@ -79,7 +79,7 @@ static bool roundtrip(const std::string &text, uint32_t layout, uint32_t transpa
     uint32_t info[4] = {9, 9, 9, 9};
     uint8_t *out = ckw_decode_rgba(frame.data(), side, side, 0, info);
     bool ok = out && ckw_last_len() == text.size() && std::memcmp(out, text.data(), text.size()) == 0 &&
-              info[0] == (layout ? 1u : 0u) && info[2] == layout && info[1] >= 1;
+              info[0] == (layout & 1u) && info[2] == layout && info[1] >= 1;
     if (!out) std::fprintf(stderr, "decode: %s (borders %u)\n", ckw_last_error(), info[3]);
     ckw_free(out);
     ckw_free(px);
@@ -110,6 +110,14 @@ int main() {
     CHECK(roundtrip(url, 0, 0, nullptr));
     CHECK(roundtrip("Hello, CKey! Grüße", 1, 0, nullptr));
     CHECK(roundtrip(url, 0, 1, nullptr));
+    // Byte-grouped layouts (2 standard, 3 print) and levels U (4), X (5).
+    CHECK(roundtrip(url, 2, 0, nullptr));
+    CHECK(roundtrip("Hello, CKey! Grüße", 3, 0, nullptr));
+    CHECK(roundtrip("ultra", 2, 0, nullptr, 4));
+    CHECK(roundtrip("x", 0, 0, nullptr, 5));
+    CHECK(ckw_scalable_capacity(1, 5, 0) == 0 && ckw_scalable_capacity(8, 4, 2) == ckw_scalable_capacity(8, 4, 0) && ckw_scalable_capacity(8, 4, 0) > 0);
+    const uint8_t one = 'x';
+    CHECK(ckw_encode(&one, 1, 1, 5, 0) == nullptr && std::strlen(ckw_last_error()) > 0);  // v1 carries nothing at X
     void *concept_style = ckw_style_new(1);
     CHECK(concept_style != nullptr);
     CHECK(roundtrip(url, 0, 0, concept_style));

@@ -119,7 +119,7 @@ function fakeModule() {
     if (channels === 4 && M.HEAPU8[p + 2] === 0xc4) {
       const s = [...symbols.keys()][M.HEAPU8[p + 1]];
       const x = symbols.get(s);
-      [x.layout, x.version, x.layout, 1].forEach((v, i) => u32(info, i, v));
+      [x.layout & 1, x.version, x.layout, 1].forEach((v, i) => u32(info, i, v));
       return putBytes(x.payload);
     }
     setError('no CKey border found');
@@ -161,6 +161,14 @@ test('encode, render, decode marshalling with a growing heap and no leaks', () =
     { v: sym.version, l: sym.level, y: sym.layout, n: sym.payloadLength, c: sym.capacity, m: sym.modules },
     { v: 3, l: 'Q', y: 'print', n: 6, c: 100, m: 31 },
   );
+  // Levels U and X and the grouped layouts map to the core's codes 4, 5 and 2, 3.
+  const ultra = ckey.encode('u', { level: 'U', layout: 'standard-grouped' });
+  assert.deepEqual([f.symbols.get([...f.symbols.keys()].at(-1)).level, f.symbols.get([...f.symbols.keys()].at(-1)).layout], [4, 2]);
+  assert.deepEqual([ultra.level, ultra.layout], ['U', 'standard-grouped']);
+  ultra.free();
+  const extreme = ckey.encode('x', { level: 'X', layout: 'print-grouped' });
+  assert.deepEqual([extreme.level, extreme.layout], ['X', 'print-grouped']);
+  extreme.free();
   const img = ckey.renderPixels(sym, { size: 64, transparent: true }); // forces heap growth
   assert.equal(img.data.length, 64 * 64 * 4);
   assert.equal(img.data[7], 0);

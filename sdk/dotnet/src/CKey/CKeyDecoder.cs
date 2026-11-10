@@ -28,7 +28,7 @@ namespace OpenCKey
         public CKeyProfile Profile { get; }
         /// <summary>Profile 0 version (1..31); 0 for Profiles 1–3.</summary>
         public int Version { get; }
-        /// <summary>Profile 0 layout (standard or print); Standard for Profiles 1–3.</summary>
+        /// <summary>Profile 0 layout (standard, print, or their byte-grouped forms); Standard for Profiles 1–3.</summary>
         public Layout Layout { get; }
         /// <summary>The refined quadrilateral the decode used: x0,y0,…,x3,y3 in frame pixels.</summary>
         public double[] Quad { get; }
@@ -36,7 +36,13 @@ namespace OpenCKey
         /// <summary>A display name, e.g. "Profile 0 · v3" or "Profile 0.1 · print · v5".</summary>
         public string ProfileName => Profile switch
         {
-            CKeyProfile.Scalable => Layout == Layout.Print ? $"Profile 0.1 · print · v{Version}" : $"Profile 0 · v{Version}",
+            CKeyProfile.Scalable => Layout switch
+            {
+                Layout.Print => $"Profile 0.1 · print · v{Version}",
+                Layout.StandardGrouped => $"Profile 0 · grouped · v{Version}",
+                Layout.PrintGrouped => $"Profile 0.1 · print · grouped · v{Version}",
+                _ => $"Profile 0 · v{Version}",
+            },
             CKeyProfile.Locator => "Profile 1 · Locator",
             CKeyProfile.Text => "Profile 2 · Text",
             _ => "Profile 3 · Extended",
@@ -62,7 +68,7 @@ namespace OpenCKey
         /// <summary>The telemetry profile code (p0, p0_1, p1, p2, p3 = 0..4).</summary>
         internal uint TelemetryProfileCode => Profile switch
         {
-            CKeyProfile.Scalable => Layout == Layout.Print ? 1u : 0u,
+            CKeyProfile.Scalable => Layout == Layout.Print || Layout == Layout.PrintGrouped ? 1u : 0u,
             CKeyProfile.Locator => 2u,
             CKeyProfile.Text => 3u,
             _ => 4u,
@@ -178,7 +184,7 @@ namespace OpenCKey
                     if (status == 0 && length <= (nuint)ScalableBufferBytes)
                     {
                         return new CKeyResult(Copy(output, (int)length), CKeyProfile.Scalable, (int)version,
-                            layout == 1 ? Layout.Print : Layout.Standard, ToArray(quad));
+                            layout <= (uint)Layout.PrintGrouped ? (Layout)layout : Layout.Standard, ToArray(quad));
                     }
                 }
                 finally

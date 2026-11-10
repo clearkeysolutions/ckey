@@ -15,12 +15,14 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.85**, C ABI **4**.
+Build **0.1.0-build.86**, C ABI **4**.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
 | Profile 0 (scalable, standard layout) | [0.27.0](../spec/CKey-Format-v0.27.0.md) | `1B` | 31 versions, 27–4,619 bytes at level M | none |
 | Profile 0.1 (scalable, print layout) | [0.28.0](../spec/CKey-Format-v0.28.0.md) | `1C` | 31 versions | none |
+| Profile 0, byte-grouped placement (opt-in) | [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | as 0.27 | none |
+| Profile 0.1, byte-grouped placement (opt-in) | [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | as 0.28 | none |
 | Profile 1 (locator) | [0.14.0](../spec/CKey-Format-v0.14.0.md) | `0E` | exactly 16 bytes | 0.8, 0.11, 0.12, 0.13 |
 | Profile 2 (text) | [0.25.0](../spec/CKey-Format-v0.25.0.md) | `19` | 0–200 bytes | 0.9, 0.15, 0.18, 0.19, 0.22, 0.23 |
 | Profile 3 (extended) | [0.26.0](../spec/CKey-Format-v0.26.0.md) | `1A` | 1–2,048 bytes in seven tiers | 0.10, 0.16, 0.17, 0.20, 0.21, 0.24 |
@@ -65,6 +67,8 @@ The encoders emit only the current formats. The image decoders read only the cur
 | [0.26.0](../spec/CKey-Format-v0.26.0.md) | `1A` | 3 | dev.49 | **current** | Safe area, uniform keyed placement, whitening, polar join. |
 | [0.27.0](../spec/CKey-Format-v0.27.0.md) | `1B` | 0 | dev.56 | **current** | Profile 0: one design at 31 sizes, four ECC levels. |
 | [0.28.0](../spec/CKey-Format-v0.28.0.md) | `1C` | 0 (print layout) | dev.58 | **current** | Profile 0.1: equal-arc rings and heavier marks for small prints. |
+| [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | 0 | build.86 | **current** (opt-in) | Format 0.27 with byte-grouped placement; defines levels U and X for 0.27 to 0.30. |
+| [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | 0 (print layout) | build.86 | **current** (opt-in) | Format 0.28 with byte-grouped placement. |
 
 The "Introduced" column is the build whose changelog entry first describes the format. Some format specifications were committed to `spec/` a few builds later.
 
@@ -85,6 +89,7 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
+| build.86 | `scratch` | 2026-11-10 | Reader repair pass after the CKTEST-RH-001 campaign: new border search, frame-edge corner fit with a lens term, erasure and soft-decision decoding, work budget; Formats 0.29/0.30 (byte-grouped, opt-in); levels U and X; frame scan, tracking and camera advice calls; Swift camera layer; additive, ABI 4 |
 | build.85 | `scratch` and `Stable-Release` | 2026-11-07 | Safe Actions: Ed25519 envelope verification in the core, CLI, spec, 22 independent vectors, and SDK-owned policy in every SDK; `CKEY_EXPIRED`; additive, ABI 4 |
 | build.84 | `scratch` and `Stable-Release` | 2026-11-07 | Field-test suite, generated docs and GitHub issue form; no core change |
 | build.83 | tag `v0.1.0-build.83` | 2026-11-06 | npm package renamed `openckey` (`ckey` is taken on npm) |

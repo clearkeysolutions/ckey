@@ -46,6 +46,8 @@ const pdf = ckey.renderPDF(sym, { widthPt: 144 });                  // Uint8Arra
 sym.free(); // release WebAssembly memory now; a forgotten symbol is freed by the GC
 ```
 
+`level` is `'L'`, `'M'` (default), `'Q'`, `'H'`, `'U'` (Ultra, 80% parity) or `'X'` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity, and the smallest versions carry nothing at those levels: `ckey.capacity(1, 'X')` is 0 and encoding there throws. `layout` is `'standard'` (default), `'print'` (Profile 0.1), or their byte-grouped forms `'standard-grouped'` (Format 0.29) and `'print-grouped'` (Format 0.30), which keep the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. Decoding reports the layout found; `'print-grouped'` reports profile `'0.1'`.
+
 `encode` throws an `Error` that carries the core's diagnostic message, for example `payload exceeds the selected Profile 0 version and level`. An invalid option throws a `TypeError` or a `RangeError`.
 
 #### Render options

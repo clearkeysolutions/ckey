@@ -64,11 +64,12 @@ int main() {
     CKEY_CHECK(ckey_certify_scalable_style(&s, &grey, 0, nullptr, nullptr, nullptr, &c) == CKEY_INVALID_ARGUMENT && c.certified == 0);
     std::printf("strict near-invisible: %s\n", c.message);
     // Low but visible contrast is only a warning: it renders, and the photo sweep decides.
-    ckey_style faint = plain; faint.ink = faint.ink_shade = {0xbb, 0xbb, 0xbb};
-    CKEY_CHECK(ckey_check_scalable_style(&s, &faint, &d) == CKEY_OK && std::string(d.message).find("only 1.9:1") != std::string::npos);
+    // (Build 86's reader reads #bbbbbb at 1.9:1, so the example is the fainter #cccccc.)
+    ckey_style faint = plain; faint.ink = faint.ink_shade = {0xcc, 0xcc, 0xcc};
+    CKEY_CHECK(ckey_check_scalable_style(&s, &faint, &d) == CKEY_OK && std::string(d.message).find("only 1.6:1") != std::string::npos);
     CKEY_CHECK(renders(s, faint));
     CKEY_CHECK(ckey_certify_scalable_style(&s, &faint, 0, nullptr, nullptr, nullptr, &c) == CKEY_INVALID_ARGUMENT && c.certified == 0);
-    std::printf("strict #bbbbbb: %s\n", c.message);
+    std::printf("strict #cccccc: %s\n", c.message);
     // A dark custom background with concept's lighter accents scans: certified despite a 2.9:1 accent.
     ckey_style slate; ckey_style_preset_fill(&slate, CKEY_PRESET_CONCEPT); slate.background = {0x55, 0x55, 0x55};
     CKEY_CHECK(ckey_certify_scalable_style(&s, &slate, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);
@@ -132,7 +133,8 @@ int main() {
         const auto v11 = encode(11, url);
         ckey_style faint = plain; faint.ink = faint.ink_shade = {0xaa, 0xaa, 0xaa}; faint.policy = CKEY_POLICY_OVERRIDE;
         CKEY_CHECK(ckey_certify_scalable_style(&v11, &faint, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 0);
-        CKEY_CHECK(std::string(c.message).find("fails scan margin") != std::string::npos);
+        // The grade is "marginal" or "fails" depending on the reader; either way it is not certified on margin.
+        CKEY_CHECK(std::string(c.message).find("not certified") == 0 && std::string(c.message).find("scan margin") != std::string::npos);
         std::printf("faint #aaaaaa (override): %s\n", c.message);
         ckey_style decorated; ckey_style_preset_fill(&decorated, CKEY_PRESET_CONCEPT);
         CKEY_CHECK(ckey_certify_scalable_style(&v11, &decorated, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);

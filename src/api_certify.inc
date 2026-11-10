@@ -229,8 +229,8 @@ ckey_status ckey_certify_scalable_style(const ckey_scalable_symbol *s, const cke
     if (!out) return CKEY_INVALID_ARGUMENT;
     *out = ckey_certification{}; out->abi_version = CKEY_ABI_VERSION;
     const auto refuse = [&](const char *why) { std::snprintf(out->message, sizeof(out->message), "%s", why); return CKEY_INVALID_ARGUMENT; };
-    if (!s || s->abi_version != CKEY_ABI_VERSION || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 ||
-        s->layout >= static_cast<uint32_t>(kScalableFamilies)) return refuse("certification needs a Profile 0 symbol");
+    if (!s || s->abi_version != CKEY_ABI_VERSION || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level >= static_cast<uint32_t>(kScalableLevels) ||
+        s->layout >= static_cast<uint32_t>(kScalableLayouts)) return refuse("certification needs a Profile 0 symbol");
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return refuse("symbol codeword does not match its version");
     ckey_scan_model m; ckey_scan_model_default(&m);

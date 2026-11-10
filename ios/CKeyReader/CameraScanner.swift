@@ -29,6 +29,9 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var hasConfigured = false
     private var didDecode = false
     private var lastDecodeDiagnostic = ""
+    // Profile 0 payloads reach 4,619 bytes (v31 at level M), beyond the
+    // 2,048-byte Profile 3 maximum: one 64 KB buffer, reused on the frame queue.
+    private var payloadBuffer = [UInt8](repeating: 0, count: 65535)
 
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -153,75 +156,70 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
         let stride = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
 
-        // A CKey's continuous outer border remains detectable after the
-        // small payload modules have blurred together at distance. Locate that
-        // high-contrast connected component first. This deliberately does not
-        // depend on a generic document-rectangle detector.
-        // Symbols may be light-on-dark or dark-on-light. Run the same
-        // geometric component pass at both polarities; the key fit later
-        // resolves the real candidate.
-        let borderQuads = borderQuads(gray, width: width, height: height, stride: stride)
-        let borderDetectionMilliseconds = (CACurrentMediaTime() - started) * 1000
-
-        // The complete locator is measured from the border component, then
-        // optimized using the printed Grid, Ring, Ray, and finder keys. No
-        // generic rectangle model or fixed distance ladder participates.
-        var liveDetails = borderQuads.isEmpty ? "Border: none" : "Border candidates: \(borderQuads.count)"
-        var lastAttemptMilliseconds = 0.0
-        for (candidateIndex, quad) in borderQuads.prefix(6).enumerated() {
-            let observed = quadPoints(quad)
-            // Compact profiles and Profile 3 have deliberately different
-            // calibration fields. Never let a strong P1/P2 score select the
-            // projective transform used to sample P3 (or vice versa).
-            let locatorQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
-                                               stride: stride, field: .locator)
-            let textQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
-                                            stride: stride, field: .text)
-            let extendedQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
-                                                stride: stride, field: .extended)
-            // Profile 0 (scalable family) first: the core aligns its frame edges,
-            // identifies the version from its Grid/Ring/Ray Keys, then decodes.
-            let scalableQuad = refinedCKeyQuad(observed, gray: gray, width: width, height: height,
-                                               stride: stride, field: .scalable)
-            let decodeStarted = CACurrentMediaTime()
-            if let decoded = decodeScalable(gray: gray, width: width, height: height, stride: stride, quad: scalableQuad) {
-                publishDecoded(decoded.bytes, profile: decoded.profile,
-                               detectionMilliseconds: borderDetectionMilliseconds,
-                               decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
-                               candidates: borderQuads.count)
-                return
-            }
-            if let decoded = decodeAnyProfile(gray: gray, width: width, height: height, stride: stride,
-                                              locatorQuad: locatorQuad, textQuad: textQuad, extendedQuad: extendedQuad) {
-                publishDecoded(decoded.bytes, profile: decoded.profile,
-                               detectionMilliseconds: borderDetectionMilliseconds,
-                               decodeMilliseconds: (CACurrentMediaTime() - decodeStarted) * 1000,
-                               candidates: borderQuads.count)
-                return
-            }
-            lastAttemptMilliseconds = (CACurrentMediaTime() - decodeStarted) * 1000
-            let side = measuredSide(observed)
-            let p1Fit = calibrationScore(gray, width: width, height: height, stride: stride,
-                                         quad: locatorQuad, field: .locator)
-            let p2Fit = calibrationScore(gray, width: width, height: height, stride: stride,
-                                         quad: textQuad, field: .text)
-            let p3Fit = calibrationScore(gray, width: width, height: height, stride: stride,
-                                         quad: extendedQuad, field: .extended)
-            var p0Version: UInt32 = 0
-            let p0Fit = scalableQuad.count == 8 ? scalableQuad.withUnsafeBufferPointer { buffer in
-                ckey_calibration_score_scalable_gray8(gray, width, height, stride, buffer.baseAddress, &p0Version)
-            } : 0
-            // Keep the leading candidate visible in real time. It is the one
-            // the decoder is most likely to accept and makes a bad border fit
-            // obvious without waiting for a successful scan.
-            if candidateIndex == 0 {
-                liveDetails = "Border \(String(format: "%.0f", side)) px · fit P0 v\(p0Version) \(String(format: "%.1f", p0Fit)) · P1 \(String(format: "%.1f", p1Fit)) · P2 \(String(format: "%.1f", p2Fit)) · P3 \(String(format: "%.1f", p3Fit))\nAttempt \(String(format: "%.1f", lastAttemptMilliseconds)) ms · \(lastDecodeDiagnostic)"
-            }
+        // One call into the shared core (ckey_scan_frame_gray8): border search
+        // at both polarities, then for each candidate Profile 0, 1, 2 and 3,
+        // each refined against its own keys and accepted only after
+        // Reed-Solomon and CRC validation. Nothing is located or decoded here.
+        var options = ckey_scan_options()
+        ckey_scan_options_init(&options)
+        var scan = ckey_scan_result()
+        let capacity = payloadBuffer.count
+        let scanStatus = payloadBuffer.withUnsafeMutableBufferPointer { output in
+            ckey_scan_frame_gray8(gray, width, height, stride, &options, output.baseAddress, capacity, &scan)
         }
-        DispatchQueue.main.async { self.candidateSizes = borderQuads.isEmpty ? "" : "\(borderQuads.count) measured border component(s)" }
-        publishProgress(borderQuads.isEmpty ? "Searching for CKey border and finder keys…" : "Calibrating CKey keys · \(lastDecodeDiagnostic)",
-                        detectionMilliseconds: borderDetectionMilliseconds, candidates: borderQuads.count,
-                        attemptMilliseconds: lastAttemptMilliseconds, details: liveDetails)
+        let scanMilliseconds = (CACurrentMediaTime() - started) * 1000
+        let candidates = Int(scan.candidates)
+        if scanStatus == CKEY_OK, Int(scan.payload_length) <= capacity {
+            publishDecoded(Array(payloadBuffer.prefix(Int(scan.payload_length))), profile: profileLabel(scan),
+                           detectionMilliseconds: scanMilliseconds, decodeMilliseconds: scanMilliseconds,
+                           candidates: candidates)
+            return
+        }
+        lastDecodeDiagnostic = scanMessage(scan)
+
+        // Keep the leading candidate visible in real time: its measured side
+        // and Profile 0 fit make a bad border fit obvious without waiting for
+        // a successful scan.
+        var liveDetails = candidates == 0 ? "Border: none" : "Border candidates: \(candidates)"
+        if scan.located != 0 {
+            let q = scan.quad
+            let side = (hypot(q.2 - q.0, q.3 - q.1) + hypot(q.6 - q.0, q.7 - q.1)) * 0.5
+            let sideText = String(format: "%.0f", side)
+            let fitText = String(format: "%.1f", scan.score)
+            let attemptText = String(format: "%.1f", scanMilliseconds)
+            let cut = (scan.flags & CKEY_SCAN_FLAG_SYMBOL_CUT) != 0
+            liveDetails = "Border \(sideText) px · fit P0 \(fitText)"
+            if cut { liveDetails += " · cut by the frame edge" }
+            liveDetails += "\nAttempt \(attemptText) ms · \(lastDecodeDiagnostic)"
+        }
+        DispatchQueue.main.async { self.candidateSizes = candidates == 0 ? "" : "\(candidates) measured border component(s)" }
+        publishProgress(candidates == 0 ? "Searching for CKey border and finder keys…" : "Calibrating CKey keys · \(lastDecodeDiagnostic)",
+                        detectionMilliseconds: scanMilliseconds, candidates: candidates,
+                        attemptMilliseconds: scanMilliseconds, details: liveDetails)
+    }
+
+    /// The label shown for a decoded symbol, from the scan result.
+    private func profileLabel(_ scan: ckey_scan_result) -> String {
+        switch scan.profile {
+        case CKEY_FIELD_SCALABLE.rawValue:
+            switch scan.layout {
+            case CKEY_LAYOUT_PRINT.rawValue: return "Profile 0.1 · print · v\(scan.version)"
+            case CKEY_LAYOUT_STANDARD_GROUPED.rawValue: return "Profile 0 · grouped · v\(scan.version)"
+            case CKEY_LAYOUT_PRINT_GROUPED.rawValue: return "Profile 0.1 · print · grouped · v\(scan.version)"
+            default: return "Profile 0 · v\(scan.version)"
+            }
+        case CKEY_FIELD_LOCATOR.rawValue: return "Profile 1 · Locator"
+        case CKEY_FIELD_TEXT.rawValue: return "Profile 2 · Text"
+        default: return "Profile 3 · Extended"
+        }
+    }
+
+    private func scanMessage(_ scan: ckey_scan_result) -> String {
+        withUnsafeBytes(of: scan.message) { raw -> String in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            let end = bytes.firstIndex(of: 0) ?? bytes.count
+            return String(decoding: bytes[0..<end], as: UTF8.self)
+        }
     }
 
     private func publishProgress(_ text: String, detectionMilliseconds: Double, candidates: Int,
@@ -236,120 +234,6 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             self.decodeMilliseconds = attemptMilliseconds
             self.candidateCount = candidates
             if !details.isEmpty { self.scanDetails = details }
-        }
-    }
-
-    private func measuredSide(_ quad: [CGPoint]) -> Double {
-        guard quad.count == 4 else { return 0 }
-        return Double((hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y) +
-                       hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y)) * 0.5)
-    }
-
-    private enum CalibrationField { case scalable, locator, text, extended }
-
-    // Fit a border to one profile's canonical field against that profile's
-    // fixed keys. Shared C++ core (ckey_refine_quad_gray8): coordinate descent
-    // over scale, rotation, and offset, then per-corner projective moves.
-    private func refinedCKeyQuad(_ observed: [CGPoint], gray: UnsafePointer<UInt8>,
-                                 width: Int, height: Int, stride: Int,
-                                 field: CalibrationField) -> [Double] {
-        guard observed.count == 4 else { return [] }
-        let border = observed.flatMap { [Double($0.x), Double($0.y)] }
-        let coreField: ckey_field
-        switch field {
-        case .scalable: coreField = CKEY_FIELD_SCALABLE
-        case .locator: coreField = CKEY_FIELD_LOCATOR
-        case .text: coreField = CKEY_FIELD_TEXT
-        case .extended: coreField = CKEY_FIELD_EXTENDED
-        }
-        var refined = [Double](repeating: 0, count: 8)
-        let score = border.withUnsafeBufferPointer { input in
-            refined.withUnsafeMutableBufferPointer { output in
-                ckey_refine_quad_gray8(gray, width, height, stride, input.baseAddress, coreField, output.baseAddress)
-            }
-        }
-        return score >= 0 ? refined : []
-    }
-
-    private func calibrationScore(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                                  stride: Int, quad: [Double], field: CalibrationField) -> Double {
-        quad.withUnsafeBufferPointer { buffer in
-            switch field {
-            case .scalable:
-                return ckey_calibration_score_scalable_gray8(gray, width, height, stride, buffer.baseAddress, nil)
-            case .locator:
-                return ckey_calibration_score_gray8(gray, width, height, stride, buffer.baseAddress)
-            case .text:
-                return ckey_calibration_score_text_gray8(gray, width, height, stride, buffer.baseAddress)
-            case .extended:
-                return ckey_calibration_score_extended_gray8(gray, width, height, stride, buffer.baseAddress)
-            }
-        }
-    }
-
-    // Profile 0 payloads reach 4,619 bytes (v31 at level M), beyond the
-    // 2,048-byte Profile 3 maximum, so this uses its own 64 KB buffer.
-    private func decodeScalable(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
-                                quad: [Double]) -> (bytes: [UInt8], profile: String)? {
-        guard quad.count == 8 else { return nil }
-        var output = [UInt8](repeating: 0, count: 65535)
-        var length = 0
-        var version: UInt32 = 0
-        var layout: UInt32 = 0
-        var diagnostic = ckey_diagnostics()
-        let status = output.withUnsafeMutableBufferPointer { decoded in
-            quad.withUnsafeBufferPointer { q in
-                ckey_decode_scalable_gray8(gray, width, height, stride, q.baseAddress,
-                                           decoded.baseAddress, decoded.count, &length, &version, &layout, &diagnostic)
-            }
-        }
-        guard status == CKEY_OK else { return nil }
-        return (Array(output.prefix(length)), layout == 1 ? "Profile 0.1 · print · v\(version)" : "Profile 0 · v\(version)")
-    }
-
-    private func decodeAnyProfile(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int,
-                                  locatorQuad: [Double], textQuad: [Double], extendedQuad: [Double]) -> (bytes: [UInt8], profile: String)? {
-        guard locatorQuad.count == 8, textQuad.count == 8, extendedQuad.count == 8 else { return nil }
-        var locator = [UInt8](repeating: 0, count: Int(CKEY_LOCATOR_PAYLOAD_BYTES))
-        var diagnostic = ckey_diagnostics()
-        let locatorStatus = locator.withUnsafeMutableBufferPointer { output in
-            locatorQuad.withUnsafeBufferPointer { q in
-                ckey_decode_gray8(gray, width, height, stride, q.baseAddress, output.baseAddress, output.count, &diagnostic)
-            }
-        }
-        if locatorStatus == CKEY_OK { return (locator, "Profile 1 · Locator") }
-        let locatorDiagnostic = diagnosticText(diagnostic)
-
-        // Dense profiles share the actual native sampler and only succeed after
-        // their independent RS and CRC validation. They are intentionally tried
-        // after the compact profile so ordinary locator reads retain their fast path.
-        var dense = [UInt8](repeating: 0, count: Int(CKEY_EXTENDED_PAYLOAD_MAX_BYTES))
-        var length = 0
-        let textStatus = dense.withUnsafeMutableBufferPointer { output in
-            textQuad.withUnsafeBufferPointer { q in
-                ckey_decode_text_gray8(gray, width, height, stride, q.baseAddress,
-                                       output.baseAddress, output.count, &length, &diagnostic)
-            }
-        }
-        if textStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 2 · Text") }
-        let textDiagnostic = diagnosticText(diagnostic)
-
-        length = 0
-        let extendedStatus = dense.withUnsafeMutableBufferPointer { output in
-            extendedQuad.withUnsafeBufferPointer { q in
-                ckey_decode_extended_gray8(gray, width, height, stride, q.baseAddress,
-                                           output.baseAddress, output.count, &length, &diagnostic)
-            }
-        }
-        if extendedStatus == CKEY_OK { return (Array(dense.prefix(length)), "Profile 3 · Extended") }
-        lastDecodeDiagnostic = "P1 \(locatorDiagnostic) · P2 \(textDiagnostic) · P3 \(diagnosticText(diagnostic))"
-        return nil
-    }
-
-    private func diagnosticText(_ diagnostic: ckey_diagnostics) -> String {
-        withUnsafeBytes(of: diagnostic.message) { bytes in
-            guard let address = bytes.baseAddress else { return "decoder failed" }
-            return String(cString: address.assumingMemoryBound(to: CChar.self))
         }
     }
 
@@ -379,27 +263,6 @@ final class CameraScanner: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             self.status = "CKey decoded"
             AudioServicesPlaySystemSound(SystemSoundID(1520))
         }
-    }
-
-    private func quadPoints(_ quad: [Double]) -> [CGPoint] {
-        guard quad.count == 8 else { return [] }
-        return stride(from: 0, to: 8, by: 2).map {
-            CGPoint(x: CGFloat(quad[$0]), y: CGFloat(quad[$0 + 1]))
-        }
-    }
-
-    // Candidate border outlines (both polarities), most border-like first,
-    // from the shared C++ core (ckey_find_borders_gray8). Orientation comes
-    // from the border's minimum-area rectangle and each side is line-fitted,
-    // so rotated and keystoned symbols start from the right geometry.
-    private func borderQuads(_ gray: UnsafePointer<UInt8>, width: Int, height: Int,
-                             stride: Int) -> [[Double]] {
-        let maxQuads = 6
-        var buffer = [Double](repeating: 0, count: maxQuads * 8)
-        let count = buffer.withUnsafeMutableBufferPointer { output in
-            ckey_find_borders_gray8(gray, width, height, stride, output.baseAddress, maxQuads)
-        }
-        return (0..<count).map { Array(buffer[($0 * 8)..<($0 * 8 + 8)]) }
     }
 }
 

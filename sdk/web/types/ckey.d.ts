@@ -1,8 +1,20 @@
 // Type declarations for the CKey Web SDK (npm package `openckey`).
 // Hand-written; copied to dist/ckey.d.ts by scripts/assemble.mjs.
 
-export type Level = 'L' | 'M' | 'Q' | 'H';
-export type Layout = 'standard' | 'print';
+/**
+ * Reed-Solomon correction level. 'U' (Ultra, 80% parity) and 'X' (Extreme,
+ * 95% parity) spend most of the symbol on parity: the smallest versions carry
+ * nothing at those levels (capacity 0, and encode throws). Readers before
+ * 0.1.0-build.86 reject 'U' and 'X'.
+ */
+export type Level = 'L' | 'M' | 'Q' | 'H' | 'U' | 'X';
+/**
+ * 'standard' (Format 0.27) and 'print' (Format 0.28, Profile 0.1), or their
+ * byte-grouped forms 'standard-grouped' (Format 0.29) and 'print-grouped'
+ * (Format 0.30): same geometry and capacity, different codeword-bit placement.
+ * Readers before 0.1.0-build.86 cannot read the grouped layouts.
+ */
+export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped';
 export type RasterPolicy = 'coverage' | 'binary' | 'hybrid';
 export type Preset = 'plain' | 'concept';
 /** Optical-safety policy carried by a style: strict refuses, adaptive repairs, override draws as given. */
@@ -17,7 +29,7 @@ export interface EncodeOptions {
   version?: number;
   /** Error correction level, default 'M'. */
   level?: Level;
-  /** Default 'standard'; 'print' is Profile 0.1. */
+  /** Default 'standard'; 'print' is Profile 0.1; the '-grouped' forms are opt-in (build 86+ readers). */
   layout?: Layout;
 }
 

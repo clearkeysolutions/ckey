@@ -28,6 +28,32 @@ namespace OpenCKey.Tests
         }
 
         [Fact]
+        public void EncodesUltraAndExtremeLevelsAndGroupedLayouts()
+        {
+            byte[] payload = Encoding.ASCII.GetBytes("abc");
+            var ultra = CKeySymbol.Encode(payload, version: 8, level: EccLevel.U, layout: Layout.StandardGrouped);
+            Assert.Equal(8, ultra.Version);
+            Assert.Equal(EccLevel.U, ultra.EccLevel);
+            Assert.Equal(Layout.StandardGrouped, ultra.Layout);
+            var extreme = CKeySymbol.Encode(payload, level: EccLevel.X, layout: Layout.PrintGrouped);
+            Assert.Equal(EccLevel.X, extreme.EccLevel);
+            Assert.Equal(Layout.PrintGrouped, extreme.Layout);
+            Assert.Equal(4, (int)EccLevel.U);
+            Assert.Equal(5, (int)EccLevel.X);
+            Assert.Equal(2, (int)Layout.StandardGrouped);
+            Assert.Equal(3, (int)Layout.PrintGrouped);
+
+            // Grouped layouts keep the capacity of the layout they are built on.
+            Assert.Equal(CKeySymbol.Capacity(8, EccLevel.U), CKeySymbol.Capacity(8, EccLevel.U, Layout.StandardGrouped));
+            Assert.Equal(CKeySymbol.Capacity(8, EccLevel.M, Layout.Print), CKeySymbol.Capacity(8, EccLevel.M, Layout.PrintGrouped));
+            // Version 1 carries nothing at X: capacity 0 and the core refuses to encode.
+            Assert.Equal(0, CKeySymbol.Capacity(1, EccLevel.X));
+            Assert.Throws<CKeyException>(() => CKeySymbol.Encode(payload, version: 1, level: EccLevel.X));
+            Assert.Throws<ArgumentOutOfRangeException>(() => CKeySymbol.Encode(payload, level: (EccLevel)6));
+            Assert.Throws<ArgumentOutOfRangeException>(() => CKeySymbol.Encode(payload, layout: (Layout)4));
+        }
+
+        [Fact]
         public void Capacities()
         {
             Assert.Equal(0, CKeySymbol.Capacity(0));

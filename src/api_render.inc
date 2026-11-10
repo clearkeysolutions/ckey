@@ -179,17 +179,17 @@ ckey_status ckey_style_preset_fill(ckey_style *st, ckey_style_preset preset) {
 }
 
 double ckey_scalable_logo_max_radius(uint32_t version, ckey_scalable_layout layout) {
-    return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT && static_cast<int>(layout) >= 0 && static_cast<int>(layout) < kScalableFamilies
+    return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT && static_cast<int>(layout) >= 0 && static_cast<int>(layout) < kScalableLayouts
         ? logo_max_radius(scalable_layout(static_cast<int>(version), static_cast<int>(layout))) : -1.0;
 }
 
 double ckey_scalable_logo_load(const ckey_scalable_symbol *s, double radius) {
-    if (!s || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || s->layout >= kScalableFamilies || !std::isfinite(radius) || radius < 0) return -1.0;
+    if (!s || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level >= kScalableLevels || s->layout >= kScalableLayouts || !std::isfinite(radius) || radius < 0) return -1.0;
     return logo_load(scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout)), static_cast<int>(s->ecc_level), radius);
 }
 
 ckey_status ckey_check_scalable_style(const ckey_scalable_symbol *s, const ckey_style *st, ckey_diagnostics *diag) {
-    if (!s || !st || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level > 3 || s->layout >= kScalableFamilies) {
+    if (!s || !st || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->ecc_level >= kScalableLevels || s->layout >= kScalableLayouts) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "style check needs a Profile 0 symbol and a style"); return CKEY_INVALID_ARGUMENT;
     }
     double contrast = 0, load = 0;
@@ -222,7 +222,7 @@ ckey_status ckey_render_scalable_svg(const ckey_scalable_symbol *s, uint32_t sca
 ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const ckey_style *style_in, uint32_t scale,
                                             char *out, size_t cap, size_t *required) {
     if (!s || !style_in || !required || scale == 0 || scale > CKEY_MAX_RENDER_SCALE || s->abi_version != CKEY_ABI_VERSION ||
-        s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->layout >= kScalableFamilies) return CKEY_INVALID_ARGUMENT;
+        s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT || s->layout >= kScalableLayouts) return CKEY_INVALID_ARGUMENT;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
     const ckey_style eff = effective_style(L, *s, *style_in);

@@ -1,4 +1,5 @@
 // Public C ABI: scan functions. Included after core_internal.inc.
+#include "scan_internal.inc"
 
 extern "C" {
 
@@ -362,6 +363,18 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
     if (!out_payload || !out_payload_len || !valid_image_args(gray, width, height, stride, quad_xy)) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT;
     }
+    const WorkScope work(kDecodeWorkBudget);
+    // The lens is measured from the bow of the frame's sides; if one is
+    // found, decoding is tried through it first and then without it.
+    LensModel measured{};
+    {
+        const LensScope none(LensModel{});
+        std::array<std::vector<FrameEdgePoint>, 4> sides;
+        if (frame_edge_points(gray, width, height, stride, quad_xy, 0.7, sides)) measured = estimate_lens(sides, width, height);
+    }
+    for (int lens_pass = 0; lens_pass < (measured.k1 != 0 ? 2 : 1); ++lens_pass) {
+    const LensScope lens_scope(lens_pass == 0 ? measured : LensModel{});
+    const double edge_blur = measure_edge_blur(gray, width, height, stride, quad_xy);
     // 1. The skeleton gates orientation. 2. Each version's keys are tested at
     //    that orientation; only agreeing versions are fully sampled, best
     //    first. 3. RS, the frame's version byte, and CRC-32C decide.
@@ -370,7 +383,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
     for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
         double h[8]; bool ok; orientation_homography(quad_xy, reverse, start, h, ok); if (!ok) continue;
         const KeyFit skeleton = scalable_skeleton_fit(gray, width, height, stride, h);
-        if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < 14.0) continue;
+        if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < kMinKeyContrast) continue;
         for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
             const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
             if (!keys.valid || keys.evidence < 0.85) continue;
@@ -379,123 +392,138 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         }
     }
     std::sort(attempts.begin(), attempts.end(), [](const Attempt &a, const Attempt &b) { return a.score > b.score; });
-    if (attempts.size() > 8) attempts.resize(8);
-    std::vector<uint8_t> candidate(65535);
+    if (attempts.size() > kMaxDecodeAttempts) attempts.resize(kMaxDecodeAttempts);
+    std::vector<uint8_t> candidate(65535), codeword, reliability;
+    SiteRead read; SiteSamples samples;
     for (const auto &attempt : attempts) {
-        const ScalableLayout &L = scalable_layout(attempt.version, attempt.family); const double *h = attempt.h; const double p = L.pitch;
-        // References: the Grid Key (printed) and two never-printed points.
-        std::vector<double> marks, empties;
-        for (int r = 0; r < 2; ++r) for (int c = 0; c < 2; ++c)
-            marks.push_back(gray_sample(gray, width, height, stride, h, (L.col0 + c + .5) * p, (L.row0 + r + .5) * p, 0.12 * p));
-        empties.push_back(gray_sample(gray, width, height, stride, h, (L.col0 - 1 + .5) * p, (L.row0 + .5) * p, 0.12 * p));
-        empties.push_back(gray_sample(gray, width, height, stride, h, 14.5, 1.0, 0.05));
-        if (std::any_of(marks.begin(), marks.end(), [](double x) { return x < 0; }) || std::any_of(empties.begin(), empties.end(), [](double x) { return x < 0; })) continue;
-        const double mark_mean = std::accumulate(marks.begin(), marks.end(), 0.0) / marks.size();
-        const double empty_mean = std::accumulate(empties.begin(), empties.end(), 0.0) / empties.size();
-        if (std::abs(mark_mean - empty_mean) < 14.0) continue;
-        const size_t bits = L.codeword_bytes * 8;
-        std::vector<double> level(bits); std::array<std::vector<double>, 3> classes; bool usable = true;
-        for (size_t i = 0; i < bits && usable; ++i) {
-            const auto &n = L.nodes[i];
-            const double v = n.kind == 0 ? gray_sample(gray, width, height, stride, h, n.x, n.y, 0.12 * p)
-                           : n.kind == 1 ? polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + L.dial_sample, n.slot, L.dial_slots, 0.04 * p)
-                                         : gray_sample(gray, width, height, stride, h, n.x, n.y, 0.25 * L.dot);
-            if (v < 0) { usable = false; break; }
-            level[i] = (v - empty_mean) / (mark_mean - empty_mean);
-            classes[n.kind].push_back(level[i]);
+        if (work_exhausted()) break;
+        const ScalableLayout &L = scalable_layout(attempt.version, attempt.family);
+        if (!scalable_sample_sites(L, gray, width, height, stride, attempt.h, samples)) continue;
+        samples.edge_blur = edge_blur;
+      bool hopeless = false;
+      for (const unsigned mode : kReadModes) {
+        if (work_exhausted()) break;
+        if (hopeless && !(mode & kReadLocalLevels)) continue;  // only a change of levels can rescue a reading this far off
+        if (!scalable_decide_sites(L, samples, mode, read)) continue;
+        // Both placements share the sites. Try the one whose raw header reads
+        // better first; the other gets the full soft decode only if its own
+        // header is plausible.
+        const ScalableLayout &G = scalable_layout(attempt.version, attempt.family + 2);
+        std::vector<uint8_t> cw[2], rel[2];
+        scalable_assemble(L, read, cw[0], rel[0]); scalable_assemble(G, read, cw[1], rel[1]);
+        const int match[2] = {scalable_header_matches(L, cw[0]), scalable_header_matches(G, cw[1])};
+        const int first = match[1] > match[0] ? 1 : 0;
+        // The header reads before any correction (the code is systematic).
+        // If almost none of it is right under either placement, this reading
+        // is far from the codeword: skip it rather than spend soft decoding
+        // on it. The remaining strategies get the same test.
+        if (std::max(match[0], match[1]) < 2) { if (mode == 0) hopeless = true; continue; }
+        for (int turn = 0; turn < 2; ++turn) {
+            const int which = turn == 0 ? first : 1 - first;
+            const ScalableLayout &layout = which ? G : L;
+            if (turn == 1 && match[which] < 2) continue;
+            const bool soft = match[which] >= 3;
+            size_t length = 0; ckey_diagnostics local{};
+            if (ckey_decode_scalable_soft(cw[which].data(), soft ? rel[which].data() : nullptr, cw[which].size(), static_cast<uint32_t>(attempt.version),
+                                          static_cast<ckey_scalable_layout>(attempt.family + 2 * which), candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
+            (void)layout;
+            if (out_capacity < length) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 output buffer is too small"); return CKEY_INSUFFICIENT_BUFFER; }
+            std::memcpy(out_payload, candidate.data(), length); *out_payload_len = length;
+            if (out_version) *out_version = static_cast<uint32_t>(attempt.version);
+            if (out_layout) *out_layout = static_cast<uint32_t>(attempt.family + 2 * which);
+            set_status(diag, CKEY_OK, local.message);
+            if (diag) { diag->corrected_symbols = local.corrected_symbols; diag->erasures_used = local.erasures_used; }
+            return CKEY_OK;
         }
-        if (!usable) continue;
-        const std::array<double, 3> cut = {class_threshold(classes[0]), class_threshold(classes[1]), class_threshold(classes[2])};
-        std::vector<uint8_t> printed(L.nodes.size());
-        for (size_t i = 0; i < L.nodes.size(); ++i) printed[i] = i < bits ? (level[i] > cut[L.nodes[i].kind]) : L.white[i];
-        refine_ring_context_rings(L.ring_grid, L.ring_slots, L.ring_stride, bits, L.white, level, cut[2], printed);
-        std::vector<uint8_t> cw(L.codeword_bytes, 0);
-        for (size_t i = 0; i < bits; ++i) if ((printed[i] != 0) != (L.white[i] != 0)) cw[i / 8] |= static_cast<uint8_t>(1u << (7 - i % 8));
-        size_t length = 0; ckey_diagnostics local{};
-        if (ckey_decode_scalable(cw.data(), cw.size(), static_cast<uint32_t>(attempt.version), static_cast<ckey_scalable_layout>(attempt.family),
-                                 candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
-        if (out_capacity < length) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 output buffer is too small"); return CKEY_INSUFFICIENT_BUFFER; }
-        std::memcpy(out_payload, candidate.data(), length); *out_payload_len = length;
-        if (out_version) *out_version = static_cast<uint32_t>(attempt.version);
-        if (out_layout) *out_layout = static_cast<uint32_t>(attempt.family);
-        set_status(diag, CKEY_OK, local.message); if (diag) diag->corrected_symbols = local.corrected_symbols;
-        return CKEY_OK;
+      }
     }
-    set_status(diag, CKEY_UNCORRECTABLE, attempts.empty() ? "no Profile 0 version's keys matched" : "no Profile 0 version passed Reed-Solomon and CRC");
+    }
+    set_status(diag, CKEY_UNCORRECTABLE, work_exhausted() ? "Profile 0 decode stopped at its work budget" : "no Profile 0 version passed its keys, Reed-Solomon and CRC");
     return CKEY_UNCORRECTABLE;
 }
 
-size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
-                               double *out_quads, size_t max_quads) {
-    if (!gray || !out_quads || max_quads == 0 || width < 16 || height < 16 || stride < width ||
-        height > std::numeric_limits<size_t>::max() / stride) return 0;
-    // About 960 x 540 samples at any capture size (step 2 at 1080p, 4 at 4K).
-    const size_t step = std::max<size_t>(2, 2 * std::max(width, height) / 1920);
-    const size_t sw = (width + step - 1) / step, sh = (height + step - 1) / step;
-    const size_t min_side = std::min(width, height);
-    struct Candidate { std::array<double, 8> quad; double rank; };
-    std::vector<Candidate> candidates;
-    std::vector<uint8_t> visited(sw * sh);
-    std::vector<size_t> queue;
+}  // extern "C"
+
+namespace {
+// Border search shared by ckey_find_borders_gray8 and the frame scan. `cut`
+// (may be null) reports a border-like outline that runs off the image.
+size_t find_borders(const uint8_t *gray, size_t width, size_t height, size_t stride, double *out_quads, size_t max_quads, bool *cut) {
+    if (cut) *cut = false;
+    const WorkScope work(kFindWorkBudget);
+    // About 960 x 540 area-averaged samples at any capture size (step 2 at 1080p, 4 at 4K).
+    const size_t step = std::max<size_t>(1, 2 * std::max(width, height) / 1920);
+    const ReducedImage r = reduce_area(gray, width, height, stride, step);
+    const size_t sw = r.w, sh = r.h, min_side = std::min(width, height);
+    std::vector<BorderCandidate> candidates;
+    std::vector<uint8_t> visited(sw * sh), mask(sw * sh), mask2(sw * sh);
+    std::vector<uint32_t> queue;
+    // Pass 1: one level for the whole frame (both polarities).
     for (int polarity = 0; polarity < 2; ++polarity) {
         const bool dark = polarity == 1;
-        const uint8_t t = frame_threshold(gray, width, height, stride, dark);
-        const auto is_mark = [&](size_t sx, size_t sy) {
-            const uint8_t v = gray[std::min(sy * step, height - 1) * stride + std::min(sx * step, width - 1)];
-            return dark ? v <= t : v >= t;
-        };
-        std::fill(visited.begin(), visited.end(), 0);
-        for (size_t sy = 0; sy < sh; ++sy) for (size_t sx = 0; sx < sw; ++sx) {
-            const size_t start = sy * sw + sx;
-            if (visited[start] || !is_mark(sx, sy)) continue;
-            visited[start] = 1; queue.assign(1, start);
-            size_t min_x = sx, max_x = sx, min_y = sy, max_y = sy;
-            for (size_t head = 0; head < queue.size(); ++head) {
-                const size_t x = queue[head] % sw, y = queue[head] / sw;
-                min_x = std::min(min_x, x); max_x = std::max(max_x, x); min_y = std::min(min_y, y); max_y = std::max(max_y, y);
-                for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
-                    if (!dx && !dy) continue;
-                    const long nx = static_cast<long>(x) + dx, ny = static_cast<long>(y) + dy;
-                    if (nx < 0 || ny < 0 || nx >= static_cast<long>(sw) || ny >= static_cast<long>(sh)) continue;
-                    const size_t n = static_cast<size_t>(ny) * sw + static_cast<size_t>(nx);
-                    if (!visited[n] && is_mark(static_cast<size_t>(nx), static_cast<size_t>(ny))) { visited[n] = 1; queue.push_back(n); }
-                }
-            }
-            const size_t box_w = (max_x - min_x + 1) * step, box_h = (max_y - min_y + 1) * step, side = std::min(box_w, box_h);
-            // The whole border must be in view: a component touching the frame
-            // edge is clipped (or is a display bezel). This replaces a fixed
-            // fraction-of-frame cap that rejected large rotated symbols.
-            if (queue.size() < 24 || side < 20 * step || min_x == 0 || min_y == 0 || max_x + 1 >= sw || max_y + 1 >= sh) continue;
-            const double aspect = static_cast<double>(box_w) / box_h;
-            // A rotated square's axis-aligned box stays square; a filled
-            // panel or blob fails the fill test.
-            const double fill = static_cast<double>(queue.size()) / static_cast<double>((max_x - min_x + 1) * (max_y - min_y + 1));
-            if (aspect <= 0.72 || aspect >= 1.38 || fill >= 0.38) continue;
-            std::vector<Point2> points; points.reserve(queue.size());
-            for (size_t index : queue) points.push_back({static_cast<double>((index % sw) * step), static_cast<double>((index / sw) * step)});
-            Candidate c{};
-            if (!fit_border_quad(points, static_cast<double>(step), c.quad)) continue;
-            c.rank = border_rank(std::abs(std::log(aspect)), fill, static_cast<double>(side) / min_side);
-            candidates.push_back(c);
-        }
+        const uint8_t t = reduced_threshold(r, dark);
+        for (size_t i = 0; i < mask.size(); ++i) mask[i] = dark ? r.px[i] <= t : r.px[i] >= t;
+        collect_border_candidates(mask, r, min_side, visited, queue, candidates, cut);
     }
-    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) { return a.rank > b.rank; });
+    // A clean, high-contrast symbol is already found by pass 1: if one of its
+    // candidates fits the CKey skeleton strongly at every key sample, the
+    // local passes (which cost several times as much) are skipped.
+    bool strong = false;
+    for (const auto &c : candidates) {
+        double q[8]; double cx = 0, cy = 0;
+        for (int i = 0; i < 4; ++i) { cx += c.quad[2 * i] / 4; cy += c.quad[2 * i + 1] / 4; }
+        for (int i = 0; i < 4; ++i) { q[2 * i] = cx + (c.quad[2 * i] - cx) * kBorderToField; q[2 * i + 1] = cy + (c.quad[2 * i + 1] - cy) * kBorderToField; }
+        if (valid_quad(q) && scalable_skeleton_score(gray, width, height, stride, q) >= 60.0) { strong = true; break; }
+    }
+    // Passes 2 and 3: local levels. Each pixel is compared with the mean of
+    // its own neighbourhood, so a symbol separates whatever the rest of the
+    // frame looks like (a bright screen in a dark room, a shaded page, a
+    // low-contrast print). Two window sizes cover thin and thick strokes.
+    for (const long radius : {std::max<long>(7, static_cast<long>(std::min(sw, sh)) / 36), std::max<long>(20, static_cast<long>(std::min(sw, sh)) / 9)}) {
+        if (strong) break;
+        for (size_t y = 0; y < sh; ++y) for (size_t x = 0; x < sw; ++x) {
+            double mean, sd; r.window(static_cast<long>(x) - radius, static_cast<long>(y) - radius, static_cast<long>(x) + radius + 1, static_cast<long>(y) + radius + 1, mean, sd);
+            const double margin = std::max(5.0, 0.45 * sd), v = r.px[y * sw + x];
+            mask[y * sw + x] = v < mean - margin; mask2[y * sw + x] = v > mean + margin;
+        }
+        collect_border_candidates(mask, r, min_side, visited, queue, candidates, cut);
+        collect_border_candidates(mask2, r, min_side, visited, queue, candidates, cut);
+    }
+    // The passes find the same border more than once: keep the first of each.
+    std::vector<BorderCandidate> unique;
+    for (const auto &c : candidates) {
+        const double tolerance = 0.04 * quad_mean_side(c.quad.data()) + 2.0;
+        bool duplicate = false;
+        for (const auto &u : unique) if (quad_corner_distance(c.quad.data(), u.quad.data()) < tolerance) { duplicate = true; break; }
+        if (!duplicate) unique.push_back(c);
+    }
+    candidates.swap(unique);
+    std::stable_sort(candidates.begin(), candidates.end(), [](const BorderCandidate &a, const BorderCandidate &b) { return a.rank > b.rank; });
     // Every profile shares one skeleton in normalized coordinates (frame
     // stroke, finder arcs, orientation split; Profile 3 is the same shape at
     // 4x). Re-rank the leading shape candidates by how well that skeleton
     // fits, so a symbol's own interior components (dense payload clusters,
     // rings) cannot crowd its true border out of the returned set.
-    if (candidates.size() > 24) candidates.resize(24);
+    if (candidates.size() > kMaxSkeletonRanked) candidates.resize(kMaxSkeletonRanked);
     for (auto &c : candidates) {
         double q[8]; double cx = 0, cy = 0;
         for (int i = 0; i < 4; ++i) { cx += c.quad[2 * i] / 4; cy += c.quad[2 * i + 1] / 4; }
         for (int i = 0; i < 4; ++i) { q[2 * i] = cx + (c.quad[2 * i] - cx) * kBorderToField; q[2 * i + 1] = cy + (c.quad[2 * i + 1] - cy) * kBorderToField; }
         c.rank = valid_quad(q) ? scalable_skeleton_score(gray, width, height, stride, q) + 1e-3 * c.rank : -1;
     }
-    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) { return a.rank > b.rank; });
+    std::stable_sort(candidates.begin(), candidates.end(), [](const BorderCandidate &a, const BorderCandidate &b) { return a.rank > b.rank; });
     const size_t count = std::min(max_quads, candidates.size());
     for (size_t i = 0; i < count; ++i) std::copy(candidates[i].quad.begin(), candidates[i].quad.end(), out_quads + 8 * i);
     return count;
+}
+}  // namespace
+
+extern "C" {
+
+size_t ckey_find_borders_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                               double *out_quads, size_t max_quads) {
+    if (!gray || !out_quads || max_quads == 0 || width < 16 || height < 16 || stride < width ||
+        height > std::numeric_limits<size_t>::max() / stride) return 0;
+    return find_borders(gray, width, height, stride, out_quads, max_quads, nullptr);
 }
 
 namespace {
@@ -510,17 +538,68 @@ double field_score(int field, const uint8_t *gray, size_t width, size_t height, 
 }
 }  // namespace
 
+}  // extern "C"
+namespace { inline bool &refine_legacy_start() { static thread_local bool flag = false; return flag; } }
+extern "C" {
+
 double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                               const double border_quad[8], ckey_field field, double out_quad[8]) {
     if (!out_quad || (field != CKEY_FIELD_SCALABLE && field != CKEY_FIELD_LOCATOR && field != CKEY_FIELD_TEXT && field != CKEY_FIELD_EXTENDED) ||
         !valid_image_args(gray, width, height, stride, border_quad)) return -1.0;
-    double cx = 0, cy = 0; for (int i = 0; i < 4; ++i) { cx += border_quad[2 * i] / 4; cy += border_quad[2 * i + 1] / 4; }
-    const double side = (std::hypot(border_quad[2] - border_quad[0], border_quad[3] - border_quad[1]) +
-                         std::hypot(border_quad[6] - border_quad[0], border_quad[7] - border_quad[1])) / 2;
+    const WorkScope work(kRefineWorkBudget);
+    const LensScope lens_scope(LensModel{});  // no lens until the frame fit measures one
+    // Start from the frame itself. Every profile has the same frame stroke in
+    // normalised coordinates, so its edges are located directly first; the
+    // searches below then begin within a pixel or so of the field instead of
+    // wherever the border search's coarse outline put it.
+    // The border search sometimes returns the stroke's inner outline (the
+    // moat's rim) or an outer rim instead of the stroke's outer edge, so
+    // three sizes are tried and the best-fitting frame wins.
+    double start_quad[8]; double start_scale = kBorderToField;
+    double alternative_score = -1, alternative_quad[8] = {};
+    bool start_has_skeleton = false;
+    {
+        double sx = 0, sy = 0; for (int i = 0; i < 4; ++i) { sx += border_quad[2 * i] / 4; sy += border_quad[2 * i + 1] / 4; }
+        double best_fit = 0; bool fitted = false;
+        for (const double grow : {1.0, 1.0 + 1.3 / 29.0, 1.0 - 1.3 / 29.0}) {
+            double field[8]; for (int i = 0; i < 4; ++i) { field[2 * i] = sx + (border_quad[2 * i] - sx) * kBorderToField * grow; field[2 * i + 1] = sy + (border_quad[2 * i + 1] - sy) * kBorderToField * grow; }
+            if (!valid_quad(field) || !fit_frame_edges(gray, width, height, stride, field, 0.6)) continue;
+            fit_frame_edges(gray, width, height, stride, field, 0.25);
+            const double fit = frame_edge_score(gray, width, height, stride, field, 1.5) * (0.25 + scalable_skeleton_score(gray, width, height, stride, field));
+            if (fit > best_fit) { best_fit = fit; std::copy(field, field + 8, start_quad); fitted = true; }
+            // The outline as found already fits a full skeleton: no need to try the other sizes.
+            if (work_exhausted() || (grow == 1.0 && scalable_skeleton_score(gray, width, height, stride, field) >= 60.0)) break;
+        }
+        if (fitted && !refine_legacy_start()) start_scale = 1.0; else { std::copy(border_quad, border_quad + 8, start_quad); start_scale = kBorderToField; }
+        // A clean frame with no CKey skeleton inside it (finder arms, moat,
+        // quiet margin) is some other rectangle: stop before the searches.
+        // Every profile shares that skeleton.
+        if (fitted && !refine_legacy_start()) {
+            for (int reverse = 0; reverse < 2 && !start_has_skeleton; ++reverse) for (int start = 0; start < 4 && !start_has_skeleton; ++start) {
+                double h[8]; bool ok; orientation_homography(start_quad, reverse, start, h, ok); if (!ok) continue;
+                const KeyFit fit = scalable_skeleton_fit(gray, width, height, stride, h);
+                start_has_skeleton = fit.valid && fit.evidence >= kDenseKeyGate && fit.contrast >= kMinKeyContrast;
+            }
+            if (!start_has_skeleton) { std::copy(start_quad, start_quad + 8, out_quad); return 0.0; }
+        }
+        // Profile 3 registers on a handful of fine key samples and is
+        // sensitive to where the search starts, so it is refined from both
+        // starts and the better key fit is kept.
+        if (fitted && !refine_legacy_start() && field == CKEY_FIELD_EXTENDED) {
+            double legacy[8]; refine_legacy_start() = true;
+            const double legacy_score = ckey_refine_quad_gray8(gray, width, height, stride, border_quad, field, legacy);
+            refine_legacy_start() = false;
+            alternative_score = legacy_score; std::copy(legacy, legacy + 8, alternative_quad);
+        }
+    }
+    const double *const origin = start_quad;
+    double cx = 0, cy = 0; for (int i = 0; i < 4; ++i) { cx += origin[2 * i] / 4; cy += origin[2 * i + 1] / 4; }
+    const double side = (std::hypot(origin[2] - origin[0], origin[3] - origin[1]) +
+                         std::hypot(origin[6] - origin[0], origin[7] - origin[1])) / 2;
     const auto similar = [&](double scale, double angle, double ox, double oy, double q[8]) {
         const double c = std::cos(angle), s = std::sin(angle);
         for (int i = 0; i < 4; ++i) {
-            const double dx = border_quad[2 * i] - cx, dy = border_quad[2 * i + 1] - cy;
+            const double dx = origin[2 * i] - cx, dy = origin[2 * i + 1] - cy;
             q[2 * i] = cx + ox + scale * (c * dx - s * dy); q[2 * i + 1] = cy + oy + scale * (s * dx + c * dy);
         }
     };
@@ -533,11 +612,13 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
         return field == CKEY_FIELD_SCALABLE ? frame_edge_score(gray, width, height, stride, q, std::clamp(step_px, 0.5, 6.0))
                                             : field_score(field, gray, width, height, stride, q);
     };
-    double scale = kBorderToField, angle = 0, ox = 0, oy = 0;
+    double scale = start_scale, angle = 0, ox = 0, oy = 0;
     double best[8]; similar(scale, angle, ox, oy, best);
     double scale_step = 0.03, angle_step = 2.0 * kTau / 360.0, offset_step = side * 0.02;
     double best_score = objective(best, offset_step);
-    for (int round = 0; round < 6; ++round) {
+    // Profile 0 with the frame already fitted needs no similarity or corner search.
+    const bool skip_search = field == CKEY_FIELD_SCALABLE && start_has_skeleton;
+    for (int round = 0; round < 6 && !skip_search; ++round) {
         best_score = objective(best, offset_step);  // re-evaluate at this step's resolution
         bool improved = true;
         while (improved) {
@@ -567,7 +648,7 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
     // Per-corner projective moves: repeat at each step while they improve
     // (bounded), down to sub-pixel steps, so keystone displacements of a few
     // percent of the side are fully recovered.
-    for (double corner_step = side * 0.02; corner_step > 0.3; corner_step /= 2) {
+    for (double corner_step = side * 0.02; corner_step > 0.3 && !skip_search; corner_step /= 2) {
         best_score = objective(best, corner_step);
         for (int pass = 0; pass < 8; ++pass) {
             bool improved = false;
@@ -581,6 +662,13 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
         }
     }
     if (field == CKEY_FIELD_SCALABLE) {
+        // Profile 0: place the frame by its edges directly (wide search, then narrow).
+        // The first pass also measures the lens from the sides' bow; the rest
+        // of this call then works through that lens.
+        if (fit_frame_edges(gray, width, height, stride, best, 0.7, true)) fit_frame_edges(gray, width, height, stride, best, 0.25);
+        best_score = objective(best, 1.0);
+    }
+    if (field == CKEY_FIELD_SCALABLE) {
         // Profile 0: the skeleton aligned the field; now pick the version whose
         // keys fit best and fine-tune against them. They sit at the version's
         // own module and slot pitch, so they pin the scale far more tightly
@@ -588,24 +676,35 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
         double version_score = 0; int family = 0;
         const int v = best_scalable_version(gray, width, height, stride, best, version_score, &family);
         if (v > 0) {
+            // The keys named the version; register on its module lattice,
+            // within half a module of the frame fit.
             const ScalableLayout &L = scalable_layout(v, family);
-            const double pitch_px = side / L.grid;
-            double score = scalable_version_score(L, gray, width, height, stride, best);
-            for (double step = pitch_px * 0.5; step > pitch_px * 0.02; step /= 2) {
-                bool improved = true;
-                while (improved) {
-                    improved = false;
-                    for (int corner = 0; corner < 4; ++corner) for (const auto &[dx, dy] : {std::pair{1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}}) {
-                        double q[8]; std::copy(best, best + 8, q);
-                        q[2 * corner] += dx * step; q[2 * corner + 1] += dy * step;
-                        const double candidate = scalable_version_score(L, gray, width, height, stride, q);
-                        if (candidate > score) { score = candidate; std::copy(q, q + 8, best); improved = true; }
+            // Fine-tune against the version's keys (they sit at its own module
+            // and slot pitch), each corner held within two modules of the
+            // frame fit and the passes capped, so this can neither wander
+            // nor run on.
+            {
+                const double pitch_px = side / L.grid; double anchor[8]; std::copy(best, best + 8, anchor);
+                double score = scalable_version_score(L, gray, width, height, stride, best);
+                for (double step = pitch_px * 0.5; step > pitch_px * 0.02; step /= 2) {
+                    for (int pass = 0; pass < 6; ++pass) {
+                        bool improved = false;
+                        for (int corner = 0; corner < 4; ++corner) for (const auto &[dx, dy] : {std::pair{1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}}) {
+                            double q[8]; std::copy(best, best + 8, q);
+                            q[2 * corner] += dx * step; q[2 * corner + 1] += dy * step;
+                            if (std::hypot(q[2 * corner] - anchor[2 * corner], q[2 * corner + 1] - anchor[2 * corner + 1]) > 2.0 * pitch_px) continue;
+                            const double candidate = scalable_version_score(L, gray, width, height, stride, q);
+                            if (candidate > score) { score = candidate; std::copy(q, q + 8, best); improved = true; }
+                        }
+                        if (!improved) break;
                     }
                 }
             }
-            best_score = score;
+            refine_on_lattice(L, gray, width, height, stride, best, 0.6);
+            best_score = scalable_version_score(L, gray, width, height, stride, best);
         }
     }
+    if (alternative_score > best_score) { std::copy(alternative_quad, alternative_quad + 8, out_quad); return alternative_score; }
     std::copy(best, best + 8, out_quad);
     return best_score;
 }

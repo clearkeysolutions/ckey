@@ -13,6 +13,14 @@ public enum CKeyErrorCorrection: Int, Sendable, CaseIterable {
     case q = 2
     /// About 30%.
     case h = 3
+    /// Ultra: about 40% (80% as erasures). Carries about half of `.h`'s
+    /// payload. Readers before 0.1.0-build.86 reject it.
+    case u = 4
+    /// Extreme: about 47.5% (95% as erasures). Carries about 5% of `.l`'s
+    /// payload, and nothing at all in the smallest versions
+    /// (`CKeySymbol.capacity` returns 0). Readers before 0.1.0-build.86
+    /// reject it.
+    case x = 5
 
     var c: ckey_ecc_level { ckey_ecc_level(rawValue: UInt32(rawValue)) }
 }
@@ -71,8 +79,10 @@ public final class CKeySymbol: @unchecked Sendable {
     /// Encodes UTF-8 text.
     /// - Parameters:
     ///   - version: 1...31, or 0 (default) for the smallest version that fits.
-    ///   - level: correction level (default `.m`).
-    ///   - layout: `.standard` (default) or `.print` (P0.1, for small prints).
+    ///   - level: correction level (default `.m`); `.u` and `.x` trade most
+    ///     of the capacity for parity.
+    ///   - layout: `.standard` (default), `.print` (P0.1, for small prints), or
+    ///     their byte-grouped forms `.standardGrouped` and `.printGrouped`.
     /// - Throws: `CKeyError` when the payload does not fit or an argument is invalid.
     public static func encode(_ text: String, version: Int = 0, level: CKeyErrorCorrection = .m,
                               layout: CKeyLayout = .standard) throws -> CKeySymbol {

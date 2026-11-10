@@ -54,7 +54,7 @@ static std::string base64(const std::string &in) {
 }
 
 // ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg>
-//   [--version 1-31] [--level L|M|Q|H] [--preset plain|concept]
+//   [--version 1-31] [--level L|M|Q|H|U|X] [--preset plain|concept]
 //   [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]
 //   [--logo <png|jpg|svg file>] [--logo-radius <units>]
 static int encode_scalable(int argc, char **argv) {
@@ -73,7 +73,8 @@ static int encode_scalable(int argc, char **argv) {
             version = static_cast<uint32_t>(v);
         } else if (flag == "--level") {
             if (arg == "L") level = CKEY_ECC_L; else if (arg == "M") level = CKEY_ECC_M; else if (arg == "Q") level = CKEY_ECC_Q; else if (arg == "H") level = CKEY_ECC_H;
-            else { std::cerr << "--level must be L, M, Q, or H\n"; return 2; }
+            else if (arg == "U") level = CKEY_ECC_U; else if (arg == "X") level = CKEY_ECC_X;
+            else { std::cerr << "--level must be L, M, Q, H, U, or X\n"; return 2; }
         } else if (flag == "--png") { png = arg;
         } else if (flag == "--raster") { raster_out = arg;
         } else if (flag == "--pdf") { pdf_out = arg;
@@ -92,7 +93,8 @@ static int encode_scalable(int argc, char **argv) {
             (flag == "--dpi" ? dpi : size_in) = v;
         } else if (flag == "--layout") {
             if (arg == "standard") layout = CKEY_LAYOUT_STANDARD; else if (arg == "print") layout = CKEY_LAYOUT_PRINT;
-            else { std::cerr << "--layout must be standard or print\n"; return 2; }
+            else if (arg == "standard-grouped") layout = CKEY_LAYOUT_STANDARD_GROUPED; else if (arg == "print-grouped") layout = CKEY_LAYOUT_PRINT_GROUPED;
+            else { std::cerr << "--layout must be standard, print, standard-grouped, or print-grouped\n"; return 2; }
         } else if (flag == "--preset") {
             if (arg == "concept") ckey_style_preset_fill(&style, CKEY_PRESET_CONCEPT);
             else if (arg == "plain") ckey_style_preset_fill(&style, CKEY_PRESET_PLAIN);
@@ -121,7 +123,7 @@ static int encode_scalable(int argc, char **argv) {
     }
     if (!logo_href.empty()) style.logo_href = logo_href.c_str();
     if ((argc % 2) != 0 || mode.empty() || (output.empty() && png.empty() && raster_out.empty() && pdf_out.empty())) {
-        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H] [--layout standard|print]\n"
+        std::cerr << "usage: ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H|U|X] [--layout standard|print|standard-grouped|print-grouped]\n"
                      "         [--preset plain|concept] [--modules rounded|square|circle|diamond] [--rings joined|dots] [--rays round|flat]\n"
                      "         [--logo <file>] [--logo-radius <units>]\n"
                      "         [--raster <file.png> [--size-px N] [--policy coverage|binary|hybrid] [--transparent yes|no]] [--pdf <file.pdf>]\n"
@@ -170,8 +172,12 @@ static int encode_scalable(int argc, char **argv) {
         if (!printout::draw_symbol(page, *symbol, &style, 0, 0, page.width, dpi) || !printout::write_png(png, page, dpi)) { std::cerr << "could not write " << png << '\n'; return 1; }
         std::cout << "print PNG: " << png << " (" << size_in << " in at " << dpi << " dpi, 1-bit, black on paper)\n";
     }
-    std::cout << diag.message << "; profile=0" << (layout == CKEY_LAYOUT_PRINT ? ".1" : "") << "; format=0."
-              << (layout == CKEY_LAYOUT_PRINT ? CKEY_SCALABLE_PRINT_FORMAT_VERSION : CKEY_SCALABLE_FORMAT_VERSION) << ".0; version=" << symbol->version
+    const bool print_geometry = layout == CKEY_LAYOUT_PRINT || layout == CKEY_LAYOUT_PRINT_GROUPED;
+    const unsigned format = layout == CKEY_LAYOUT_PRINT_GROUPED ? CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION
+                          : layout == CKEY_LAYOUT_STANDARD_GROUPED ? CKEY_SCALABLE_GROUPED_FORMAT_VERSION
+                          : layout == CKEY_LAYOUT_PRINT ? CKEY_SCALABLE_PRINT_FORMAT_VERSION : CKEY_SCALABLE_FORMAT_VERSION;
+    std::cout << diag.message << "; profile=0" << (print_geometry ? ".1" : "") << "; format=0."
+              << format << ".0; version=" << symbol->version
               << "; payload-bytes=" << payload.size() << "; capacity=" << ckey_scalable_capacity(symbol->version, level, layout) << "; svg=" << output << '\n';
     return 0;
 }
@@ -327,7 +333,7 @@ int main(int argc, char **argv) {
     const int outIndex = tierOption ? 6 : 4;
     if ((argc != 6 && !tierOption) || (std::string(argv[modeIndex]) != "--hex" && std::string(argv[modeIndex]) != "--utf8") || std::string(argv[outIndex]) != "--out") {
         std::cerr << "usage:\n"
-                  << "  ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H]\n"
+                  << "  ckey encode-scalable (--utf8 <text> | --hex <hex>) --out <file.svg> [--version 1-31] [--level L|M|Q|H|U|X]\n"
                   << "  ckey encode --hex <32-hex-chars> --out <locator.svg>\n"
                   << "  ckey encode-text --utf8 <up-to-200-byte-text> --out <text.svg>\n"
                   << "  ckey encode-text --hex <up-to-400-hex-chars> --out <text.svg>\n"

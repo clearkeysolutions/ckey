@@ -1,0 +1,1198 @@
+// Scan-library internals: full-frame border search. Included by api_scan.inc
+// after core_internal.inc. Everything here has internal linkage.
+
+namespace {
+
+// ---- Area-averaged working image -------------------------------------------
+// The border search works on a box-filtered reduction of the frame (about
+// 960 x 540 at any capture size). Averaging each step x step block, instead of
+// reading one pixel per block, is what keeps a display's pixel grid from
+// aliasing into moire bands; it also halves sensor noise per step.
+struct ReducedImage {
+    size_t w = 0, h = 0, step = 1;
+    std::vector<uint8_t> px;
+    std::vector<uint32_t> sum;  // (w + 1) x (h + 1) integral image
+    std::vector<uint64_t> sq;   // integral of squares
+    // Mean and standard deviation of the window [x0, x1) x [y0, y1), clipped.
+    void window(long x0, long y0, long x1, long y1, double &mean, double &sd) const {
+        x0 = std::max(x0, 0L); y0 = std::max(y0, 0L);
+        x1 = std::min(x1, static_cast<long>(w)); y1 = std::min(y1, static_cast<long>(h));
+        const size_t W = w + 1;
+        const size_t a = static_cast<size_t>(y0) * W + static_cast<size_t>(x0), b = static_cast<size_t>(y0) * W + static_cast<size_t>(x1);
+        const size_t c = static_cast<size_t>(y1) * W + static_cast<size_t>(x0), d = static_cast<size_t>(y1) * W + static_cast<size_t>(x1);
+        const double n = static_cast<double>((x1 - x0) * (y1 - y0));
+        const double s = static_cast<double>(sum[d] - sum[b] - sum[c] + sum[a]);
+        const double q = static_cast<double>(sq[d] - sq[b] - sq[c] + sq[a]);
+        mean = s / n;
+        sd = std::sqrt(std::max(0.0, q / n - mean * mean));
+    }
+};
+
+ReducedImage reduce_area(const uint8_t *gray, size_t width, size_t height, size_t stride, size_t step) {
+    ReducedImage r;
+    r.step = step; r.w = (width + step - 1) / step; r.h = (height + step - 1) / step;
+    r.px.resize(r.w * r.h);
+    std::vector<uint32_t> row(r.w);
+    for (size_t sy = 0; sy < r.h; ++sy) {
+        std::fill(row.begin(), row.end(), 0u);
+        const size_t y0 = sy * step, y1 = std::min(y0 + step, height);
+        for (size_t y = y0; y < y1; ++y) {
+            const uint8_t *line = gray + y * stride;
+            for (size_t sx = 0; sx < r.w; ++sx) {
+                const size_t x0 = sx * step, x1 = std::min(x0 + step, width);
+                uint32_t s = 0; for (size_t x = x0; x < x1; ++x) s += line[x];
+                row[sx] += s;
+            }
+        }
+        for (size_t sx = 0; sx < r.w; ++sx) {
+            const size_t n = (y1 - y0) * (std::min(sx * step + step, width) - sx * step);
+            r.px[sy * r.w + sx] = static_cast<uint8_t>((row[sx] + n / 2) / n);
+        }
+    }
+    r.sum.assign((r.w + 1) * (r.h + 1), 0); r.sq.assign((r.w + 1) * (r.h + 1), 0);
+    for (size_t y = 0; y < r.h; ++y) {
+        uint32_t s = 0; uint64_t q = 0;
+        for (size_t x = 0; x < r.w; ++x) {
+            const uint32_t v = r.px[y * r.w + x]; s += v; q += v * v;
+            r.sum[(y + 1) * (r.w + 1) + x + 1] = r.sum[y * (r.w + 1) + x + 1] + s;
+            r.sq[(y + 1) * (r.w + 1) + x + 1] = r.sq[y * (r.w + 1) + x + 1] + q;
+        }
+    }
+    return r;
+}
+
+// The former whole-frame rule (10th/90th percentile), on the reduced image.
+// Kept as one of several passes: it is the cheapest and still the best when a
+// symbol fills the frame.
+uint8_t reduced_threshold(const ReducedImage &r, bool dark_marks) {
+    std::array<size_t, 256> histogram{}; size_t samples = 0;
+    for (size_t y = 0; y < r.h; y += 4) for (size_t x = 0; x < r.w; x += 4) { ++histogram[r.px[y * r.w + x]]; ++samples; }
+    if (!samples) return dark_marks ? 92 : 164;
+    const auto percentile = [&](double fraction) {
+        const size_t target = static_cast<size_t>(static_cast<double>(samples - 1) * fraction); size_t total = 0;
+        for (int v = 0; v < 256; ++v) { total += histogram[v]; if (total > target) return v; }
+        return 255;
+    };
+    const int low = percentile(0.10), high = percentile(0.90);
+    if (high - low < 32) return dark_marks ? 92 : 164;
+    const double contrast = high - low;
+    const double value = dark_marks ? low + contrast * 0.32 : high - contrast * 0.32;
+    return static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(value)), 0, 255));
+}
+
+// ---- Border quadrilateral from a component ---------------------------------
+
+bool line_intersection(const Point2 &a0, const Point2 &a1, const Point2 &b0, const Point2 &b1, Point2 &out) {
+    const double dax = a1.x - a0.x, day = a1.y - a0.y, dbx = b1.x - b0.x, dby = b1.y - b0.y;
+    const double det = dax * dby - day * dbx;
+    if (std::abs(det) < 1e-9) return false;
+    const double t = ((b0.x - a0.x) * dby - (b0.y - a0.y) * dbx) / det;
+    out = {a0.x + t * dax, a0.y + t * day};
+    return std::isfinite(out.x) && std::isfinite(out.y);
+}
+
+// Reduces a convex hull to its four dominant sides: repeatedly drop the edge
+// whose removal (extending its two neighbours until they meet) adds the least
+// area. The short edges of a rounded corner go first, so the result is the
+// enclosing quadrilateral of the stroke's outer edge. Unlike a minimum-area
+// rectangle, it follows a keystoned (perspective) outline at any tilt.
+bool hull_to_quad(std::vector<Point2> hull, std::array<Point2, 4> &quad) {
+    if (hull.size() < 4) return false;
+    if (hull.size() > 120) {
+        // Keep the hull's extreme vertex in each of 120 directions: the same
+        // outline to within a fraction of a pixel, at a fixed cost.
+        std::vector<size_t> keep;
+        for (int k = 0; k < 120; ++k) {
+            const double a = kTau * k / 120.0, dx = std::cos(a), dy = std::sin(a);
+            size_t best = 0; double best_v = -1e300;
+            for (size_t i = 0; i < hull.size(); ++i) { const double v = hull[i].x * dx + hull[i].y * dy; if (v > best_v) { best_v = v; best = i; } }
+            keep.push_back(best);
+        }
+        std::sort(keep.begin(), keep.end()); keep.erase(std::unique(keep.begin(), keep.end()), keep.end());
+        std::vector<Point2> reduced; for (size_t i : keep) reduced.push_back(hull[i]);
+        hull.swap(reduced);
+        if (hull.size() < 4) return false;
+    }
+    while (hull.size() > 4) {
+        const size_t n = hull.size();
+        double best = std::numeric_limits<double>::infinity(); size_t best_i = n; Point2 best_p{};
+        for (size_t i = 0; i < n; ++i) {
+            // Edge i runs hull[i] -> hull[i + 1]; neighbours are (i - 1 -> i) and (i + 1 -> i + 2).
+            const Point2 &p0 = hull[(i + n - 1) % n], &p1 = hull[i], &p2 = hull[(i + 1) % n], &p3 = hull[(i + 2) % n];
+            Point2 x{};
+            if (!line_intersection(p0, p1, p2, p3, x)) continue;
+            // The meeting point must lie beyond the edge (outside the hull), ahead of p1 along p0 -> p1.
+            if ((x.x - p1.x) * (p1.x - p0.x) + (x.y - p1.y) * (p1.y - p0.y) < 0) continue;
+            if ((x.x - p2.x) * (p2.x - p3.x) + (x.y - p2.y) * (p2.y - p3.y) < 0) continue;
+            const double area = std::abs(cross(p1, x, p2)) / 2;
+            if (area < best) { best = area; best_i = i; best_p = x; }
+        }
+        if (best_i == n) return false;
+        const size_t j = (best_i + 1) % n;
+        hull[best_i] = best_p;
+        hull.erase(hull.begin() + static_cast<std::ptrdiff_t>(j));
+    }
+    for (size_t i = 0; i < 4; ++i) quad[i] = hull[i];
+    return true;
+}
+
+// Fits the outer edge of a border component as a perspective quadrilateral.
+// 1. hull_to_quad gives four side directions at any tilt. 2. Each side is
+// re-fitted as a least-squares line through the component's points that lie
+// in a band along the middle of that side (rounded corners excluded), then
+// pushed out to the stroke's outer edge.
+bool fit_border_quad_perspective(const std::vector<Point2> &points, const std::vector<Point2> &hull, double step, std::array<double, 8> &out) {
+    std::array<Point2, 4> q{};
+    if (!hull_to_quad(hull, q)) return false;
+    double area = 0; for (int i = 0; i < 4; ++i) area += q[i].x * q[(i + 1) % 4].y - q[(i + 1) % 4].x * q[i].y;
+    if (std::abs(area) < 1.0) return false;
+    Point2 centre{0, 0}; for (const auto &p : q) { centre.x += p.x / 4; centre.y += p.y / 4; }
+    struct Line { double nx, ny, d; };
+    std::array<Line, 4> lines{};
+    for (int s = 0; s < 4; ++s) {
+        const Point2 &a = q[s], &b = q[(s + 1) % 4];
+        const double len = std::hypot(b.x - a.x, b.y - a.y);
+        if (len < 4 * step) return false;
+        const double tx = (b.x - a.x) / len, ty = (b.y - a.y) / len;
+        double nx = ty, ny = -tx;
+        if ((centre.x - a.x) * nx + (centre.y - a.y) * ny > 0) { nx = -nx; ny = -ny; }  // outward
+        const double depth = std::abs((centre.x - a.x) * nx + (centre.y - a.y) * ny);  // side to centre
+        const double band = std::max(3.0 * step, 0.10 * depth);
+        std::vector<Point2> side;
+        for (const auto &p : points) {
+            const double along = (p.x - a.x) * tx + (p.y - a.y) * ty, across = (p.x - a.x) * nx + (p.y - a.y) * ny;
+            if (across > -band && along > 0.19 * len && along < 0.81 * len) side.push_back(p);
+        }
+        Line line{nx, ny, a.x * nx + a.y * ny};
+        if (side.size() >= 8) {
+            double mx = 0, my = 0; for (const auto &p : side) { mx += p.x; my += p.y; } mx /= side.size(); my /= side.size();
+            double sxx = 0, syy = 0, sxy = 0;
+            for (const auto &p : side) { sxx += (p.x - mx) * (p.x - mx); syy += (p.y - my) * (p.y - my); sxy += (p.x - mx) * (p.y - my); }
+            const double theta = 0.5 * std::atan2(2 * sxy, sxx - syy);
+            double lx = -std::sin(theta), ly = std::cos(theta);
+            if (lx * nx + ly * ny < 0) { lx = -lx; ly = -ly; }
+            if (lx * nx + ly * ny > 0.966) { line.nx = lx; line.ny = ly; }  // within 15 degrees of the hull side
+            std::vector<double> outward; outward.reserve(side.size());
+            for (const auto &p : side) outward.push_back(p.x * line.nx + p.y * line.ny);
+            std::sort(outward.begin(), outward.end());
+            line.d = outward[static_cast<size_t>(0.95 * (outward.size() - 1))] + 0.5 * step;
+        } else {
+            line.d += 0.5 * step;
+        }
+        lines[s] = line;
+    }
+    for (int c = 0; c < 4; ++c) {
+        const Line &a = lines[(c + 3) % 4], &b = lines[c];
+        const double det = a.nx * b.ny - a.ny * b.nx;
+        if (std::abs(det) < 1e-9) return false;
+        out[2 * c] = (a.d * b.ny - a.ny * b.d) / det;
+        out[2 * c + 1] = (a.nx * b.d - a.d * b.nx) / det;
+    }
+    return std::all_of(out.begin(), out.end(), [](double v) { return std::isfinite(v); }) && valid_quad(out.data());
+}
+
+struct BorderCandidate { std::array<double, 8> quad; double rank; };
+double quad_corner_distance(const double a[8], const double b[8]);
+
+// Hard limits on the border search, so no frame can make it run on (a noisy
+// frame can hold tens of thousands of components).
+constexpr size_t kMaxBorderFits = 160;        // quadrilateral fits per mask
+constexpr size_t kMaxSkeletonRanked = 32;     // candidates scored against the skeleton
+
+// Connected components of a mark mask that look like a border outline. The
+// mask is consumed: it is copied into a frame padded by one empty pixel so the
+// fill needs no bounds checks, and each pixel is cleared as it is queued.
+void collect_border_candidates(const std::vector<uint8_t> &mask, const ReducedImage &r, size_t min_side_px,
+                               std::vector<uint8_t> &visited, std::vector<uint32_t> &queue, std::vector<BorderCandidate> &out, bool *cut) {
+    const size_t sw = r.w, sh = r.h, step = r.step, pw = sw + 2;
+    visited.assign(pw * (sh + 2), 0);  // padded working copy of the mask
+    for (size_t y = 0; y < sh; ++y) std::copy_n(mask.begin() + static_cast<std::ptrdiff_t>(y * sw), sw, visited.begin() + static_cast<std::ptrdiff_t>((y + 1) * pw + 1));
+    const std::ptrdiff_t around[8] = {-static_cast<std::ptrdiff_t>(pw) - 1, -static_cast<std::ptrdiff_t>(pw), -static_cast<std::ptrdiff_t>(pw) + 1, -1, 1,
+                                      static_cast<std::ptrdiff_t>(pw) - 1, static_cast<std::ptrdiff_t>(pw), static_cast<std::ptrdiff_t>(pw) + 1};
+    size_t fits = 0;
+    for (size_t sy = 0; sy < sh; ++sy) for (size_t sx = 0; sx < sw; ++sx) {
+        const size_t start = (sy + 1) * pw + sx + 1;
+        if (!visited[start]) continue;
+        visited[start] = 0; queue.assign(1, static_cast<uint32_t>(start));
+        size_t min_x = sx, max_x = sx, min_y = sy, max_y = sy;
+        for (size_t head = 0; head < queue.size(); ++head) {
+            const size_t at = queue[head], x = at % pw - 1, y = at / pw - 1;
+            min_x = std::min(min_x, x); max_x = std::max(max_x, x); max_y = std::max(max_y, y);
+            for (const std::ptrdiff_t offset : around) {
+                const size_t n = static_cast<size_t>(static_cast<std::ptrdiff_t>(at) + offset);
+                if (visited[n]) { visited[n] = 0; queue.push_back(static_cast<uint32_t>(n)); }
+            }
+        }
+        // Back to unpadded indices for the fit.
+        for (auto &index : queue) index = static_cast<uint32_t>((index / pw - 1) * sw + (index % pw - 1));
+        const size_t bw = max_x - min_x + 1, bh = max_y - min_y + 1, side = std::min(bw, bh) * step;
+        // The whole border must be in view: a component touching the frame
+        // edge is clipped (or is a display bezel).
+        if (queue.size() < 24 || side < 20 * step) continue;
+        if (min_x == 0 || min_y == 0 || max_x + 1 >= sw || max_y + 1 >= sh) {
+            // A large, thin, open outline against the edge looks like a
+            // symbol that is partly out of frame: tell the caller to back off.
+            if (cut && side * 10 >= min_side_px && static_cast<double>(queue.size()) < 0.2 * static_cast<double>(bw * bh) &&
+                !(min_x == 0 && min_y == 0 && max_x + 1 >= sw && max_y + 1 >= sh)) *cut = true;
+            continue;
+        }
+        const double aspect = static_cast<double>(bw) / bh;
+        // A rotated square's box stays square, and a tilted one narrows to
+        // the cosine of the tilt; a filled panel or blob fails the fill test.
+        const double fill = static_cast<double>(queue.size()) / static_cast<double>(bw * bh);
+        // An outline has at least about one pixel per unit of its box's perimeter.
+        if (aspect <= 0.30 || aspect >= 3.3 || fill >= 0.38) continue;
+        if (fits >= kMaxBorderFits) return;
+        ++fits;
+        std::vector<Point2> points; points.reserve(queue.size());
+        for (uint32_t index : queue) points.push_back({static_cast<double>((index % sw) * step) + 0.5 * (step - 1), static_cast<double>((index / sw) * step) + 0.5 * (step - 1)});
+        // Two fits of the same outline: the perspective fit follows any tilt;
+        // the rectangle-based fit is steadier on near-frontal symbols. Both
+        // go forward (near-duplicates are merged later).
+        BorderCandidate c{}, alternative{}; bool has_alternative = false;
+        if (fit_border_quad_perspective(points, convex_hull(points), static_cast<double>(step), c.quad)) has_alternative = fit_border_quad(points, static_cast<double>(step), alternative.quad) && valid_quad(alternative.quad.data());
+        else if (!fit_border_quad(points, static_cast<double>(step), c.quad)) continue;
+        // Shape rank from the fitted quadrilateral's own side lengths, so a
+        // tilted border is not penalised for its bounding box.
+        double sides[4]; for (int i = 0; i < 4; ++i) sides[i] = std::hypot(c.quad[2 * ((i + 1) % 4)] - c.quad[2 * i], c.quad[2 * ((i + 1) % 4) + 1] - c.quad[2 * i + 1]);
+        const double longest = *std::max_element(sides, sides + 4), shortest = *std::min_element(sides, sides + 4);
+        if (shortest < 16.0 || longest > 6.0 * shortest) continue;
+        const double quad_aspect = std::min(std::abs(std::log(aspect)), std::abs(std::log((sides[0] + sides[2]) / (sides[1] + sides[3]))));
+        c.rank = border_rank(quad_aspect, fill, static_cast<double>(side) / static_cast<double>(min_side_px));
+        out.push_back(c);
+        if (has_alternative) {
+            // When the two fits nearly agree the view is close to frontal:
+            // the rectangle-based fit goes first there.
+            const double apart = quad_corner_distance(c.quad.data(), alternative.quad.data());
+            if (apart <= 0.015 * longest) { out.back().quad = alternative.quad; }
+            else { alternative.rank = c.rank - 1e-6; out.push_back(alternative); }
+        }
+    }
+}
+
+double quad_corner_distance(const double a[8], const double b[8]) {
+    double best = std::numeric_limits<double>::infinity();
+    for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
+        double worst = 0;
+        for (int i = 0; i < 4; ++i) { const int j = (start + (reverse ? -i : i) + 8) % 4; worst = std::max(worst, std::hypot(a[2 * i] - b[2 * j], a[2 * i + 1] - b[2 * j + 1])); }
+        best = std::min(best, worst);
+    }
+    return best;
+}
+
+double quad_mean_side(const double q[8]) {
+    double s = 0; for (int i = 0; i < 4; ++i) s += std::hypot(q[2 * ((i + 1) % 4)] - q[2 * i], q[2 * ((i + 1) % 4) + 1] - q[2 * i + 1]);
+    return s / 4;
+}
+
+}  // namespace
+
+namespace {
+
+// ---- Profile 0 site reading --------------------------------------------------
+// Neighbour tables for intersymbol-interference cancellation. For each site of
+// a family's scattered layout: up to 8 neighbours (-1 none, -2 a fixed printed
+// mark). Cartesian slots 0,1 east/west, 2,3 north/south, 4,5 and 6,7 the two
+// diagonals; ring and dial slots 0,1 the previous and next slot.
+struct SiteNeighbours { std::vector<std::array<int32_t, 8>> of; };
+
+const SiteNeighbours &site_neighbours(int v, int family) {
+    static std::array<std::once_flag, kScalableVersions * kScalableFamilies> once;
+    static std::array<std::unique_ptr<SiteNeighbours>, kScalableVersions * kScalableFamilies> cache;
+    const size_t slot = static_cast<size_t>(family * kScalableVersions + v - 1);
+    std::call_once(once[slot], [&] {
+        const ScalableLayout &L = scalable_layout(v, family);
+        auto n = std::make_unique<SiteNeighbours>();
+        std::array<int32_t, 8> none; none.fill(-1);
+        n->of.assign(L.nodes.size(), none);
+        const int G = L.grid;
+        std::vector<int32_t> lattice(static_cast<size_t>(G) * G, -1), dial(static_cast<size_t>(L.dial_slots), -1);
+        for (size_t i = 0; i < L.nodes.size(); ++i) {
+            const auto &node = L.nodes[i];
+            if (node.kind == 0) lattice[static_cast<size_t>((node.id >> 12) & 0xfffu) * G + (node.id & 0xfffu)] = static_cast<int32_t>(i);
+            else if (node.kind == 1) dial[static_cast<size_t>(node.slot)] = static_cast<int32_t>(i);
+        }
+        for (int s = 0; s < L.dial_slots; ++s) if (L.reserved_ray(s)) dial[static_cast<size_t>(s)] = -2;  // Ray Keys reach the sample radius
+        constexpr int offsets[8][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}, {-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
+        for (size_t i = 0; i < L.nodes.size(); ++i) {
+            const auto &node = L.nodes[i];
+            if (node.kind == 0) {
+                const int row = static_cast<int>((node.id >> 12) & 0xfffu), col = static_cast<int>(node.id & 0xfffu);
+                for (int k = 0; k < 8; ++k) {
+                    const int r = row + offsets[k][0], c = col + offsets[k][1];
+                    if (r >= 0 && c >= 0 && r < G && c < G) n->of[i][static_cast<size_t>(k)] = lattice[static_cast<size_t>(r) * G + c];
+                }
+            } else if (node.kind == 1) {
+                n->of[i][0] = dial[static_cast<size_t>((node.slot + L.dial_slots - 1) % L.dial_slots)];
+                n->of[i][1] = dial[static_cast<size_t>((node.slot + 1) % L.dial_slots)];
+            } else {
+                const int S = L.ring_slots[static_cast<size_t>(node.ring)];
+                n->of[i][0] = L.ring_grid[static_cast<size_t>(node.ring) * L.ring_stride + static_cast<size_t>((node.slot + S - 1) % S)];
+                n->of[i][1] = L.ring_grid[static_cast<size_t>(node.ring) * L.ring_stride + static_cast<size_t>((node.slot + 1) % S)];
+            }
+        }
+        cache[slot] = std::move(n);
+    });
+    return *cache[slot];
+}
+
+// Solves the d x d system a * x = b in place (d <= 6); false if singular.
+bool solve_small(double a[6][6], double b[6], int d) {
+    for (int col = 0; col < d; ++col) {
+        int pivot = col;
+        for (int row = col + 1; row < d; ++row) if (std::abs(a[row][col]) > std::abs(a[pivot][col])) pivot = row;
+        if (std::abs(a[pivot][col]) < 1e-9) return false;
+        if (pivot != col) { for (int j = 0; j < d; ++j) std::swap(a[pivot][j], a[col][j]); std::swap(b[pivot], b[col]); }
+        for (int row = 0; row < d; ++row) if (row != col) {
+            const double f = a[row][col] / a[col][col];
+            for (int j = col; j < d; ++j) a[row][j] -= f * a[col][j];
+            b[row] -= f * b[col];
+        }
+    }
+    for (int i = 0; i < d; ++i) b[i] /= a[i][i];
+    return true;
+}
+
+// One reading of every site of a family's scattered layout.
+struct SiteRead {
+    std::vector<uint8_t> printed;  // estimated printed value per site
+    std::vector<float> confidence; // 0 = unknown (erased) .. large = certain, in noise standard deviations
+    size_t unknown = 0;            // sites outside the image or in a washed-out region
+};
+
+// Mean and deviation of the known values within +/- radius of index i on a
+// circular sequence (prefix sums over three laps).
+struct CircularStats {
+    std::vector<double> sum, sq; std::vector<int> count; int n = 0;
+    void build(const std::vector<double> &value, const std::vector<uint8_t> &valid) {
+        n = static_cast<int>(value.size());
+        sum.assign(static_cast<size_t>(3 * n + 1), 0); sq = sum; count.assign(static_cast<size_t>(3 * n + 1), 0);
+        for (int i = 0; i < 3 * n; ++i) {
+            const size_t k = static_cast<size_t>(i % n), o = static_cast<size_t>(i);
+            sum[o + 1] = sum[o] + (valid[k] ? value[k] : 0); sq[o + 1] = sq[o] + (valid[k] ? value[k] * value[k] : 0); count[o + 1] = count[o] + (valid[k] ? 1 : 0);
+        }
+    }
+    void window(int i, int radius, double &s, double &q, int &c) const {
+        radius = std::min(radius, (n - 1) / 2);
+        const size_t lo = static_cast<size_t>(n + i - radius), hi = static_cast<size_t>(n + i + radius + 1);
+        s = sum[hi] - sum[lo]; q = sq[hi] - sq[lo]; c = count[hi] - count[lo];
+    }
+};
+
+// Sequence detection along one ring. Ring slots sit as close as 0.3 module
+// apart, so blur makes each sample a mix of several neighbouring dots, and a
+// per-site threshold fails long before the modules do. The samples are
+// modelled as
+//     base + dot * sum_j bit_j K(distance to dot j) + join * sum_j bit_j bit_j+1 K(distance to the gap after j)
+// with a Gaussian K whose width (the blur) is fitted to this image, and the
+// most likely bit sequence is found with the Viterbi algorithm. `join` is
+// the ink that fills the gap between two printed neighbours (joined arcs).
+struct RingModel { double base = 0, dot = 1, join = 0, sigma = 0.1, noise = 0.1; bool valid = false; };
+
+struct RingLine {
+    int slots = 0; double spacing = 0;       // slot pitch in canonical units
+    std::vector<int32_t> site;               // site index per slot, -1 none
+    std::vector<int8_t> fixed;               // known printed value (0/1), -1 for data
+    std::vector<double> y; std::vector<uint8_t> has;  // normalised sample per slot
+    std::vector<uint8_t> bit;                // current decision per slot
+};
+
+double ring_kernel(double distance, double sigma) { return std::exp(-distance * distance / (2 * sigma * sigma)); }
+
+constexpr int kRingReach = 3;  // neighbours on each side that the detector models
+
+void ring_features(const RingLine &line, double sigma, int s, double &dots, double &joins) {
+    dots = joins = 0;
+    const int S = line.slots;
+    for (int t = -kRingReach; t <= kRingReach; ++t) {
+        const int j = ((s + t) % S + S) % S, k = (j + 1) % S;
+        if (line.bit[static_cast<size_t>(j)]) {
+            dots += ring_kernel(t * line.spacing, sigma);
+            if (line.bit[static_cast<size_t>(k)]) joins += ring_kernel((t + 0.5) * line.spacing, sigma);
+        }
+    }
+    // The gap just before the window's first dot.
+    const int j = ((s - kRingReach - 1) % S + S) % S, k = (j + 1) % S;
+    if (line.bit[static_cast<size_t>(j)] && line.bit[static_cast<size_t>(k)]) joins += ring_kernel((-kRingReach - 0.5) * line.spacing, sigma);
+}
+
+// Least-squares base, dot and join for a given blur width, from the current
+// decisions.
+RingModel fit_ring_model(const std::vector<RingLine> &lines, double sigma) {
+    RingModel best; double best_error = std::numeric_limits<double>::infinity();
+    {
+        double a[6][6] = {}, b[6] = {}; double yy = 0; size_t n = 0;
+        for (const auto &line : lines) for (int s = 0; s < line.slots; ++s) {
+            if (!line.has[static_cast<size_t>(s)]) continue;
+            double dots, joins; ring_features(line, sigma, s, dots, joins);
+            const double f[3] = {1.0, dots, joins}, y = line.y[static_cast<size_t>(s)];
+            for (int r = 0; r < 3; ++r) { b[r] += f[r] * y; for (int q = 0; q < 3; ++q) a[r][q] += f[r] * f[q]; }
+            yy += y * y; ++n;
+        }
+        if (n < 40) return best;
+        double a0[6][6]; std::copy(&a[0][0], &a[0][0] + 36, &a0[0][0]); double b0[6]; std::copy(b, b + 6, b0);
+        for (int r = 0; r < 3; ++r) a[r][r] += 1e-6;
+        if (!solve_small(a, b, 3)) return best;
+        if (b[2] < 0) {  // no negative joins: refit without the term
+            double a2[6][6] = {}, b2[6] = {b0[0], b0[1]};
+            a2[0][0] = a0[0][0] + 1e-6; a2[0][1] = a0[0][1]; a2[1][0] = a0[1][0]; a2[1][1] = a0[1][1] + 1e-6;
+            if (!solve_small(a2, b2, 2)) return best;
+            b[0] = b2[0]; b[1] = b2[1]; b[2] = 0;
+        }
+        if (b[1] <= 0.02) return best;
+        double error = yy;  // sum (y - f.w)^2 = yy - 2 w.b0 + w'Aw
+        for (int r = 0; r < 3; ++r) { error -= 2 * b[r] * b0[r]; for (int q = 0; q < 3; ++q) error += b[r] * a0[r][q] * b[q]; }
+        if (error < best_error) { best_error = error; best = {b[0], b[1], b[2], sigma, std::sqrt(std::max(error, 0.0) / static_cast<double>(n)), true}; }
+    }
+    return best;
+}
+
+// Blind first estimate of the model, without any decisions. Whitening makes
+// the bits independent and half printed, so the samples' statistics along a
+// ring give the model directly: the ratio of the lag-1 covariance to the
+// variance depends only on the blur width, the variance then gives the dot
+// amplitude, and the mean gives the base. (The join term starts at zero and
+// is fitted once decisions exist.)
+RingModel blind_ring_model(const std::vector<RingLine> &lines, double pitch) {
+    RingModel m;
+    double sigma_sum = 0, weight_sum = 0;
+    struct Moments { double mean, var, c1; int n; double spacing; };
+    std::vector<Moments> moments;
+    for (const auto &line : lines) {
+        double sum = 0; int n = 0;
+        for (int s = 0; s < line.slots; ++s) if (line.has[static_cast<size_t>(s)] && line.fixed[static_cast<size_t>(s)] < 0) { sum += line.y[static_cast<size_t>(s)]; ++n; }
+        if (n < 32) continue;
+        const double mean = sum / n; double var = 0, c1 = 0; int pairs = 0;
+        for (int s = 0; s < line.slots; ++s) {
+            const int t = (s + 1) % line.slots;
+            if (!line.has[static_cast<size_t>(s)] || line.fixed[static_cast<size_t>(s)] >= 0) continue;
+            const double d = line.y[static_cast<size_t>(s)] - mean; var += d * d;
+            if (line.has[static_cast<size_t>(t)] && line.fixed[static_cast<size_t>(t)] < 0) { c1 += d * (line.y[static_cast<size_t>(t)] - mean); ++pairs; }
+        }
+        if (!pairs || var <= 0) continue;
+        moments.push_back({mean, var / n, c1 / pairs, n, line.spacing});
+    }
+    if (moments.empty()) return m;
+    const auto sums = [](double sigma, double spacing, double &kk, double &kk1, double &k) {
+        kk = kk1 = k = 0;
+        for (int t = -6; t <= 6; ++t) { const double a = ring_kernel(t * spacing, sigma), b = ring_kernel((t + 1) * spacing, sigma); kk += a * a; kk1 += a * b; k += a; }
+    };
+    for (const auto &mo : moments) {
+        const double ratio = std::clamp(mo.c1 / mo.var, 0.0, 0.97);
+        double lo = 0.05 * pitch, hi = 1.0 * pitch;
+        for (int it = 0; it < 30; ++it) {
+            const double mid = (lo + hi) / 2; double kk, kk1, k; sums(mid, mo.spacing, kk, kk1, k);
+            if (kk1 / kk < ratio) lo = mid; else hi = mid;
+        }
+        sigma_sum += mo.n * (lo + hi) / 2; weight_sum += mo.n;
+    }
+    m.sigma = sigma_sum / weight_sum;
+    double dot_sum = 0, base_sum = 0;
+    for (const auto &mo : moments) {
+        double kk, kk1, k; sums(m.sigma, mo.spacing, kk, kk1, k);
+        const double dot = 2 * std::sqrt(mo.var / kk);
+        dot_sum += mo.n * dot; base_sum += mo.n * (mo.mean - 0.5 * dot * k);
+    }
+    m.dot = dot_sum / weight_sum; m.base = base_sum / weight_sum; m.join = 0; m.noise = 0.1 * m.dot; m.valid = m.dot > 0.02;
+    return m;
+}
+
+// Most likely bits of one ring under the model (Viterbi over a window of
+// 2 * reach + 1 slots; the ring is unrolled with an overlap so it closes).
+void detect_ring(RingLine &line, const RingModel &m) {
+    const int S = line.slots;
+    int reach = 1;
+    while (reach < kRingReach && ring_kernel((reach + 1) * line.spacing, m.sigma) * m.dot > 0.06 * m.dot) ++reach;
+    if (S < 4 * reach + 4) return;
+    const int width = 2 * reach + 1, states = 1 << (width - 1), windows = 1 << width;
+    // Prediction for every window; bit (width - 1 - k) is the slot at offset k - reach.
+    std::vector<double> prediction(static_cast<size_t>(windows));
+    for (int w = 0; w < windows; ++w) {
+        double v = m.base;
+        for (int k = 0; k < width; ++k) {
+            if (!((w >> (width - 1 - k)) & 1)) continue;
+            v += m.dot * ring_kernel((k - reach) * line.spacing, m.sigma);
+            if (k + 1 < width && ((w >> (width - 2 - k)) & 1)) v += m.join * ring_kernel((k - reach + 0.5) * line.spacing, m.sigma);
+        }
+        prediction[static_cast<size_t>(w)] = v;
+    }
+    const int overlap = 4 * reach + 6, length = S + 2 * overlap;
+    constexpr double kInfinity = 1e300;
+    std::vector<double> cost(static_cast<size_t>(states), 0.0), next(static_cast<size_t>(states));
+    std::vector<uint8_t> back(static_cast<size_t>(length) * states);
+    // Step i decides the slot at unrolled position i + reach and scores the sample at position i.
+    for (int i = 0; i < length; ++i) {
+        const int centre = ((i - overlap) % S + S) % S, incoming = ((i - overlap + reach) % S + S) % S;
+        const int8_t fixed = line.fixed[static_cast<size_t>(incoming)];
+        const bool scored = line.has[static_cast<size_t>(centre)] != 0; const double y = line.y[static_cast<size_t>(centre)];
+        std::fill(next.begin(), next.end(), kInfinity);
+        for (int state = 0; state < states; ++state) {
+            if (cost[static_cast<size_t>(state)] >= kInfinity) continue;
+            for (int bit = 0; bit < 2; ++bit) {
+                if (fixed >= 0 && bit != fixed) continue;
+                const int window = (state << 1) | bit, to = window & (states - 1);
+                double c = cost[static_cast<size_t>(state)];
+                if (scored && i >= reach) { const double d = y - prediction[static_cast<size_t>(window)]; c += d * d; }
+                if (c < next[static_cast<size_t>(to)]) { next[static_cast<size_t>(to)] = c; back[static_cast<size_t>(i) * states + to] = static_cast<uint8_t>(state >> (width - 2)); }
+            }
+        }
+        cost.swap(next);
+    }
+    int state = static_cast<int>(std::min_element(cost.begin(), cost.end()) - cost.begin());
+    for (int i = length - 1; i >= 0; --i) {
+        const int position = i - overlap + reach;  // slot decided at step i
+        if (position >= 0 && position < S && i >= overlap && i < overlap + S + reach) line.bit[static_cast<size_t>(position)] = static_cast<uint8_t>(state & 1);
+        const int dropped = back[static_cast<size_t>(i) * states + state];
+        state = (state >> 1) | (dropped << (width - 2));
+    }
+    for (int s = 0; s < S; ++s) if (line.fixed[static_cast<size_t>(s)] >= 0) line.bit[static_cast<size_t>(s)] = static_cast<uint8_t>(line.fixed[static_cast<size_t>(s)]);
+}
+
+// How firmly each ring decision stands: the extra squared error of flipping
+// that one bit, as a distance in noise deviations.
+void ring_confidence(const RingLine &line, const RingModel &m, std::vector<float> &confidence) {
+    const int S = line.slots; RingLine flipped = line;
+    for (int s = 0; s < S; ++s) {
+        const int32_t site = line.site[static_cast<size_t>(s)];
+        if (site < 0 || line.fixed[static_cast<size_t>(s)] >= 0) continue;
+        flipped.bit[static_cast<size_t>(s)] ^= 1;
+        double delta = 0, signal = 0;
+        for (int t = -kRingReach - 1; t <= kRingReach + 1; ++t) {
+            const int u = ((s + t) % S + S) % S;
+            if (!line.has[static_cast<size_t>(u)]) continue;
+            double d0, j0, d1, j1; ring_features(line, m.sigma, u, d0, j0); ring_features(flipped, m.sigma, u, d1, j1);
+            const double p0 = m.base + m.dot * d0 + m.join * j0, p1 = m.base + m.dot * d1 + m.join * j1, y = line.y[static_cast<size_t>(u)];
+            delta += (y - p1) * (y - p1) - (y - p0) * (y - p0); signal += (p1 - p0) * (p1 - p0);
+        }
+        flipped.bit[static_cast<size_t>(s)] ^= 1;
+        confidence[static_cast<size_t>(site)] = signal > 1e-12 ? static_cast<float>(std::max(0.0, delta) / (2 * std::sqrt(signal) * std::max(m.noise, 0.01))) : 0.0f;
+    }
+}
+
+// Reads every site under homography h.
+//   1. Sample each site. A site whose sample leaves the image is unknown,
+//      not a failure, so a symbol partly out of frame can still decode.
+//   2. Normalise between the symbol's own dark and light levels (two clusters
+//      of the Cartesian samples; whitening makes about half of them printed).
+//   3. Local levels. Each sample is re-referenced to the mean and spread of
+//      its own neighbourhood (a window of the lattice for modules, a sector
+//      of the ring or dial for polar marks), so uneven light, a shadow edge
+//      or a highlight does not move the threshold for the whole field. A
+//      neighbourhood whose samples barely vary (glare, a covering object) is
+//      washed out: its sites are unknown. Clipped is unknown, not white.
+//   4. Cancel intersymbol interference. For modules and dial rays, a
+//      least-squares fit of
+//      sample = base + own * bit + sum(leak_c * printed neighbours in class c)
+//      measures the blur leak in this image, and each site is re-decided
+//      after subtracting what its neighbours contribute (separate classes
+//      for east-west, north-south and the two diagonals follow motion blur).
+//      Ring dots go through sequence detection (see RingModel).
+//   5. Confidence is the distance from the decision level in noise units.
+// The samples are taken once (SiteSamples) and can then be decided under
+// several strategies (ReadMode): each strategy wins on different images, and
+// Reed-Solomon plus the CRC say which reading is right.
+constexpr int kDialRadii = 3;
+struct SiteSamples {
+    std::vector<double> raw; std::vector<uint8_t> known; size_t unknown = 0;
+    std::vector<std::array<double, kDialRadii>> dial_raw;
+    std::vector<double> cart_values;
+    double lo = 0, hi = 0; bool dark = true;
+    double edge_blur = 0;  // measured blur width in canonical units (0 = unknown)
+};
+constexpr unsigned kReadLocalLevels = 1u;   // re-reference each sample to its neighbourhood
+constexpr unsigned kReadRingSequence = 2u;  // sequence detection along the rings
+// Strategies in the order tried: the plain reading first (cheapest, right for
+// clean images), then the ones built for uneven light and for blur.
+constexpr std::array<unsigned, 4> kReadModes = {0u, kReadLocalLevels | kReadRingSequence, kReadRingSequence, kReadLocalLevels};
+
+bool scalable_sample_sites(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride,
+                           const double h[8], SiteSamples &S) {
+    const size_t N = L.nodes.size(); const double p = L.pitch;
+    std::vector<double> &raw = S.raw; std::vector<uint8_t> &known = S.known;
+    raw.assign(N, 0); known.assign(N, 1); S.unknown = 0;
+    struct { size_t unknown = 0; } out;
+    // Dial rays are read at three radii; ink spread moves the best one.
+    const double dial_offset[kDialRadii] = {-0.3 * p, 0.0, 0.3 * p};
+    std::vector<std::array<double, kDialRadii>> &dial_raw = S.dial_raw; dial_raw.assign(static_cast<size_t>(L.dial_slots), {});
+    std::vector<double> &cart_values = S.cart_values; cart_values.clear();
+    for (size_t i = 0; i < N; ++i) {
+        const auto &n = L.nodes[i];
+        double v;
+        if (n.kind == 1) {
+            v = 0;
+            for (int k = 0; k < kDialRadii; ++k) {
+                const double s = polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + L.dial_sample + dial_offset[k], n.slot, L.dial_slots, 0.04 * p);
+                dial_raw[static_cast<size_t>(n.slot)][static_cast<size_t>(k)] = s;
+                if (s < 0) v = -1;
+            }
+        } else v = gray_sample(gray, width, height, stride, h, n.x, n.y, n.kind == 0 ? 0.12 * p : 0.25 * L.dot);
+        if (v < 0) { known[i] = 0; ++out.unknown; raw[i] = 0; if (work_exhausted()) return false; continue; }
+        raw[i] = v; if (n.kind == 0) cart_values.push_back(v);
+    }
+    if (out.unknown * 2 > N || cart_values.size() < 32) return false;
+    // Global dark and light levels from the Cartesian samples.
+    double lo = 0, hi = 0;
+    {
+        const auto [min_it, max_it] = std::minmax_element(cart_values.begin(), cart_values.end());
+        double cut = (*min_it + *max_it) / 2;
+        for (int it = 0; it < 24; ++it) {
+            double sl = 0, sh = 0; size_t nl = 0, nh = 0;
+            for (double v : cart_values) { if (v > cut) { sh += v; ++nh; } else { sl += v; ++nl; } }
+            if (!nl || !nh) return false;
+            lo = sl / nl; hi = sh / nh;
+            const double next = (lo + hi) / 2; if (std::abs(next - cut) < 1e-4) break; cut = next;
+        }
+        if (hi - lo < 4.0) return false;
+    }
+    // Polarity: the frame stroke and the Grid Key are solid ink, so they sit
+    // on the printed side of the modules' mean level. (The stroke is wide; it
+    // stays that side of the mean under blur that already merges the moat.)
+    double mark = 0; int marks = 0;
+    for (int r = 0; r < 2; ++r) for (int c = 0; c < 2; ++c) {
+        const double v = gray_sample(gray, width, height, stride, h, (L.col0 + c + .5) * p, (L.row0 + r + .5) * p, 0.12 * p);
+        if (v >= 0) { mark += v; ++marks; }
+    }
+    for (const double t : {7.0, 11.0, 14.5, 18.0, 22.0}) for (const auto &[x, y] : {std::pair{t, 0.5}, {28.5, t}, {t, 28.5}, {0.5, t}}) {
+        const double v = gray_sample(gray, width, height, stride, h, x, y, 0.05);
+        if (v >= 0) { mark += v; ++marks; }
+    }
+    if (marks < 6) return false;
+    S.dark = mark / marks < std::accumulate(cart_values.begin(), cart_values.end(), 0.0) / static_cast<double>(cart_values.size());
+    S.lo = lo; S.hi = hi; S.unknown = out.unknown;
+    return true;
+}
+
+bool scalable_decide_sites(const ScalableLayout &L, const SiteSamples &S, unsigned mode, SiteRead &out) {
+    const size_t N = L.nodes.size(); const double p = L.pitch;
+    std::vector<double> raw = S.raw; std::vector<uint8_t> known = S.known;
+    const auto &dial_raw = S.dial_raw; const double lo = S.lo, hi = S.hi; const bool dark = S.dark;
+    out.unknown = S.unknown;
+    const double unprinted = dark ? hi : lo, printed_level = dark ? lo : hi;
+    const auto normalise = [&](double v) { return (v - unprinted) / (printed_level - unprinted); };
+    std::vector<double> level(N, 0.0);
+    // Dial: choose the radius whose samples split most evenly and widely.
+    {
+        int best = 1; double best_score = -1;
+        for (int k = 0; k < kDialRadii; ++k) {
+            std::vector<double> values;
+            for (size_t i = 0; i < N; ++i) if (known[i] && L.nodes[i].kind == 1) values.push_back(normalise(dial_raw[static_cast<size_t>(L.nodes[i].slot)][static_cast<size_t>(k)]));
+            if (values.size() < 16) break;
+            double separation = 0; const double cut = two_means_cut(values, separation);
+            const double above = static_cast<double>(std::count_if(values.begin(), values.end(), [&](double v) { return v > cut; })) / static_cast<double>(values.size());
+            const double score = separation * std::min(1.0, std::min(above, 1 - above) / 0.35) * (k == 1 ? 1.08 : 1.0);
+            if (score > best_score) { best_score = score; best = k; }
+        }
+        for (size_t i = 0; i < N; ++i) if (known[i] && L.nodes[i].kind == 1) raw[i] = dial_raw[static_cast<size_t>(L.nodes[i].slot)][static_cast<size_t>(best)];
+    }
+    for (size_t i = 0; i < N; ++i) if (known[i]) level[i] = normalise(raw[i]);
+    const SiteNeighbours &nb = site_neighbours(L.version, L.family);
+    // ---- Local levels: Cartesian lattice windows ----
+    if (mode & kReadLocalLevels) {
+        const int G = L.grid; const size_t W = static_cast<size_t>(G) + 1;
+        std::vector<double> sum(W * W, 0), sq(W * W, 0); std::vector<int> cnt(W * W, 0);
+        std::vector<int32_t> at(static_cast<size_t>(G) * G, -1);
+        for (size_t i = 0; i < N; ++i) if (L.nodes[i].kind == 0) at[static_cast<size_t>((L.nodes[i].id >> 12) & 0xfffu) * G + (L.nodes[i].id & 0xfffu)] = static_cast<int32_t>(i);
+        double gsum = 0, gsq = 0; int gn = 0;
+        for (int r = 0; r < G; ++r) for (int c = 0; c < G; ++c) {
+            const int32_t i = at[static_cast<size_t>(r) * G + c]; const bool ok = i >= 0 && known[static_cast<size_t>(i)];
+            const double v = ok ? level[static_cast<size_t>(i)] : 0;
+            if (ok) { gsum += v; gsq += v * v; ++gn; }
+            const size_t o = static_cast<size_t>(r + 1) * W + static_cast<size_t>(c + 1);
+            sum[o] = sum[o - 1] + sum[o - W] - sum[o - W - 1] + v; sq[o] = sq[o - 1] + sq[o - W] - sq[o - W - 1] + v * v;
+            cnt[o] = cnt[o - 1] + cnt[o - W] - cnt[o - W - 1] + (ok ? 1 : 0);
+        }
+        const double gmean = gsum / gn, gsd = std::sqrt(std::max(1e-9, gsq / gn - gmean * gmean));
+        const auto window = [&](int r, int c, int radius, double &mean, double &sd, int &n) {
+            const int r0 = std::max(0, r - radius), c0 = std::max(0, c - radius), r1 = std::min(G, r + radius + 1), c1 = std::min(G, c + radius + 1);
+            const size_t a = static_cast<size_t>(r0) * W + static_cast<size_t>(c0), b = static_cast<size_t>(r0) * W + static_cast<size_t>(c1), d = static_cast<size_t>(r1) * W + static_cast<size_t>(c0), e = static_cast<size_t>(r1) * W + static_cast<size_t>(c1);
+            n = cnt[e] - cnt[b] - cnt[d] + cnt[a];
+            if (n < 2) { mean = gmean; sd = gsd; return; }
+            mean = (sum[e] - sum[b] - sum[d] + sum[a]) / n; sd = std::sqrt(std::max(0.0, (sq[e] - sq[b] - sq[d] + sq[a]) / n - mean * mean));
+        };
+        const int radius = std::clamp(static_cast<int>(std::lround(1.7 / p)), 3, 10);
+        std::vector<double> adjusted(N, 0.0); std::vector<uint8_t> washed(N, 0);
+        for (size_t i = 0; i < N; ++i) {
+            if (!known[i] || L.nodes[i].kind != 0) continue;
+            const int r = static_cast<int>((L.nodes[i].id >> 12) & 0xfffu), c = static_cast<int>(L.nodes[i].id & 0xfffu);
+            double mean, sd; int n;
+            window(r, c, 2, mean, sd, n);
+            if (n >= 12 && sd < 0.3 * gsd) { washed[i] = 1; continue; }
+            window(r, c, radius, mean, sd, n);
+            if (n < 20) window(r, c, 2 * radius, mean, sd, n);
+            // Shrink towards the global levels when the window is small.
+            const double weight = static_cast<double>(n) / (static_cast<double>(n) + 12.0);
+            const double m = weight * mean + (1 - weight) * gmean, s = std::max(0.35 * gsd, weight * sd + (1 - weight) * gsd);
+            adjusted[i] = gmean + (level[i] - m) * gsd / s;
+        }
+        for (size_t i = 0; i < N; ++i) {
+            if (!known[i] || L.nodes[i].kind != 0) continue;
+            if (washed[i]) { known[i] = 0; ++out.unknown; } else level[i] = adjusted[i];
+        }
+    }
+    // ---- Rings: slot tables, local levels along each ring ----
+    std::vector<RingLine> rings(static_cast<size_t>(L.rings));
+    {
+        const int key = L.ring_key_slot(); const auto key_dots = L.ring_key_dots(); const auto key_run = L.ring_key_run();
+        double gsum = 0, gsq = 0; int gn = 0;
+        for (size_t i = 0; i < N; ++i) if (known[i] && L.nodes[i].kind == 2) { gsum += level[i]; gsq += level[i] * level[i]; ++gn; }
+        const double gmean = gn ? gsum / gn : 0, gsd = gn ? std::sqrt(std::max(1e-9, gsq / gn - gmean * gmean)) : 1;
+        for (int k = 0; k < L.rings; ++k) {
+            RingLine &line = rings[static_cast<size_t>(k)]; const int S = L.ring_slots[static_cast<size_t>(k)];
+            line.slots = S; line.spacing = kTau * L.ring_radius(k) / S;
+            line.site.assign(static_cast<size_t>(S), -1); line.fixed.assign(static_cast<size_t>(S), 0); line.y.assign(static_cast<size_t>(S), 0); line.has.assign(static_cast<size_t>(S), 0); line.bit.assign(static_cast<size_t>(S), 0);
+            for (int s = 0; s < S; ++s) {
+                const int index = L.ring_grid[static_cast<size_t>(k) * L.ring_stride + static_cast<size_t>(s)];
+                if (index >= 0) { line.site[static_cast<size_t>(s)] = index; line.fixed[static_cast<size_t>(s)] = -1; }
+            }
+            if (k == L.rings - 1) {
+                for (int d : key_dots) line.fixed[static_cast<size_t>((key + d) % S)] = 1;
+                for (int s = static_cast<int>(std::ceil(key_run.first)); s <= static_cast<int>(std::floor(key_run.second)); ++s) line.fixed[static_cast<size_t>((key + s) % S)] = 1;
+            }
+        }
+        // Sector statistics pooled over up to three neighbouring rings.
+        std::vector<CircularStats> stats(static_cast<size_t>(L.rings));
+        for (int k = 0; k < L.rings; ++k) {
+            const RingLine &line = rings[static_cast<size_t>(k)];
+            std::vector<double> value(static_cast<size_t>(line.slots), 0); std::vector<uint8_t> valid(static_cast<size_t>(line.slots), 0);
+            for (int s = 0; s < line.slots; ++s) { const int32_t i = line.site[static_cast<size_t>(s)]; if (i >= 0 && known[static_cast<size_t>(i)]) { value[static_cast<size_t>(s)] = level[static_cast<size_t>(i)]; valid[static_cast<size_t>(s)] = 1; } }
+            stats[static_cast<size_t>(k)].build(value, valid);
+        }
+        std::vector<double> adjusted(N, 0.0); std::vector<uint8_t> washed(N, 0);
+        if (mode & kReadLocalLevels) for (int k = 0; k < L.rings; ++k) {
+            const RingLine &line = rings[static_cast<size_t>(k)];
+            for (int s = 0; s < line.slots; ++s) {
+                const int32_t i = line.site[static_cast<size_t>(s)];
+                if (i < 0 || !known[static_cast<size_t>(i)]) continue;
+                double sum = 0, sq = 0; int n = 0;
+                // A sixth of a turn each way, over every ring. The window must
+                // be wide: ring samples depend on their neighbours' bits, so a
+                // narrow window would normalise away the data itself.
+                for (int j = 0; j < L.rings; ++j) {
+                    const int Sj = rings[static_cast<size_t>(j)].slots; double a, b; int c;
+                    stats[static_cast<size_t>(j)].window(static_cast<int>(std::lround(static_cast<double>(s) * Sj / line.slots)) % Sj, std::max(8, Sj / 6), a, b, c);
+                    sum += a; sq += b; n += c;
+                }
+                if (n < 48) { adjusted[static_cast<size_t>(i)] = level[static_cast<size_t>(i)]; continue; }
+                const double mean = sum / n, sd = std::sqrt(std::max(0.0, sq / n - mean * mean));
+                if (sd < 0.25 * gsd) { washed[static_cast<size_t>(i)] = 1; continue; }
+                const double weight = static_cast<double>(n) / (static_cast<double>(n) + 64.0);
+                const double m = weight * mean + (1 - weight) * gmean, sdev = std::max(0.4 * gsd, weight * sd + (1 - weight) * gsd);
+                adjusted[static_cast<size_t>(i)] = gmean + (level[static_cast<size_t>(i)] - m) * gsd / sdev;
+            }
+        }
+        if (mode & kReadLocalLevels) for (size_t i = 0; i < N; ++i) {
+            if (!known[i] || L.nodes[i].kind != 2) continue;
+            if (washed[i]) { known[i] = 0; ++out.unknown; } else level[i] = adjusted[i];
+        }
+    }
+    // ---- Dial: local levels along the dial ----
+    if (mode & kReadLocalLevels) {
+        std::vector<double> value(static_cast<size_t>(L.dial_slots), 0); std::vector<uint8_t> valid(static_cast<size_t>(L.dial_slots), 0); std::vector<int32_t> site(static_cast<size_t>(L.dial_slots), -1);
+        double gsum = 0, gsq = 0; int gn = 0;
+        for (size_t i = 0; i < N; ++i) if (L.nodes[i].kind == 1) { site[static_cast<size_t>(L.nodes[i].slot)] = static_cast<int32_t>(i); if (known[i]) { value[static_cast<size_t>(L.nodes[i].slot)] = level[i]; valid[static_cast<size_t>(L.nodes[i].slot)] = 1; gsum += level[i]; gsq += level[i] * level[i]; ++gn; } }
+        if (gn >= 24) {
+            const double gmean = gsum / gn, gsd = std::sqrt(std::max(1e-9, gsq / gn - gmean * gmean));
+            CircularStats stats; stats.build(value, valid);
+            for (int s = 0; s < L.dial_slots; ++s) {
+                const int32_t i = site[static_cast<size_t>(s)];
+                if (i < 0 || !known[static_cast<size_t>(i)]) continue;
+                double a, b; int n; stats.window(s, std::max(8, L.dial_slots / 10), a, b, n);
+                if (n < 12) continue;
+                const double mean = a / n, sd = std::sqrt(std::max(0.0, b / n - mean * mean));
+                if (sd < 0.25 * gsd) { known[static_cast<size_t>(i)] = 0; ++out.unknown; continue; }
+                const double weight = static_cast<double>(n) / (static_cast<double>(n) + 12.0);
+                const double m = weight * mean + (1 - weight) * gmean, sdev = std::max(0.4 * gsd, weight * sd + (1 - weight) * gsd);
+                level[static_cast<size_t>(i)] = gmean + (level[static_cast<size_t>(i)] - m) * gsd / sdev;
+            }
+        }
+    }
+    if (out.unknown * 2 > N) return false;
+    // ---- Decisions ----
+    out.printed.assign(N, 0); out.confidence.assign(N, 0.0f);
+    for (int kind = 0; kind < 3; ++kind) {
+        std::vector<uint32_t> sites; std::vector<double> values;
+        for (size_t i = 0; i < N; ++i) if (known[i] && L.nodes[i].kind == kind) { sites.push_back(static_cast<uint32_t>(i)); values.push_back(level[i]); }
+        if (sites.empty()) continue;
+        const double cut = class_threshold(values);
+        for (uint32_t i : sites) out.printed[i] = level[i] > cut;
+        if (kind == 2 && (mode & kReadRingSequence)) {
+            // Ring dots: sequence detection, re-fitting the model to its own decisions.
+            for (auto &line : rings) for (int s = 0; s < line.slots; ++s) {
+                const int32_t i = line.site[static_cast<size_t>(s)];
+                if (i >= 0 && known[static_cast<size_t>(i)]) { line.y[static_cast<size_t>(s)] = level[static_cast<size_t>(i)]; line.has[static_cast<size_t>(s)] = 1; }
+                line.bit[static_cast<size_t>(s)] = line.fixed[static_cast<size_t>(s)] >= 0 ? static_cast<uint8_t>(line.fixed[static_cast<size_t>(s)]) : (i >= 0 ? out.printed[static_cast<size_t>(i)] : 0);
+            }
+            // Start from the blind estimate, then alternate detection and a
+            // least-squares refit of base, dot and join. Two neighbouring blur
+            // widths are also tried on a few rings; the width that leaves the
+            // smallest residual after detection is used for all of them.
+            RingModel model;
+            {
+                RingModel blind = blind_ring_model(rings, p);
+                // Prefer the blur measured on the frame edge to the blind
+                // estimate; a dot's own size and the sampling footprint add to it.
+                if (blind.valid && S.edge_blur > 0) {
+                    const double measured = std::sqrt(S.edge_blur * S.edge_blur + (0.3 * L.dot) * (0.3 * L.dot));
+                    blind.sigma = std::clamp(measured, 0.06 * p, 0.9 * p);
+                    std::vector<RingLine> copy = rings; const RingModel levels = fit_ring_model(copy, blind.sigma);
+                    if (levels.valid) { blind.base = levels.base; blind.dot = levels.dot; blind.join = levels.join; }
+                }
+                double best_sigma = blind.valid ? blind.sigma : 0;
+                if (blind.valid && L.rings > 0) {
+                    std::vector<RingLine> probe;
+                    for (int k : {0, L.rings / 2, L.rings - 1}) { bool seen = false; for (const auto &q : probe) seen = seen || q.spacing == rings[static_cast<size_t>(k)].spacing; if (!seen) probe.push_back(rings[static_cast<size_t>(k)]); }
+                    double best_noise = std::numeric_limits<double>::infinity();
+                    for (const double scale : {0.75, 1.0, 1.3}) {
+                        std::vector<RingLine> trial = probe; RingModel m = blind; m.sigma = blind.sigma * scale;
+                        if (scale != 1.0) { const RingModel rescaled = blind_ring_model(trial, p); m.base = rescaled.base; m.dot = rescaled.dot; }
+                        for (int round = 0; round < 3 && m.valid; ++round) { for (auto &line : trial) detect_ring(line, m); m = fit_ring_model(trial, m.sigma); }
+                        if (m.valid && m.noise < best_noise) { best_noise = m.noise; best_sigma = m.sigma; }
+                    }
+                }
+                if (best_sigma > 0) {
+                    model = blind; model.sigma = best_sigma;
+                    for (int round = 0; round < 4 && model.valid; ++round) {
+                        for (auto &line : rings) detect_ring(line, model);
+                        const RingModel fitted = fit_ring_model(rings, best_sigma);
+                        if (!fitted.valid) break;
+                        const bool settled = std::abs(fitted.dot - model.dot) < 0.02 * model.dot && std::abs(fitted.join - model.join) < 0.02 * model.dot;
+                        model = fitted;
+                        if (settled) break;
+                    }
+                }
+            }
+            if (model.valid) {
+                for (auto &line : rings) detect_ring(line, model);
+                model = fit_ring_model(rings, model.sigma);
+                for (const auto &line : rings) for (int s = 0; s < line.slots; ++s) { const int32_t i = line.site[static_cast<size_t>(s)]; if (i >= 0) out.printed[static_cast<size_t>(i)] = line.bit[static_cast<size_t>(s)]; }
+                if (model.valid) { for (const auto &line : rings) ring_confidence(line, model, out.confidence); for (uint32_t i : sites) if (!known[i]) out.confidence[i] = 0; continue; }
+            }
+            double sum_sq = 0; for (uint32_t i : sites) { const double d = level[i] - cut; sum_sq += d * d; }
+            const double spread = std::sqrt(sum_sq / static_cast<double>(sites.size()));
+            for (uint32_t i : sites) out.confidence[i] = static_cast<float>(std::abs(level[i] - cut) / std::max(0.25 * spread, 0.02));
+            continue;
+        }
+        const int classes = kind == 0 ? 4 : 1, d = 2 + classes;
+        double w[6] = {0, 1, 0, 0, 0, 0}; double centre = cut, sigma = 0.25; bool fitted = false;
+        const auto counts = [&](uint32_t i, double c[4]) {
+            c[0] = c[1] = c[2] = c[3] = 0;
+            for (int k = 0; k < (kind == 0 ? 8 : 2); ++k) {
+                const int32_t j = nb.of[i][static_cast<size_t>(k)];
+                if (j == -2) c[kind == 0 ? k / 2 : 0] += 1;
+                else if (j >= 0 && known[static_cast<size_t>(j)]) c[kind == 0 ? k / 2 : 0] += out.printed[static_cast<size_t>(j)];
+            }
+        };
+        std::vector<uint8_t> next(N);
+        for (int iteration = 0; iteration < 4 && sites.size() >= 48; ++iteration) {
+            double a[6][6] = {}, b[6] = {};
+            for (uint32_t i : sites) {
+                double c[4]; counts(i, c);
+                double f[6] = {1.0, static_cast<double>(out.printed[i]), c[0], c[1], c[2], c[3]};
+                for (int r = 0; r < d; ++r) { b[r] += f[r] * level[i]; for (int q = 0; q < d; ++q) a[r][q] += f[r] * f[q]; }
+            }
+            for (int r = 0; r < d; ++r) a[r][r] += 1e-6;
+            if (!solve_small(a, b, d) || b[1] < 0.12) break;
+            // Leak terms are physical: non-negative and smaller than the mark itself.
+            for (int r = 2; r < d; ++r) b[r] = std::clamp(b[r], 0.0, 0.6 * b[1]);
+            std::copy(b, b + 6, w); fitted = true;
+            double sum_sq = 0; size_t changed = 0;
+            for (uint32_t i : sites) {
+                double c[4]; counts(i, c);
+                double rest = level[i] - w[0]; for (int r = 0; r < classes; ++r) rest -= w[2 + r] * c[r];
+                next[i] = rest > w[1] / 2;
+                const double residual = rest - (next[i] ? w[1] : 0.0); sum_sq += residual * residual;
+            }
+            for (uint32_t i : sites) { if (out.printed[i] != next[i]) ++changed; out.printed[i] = next[i]; }
+            sigma = std::sqrt(sum_sq / static_cast<double>(sites.size()));
+            if (!changed) break;
+        }
+        if (fitted) centre = w[1] / 2;
+        sigma = std::max(sigma, fitted ? 0.03 * w[1] : 0.03);
+        for (uint32_t i : sites) {
+            double distance;
+            if (fitted) {
+                double c[4]; counts(i, c);
+                double rest = level[i] - w[0]; for (int r = 0; r < classes; ++r) rest -= w[2 + r] * c[r];
+                distance = std::abs(rest - centre);
+            } else distance = std::abs(level[i] - centre);
+            out.confidence[i] = static_cast<float>(distance / sigma);
+        }
+    }
+    return true;
+}
+
+// Assembles the codeword of `layout` (a placement of the family that `read`
+// was sampled with) and each byte's reliability (0..255; its weakest bit).
+void scalable_assemble(const ScalableLayout &layout, const SiteRead &read, std::vector<uint8_t> &codeword, std::vector<uint8_t> &reliability) {
+    const size_t bytes = layout.codeword_bytes;
+    codeword.assign(bytes, 0); reliability.assign(bytes, 255);
+    for (size_t n = 0; n < bytes * 8; ++n) {
+        const size_t site = layout.grouped ? layout.base_index[n] : n;
+        if ((read.printed[site] != 0) != (layout.white[n] != 0)) codeword[n / 8] |= static_cast<uint8_t>(1u << (7 - n % 8));
+        const uint8_t r = static_cast<uint8_t>(std::min(255.0f, 40.0f * read.confidence[site]));
+        reliability[n / 8] = std::min(reliability[n / 8], r);
+    }
+}
+
+// How many of the frame's fixed header bytes read correctly before any
+// correction (the code is systematic, so block 0 starts with the header).
+int scalable_header_matches(const ScalableLayout &layout, const std::vector<uint8_t> &codeword) {
+    const size_t blocks = (layout.codeword_bytes + 254) / 255;
+    if (layout.codeword_bytes < 5 * blocks + 1) return 0;
+    const uint8_t expected[5] = {0xc7, 0x4b, layout.format, 0, static_cast<uint8_t>(layout.version)};
+    int matches = 0; for (size_t i = 0; i < 5; ++i) matches += codeword[i * blocks] == expected[i];
+    return matches;
+}
+
+}  // namespace
+
+namespace {
+
+// ---- Precise frame fit --------------------------------------------------------
+// Locates the frame stroke's outer edge directly. Along the straight middle
+// of each side, a brightness profile is taken across the expected edge and
+// the edge is placed at its steepest step (sub-pixel, by a parabola through
+// the gradient peak).
+struct FrameEdgePoint { double x, y, strength; };
+constexpr double kFrameOuter = 0.175;  // stroke outer edge inset, canonical units
+
+bool frame_edge_points(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double reach,
+                       std::array<std::vector<FrameEdgePoint>, 4> &found) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad, h)) return false;
+    const double unit_px = quad_mean_side(quad) / 29.0;
+    if (unit_px < 1.0) return false;
+    // Half-pixel steps, or coarser if the reach would need more than 64 of them.
+    const double step = std::max(0.5 / unit_px, reach / 64.0);
+    const int steps = std::max(3, static_cast<int>(std::ceil(reach / step)));
+    // The stroke is 0.65 units wide: its inner edge is a step of the opposite
+    // sign that far inside. Scoring the pair keeps a lone edge nearby (the
+    // rim of a label, a screen bezel, the first row of modules) from being
+    // taken for the frame.
+    const int stroke = std::max(1, static_cast<int>(std::lround(0.65 / step)));
+    const int inner = steps + stroke + 2, outer = steps + 2, length = inner + outer + 1;  // index `inner` is the expected edge
+    constexpr int kPoints = 28;
+    const auto base_point = [](int side, int i, double &x, double &y, double &nx, double &ny) {
+        const double t = 5.0 + 19.0 * i / (kPoints - 1);
+        if (side == 0) { x = t; y = kFrameOuter; nx = 0; ny = -1; }
+        else if (side == 1) { x = 29 - kFrameOuter; y = t; nx = 1; ny = 0; }
+        else if (side == 2) { x = 29 - t; y = 29 - kFrameOuter; nx = 0; ny = 1; }
+        else { x = kFrameOuter; y = 29 - t; nx = -1; ny = 0; }
+    };
+    std::array<std::vector<std::vector<double>>, 4> profiles; double signed_sum = 0;
+    for (int side = 0; side < 4; ++side) for (int i = 0; i < kPoints; ++i) {
+        double x, y, nx, ny; base_point(side, i, x, y, nx, ny);
+        std::vector<double> profile(static_cast<size_t>(length));
+        bool ok = true;
+        for (int k = 0; k < length && ok; ++k) {
+            profile[static_cast<size_t>(k)] = gray_sample(gray, width, height, stride, h, x + nx * (k - inner) * step, y + ny * (k - inner) * step, 0.0);
+            ok = profile[static_cast<size_t>(k)] >= 0;
+        }
+        if (!ok) profile.clear();
+        else signed_sum += profile[static_cast<size_t>(std::min(length - 1, inner + stroke / 2 + 1))] - profile[static_cast<size_t>(inner - stroke / 2)];  // just outside minus mid-stroke
+        profiles[static_cast<size_t>(side)].push_back(std::move(profile));
+    }
+    const double polarity = signed_sum >= 0 ? 1.0 : -1.0;  // +1: dark stroke on a light surround
+    for (int side = 0; side < 4; ++side) {
+        found[static_cast<size_t>(side)].clear();
+        for (int i = 0; i < kPoints; ++i) {
+            const auto &profile = profiles[static_cast<size_t>(side)][static_cast<size_t>(i)];
+            if (profile.empty()) continue;
+            const auto grad = [&](int k) { return polarity * (profile[static_cast<size_t>(k + 1)] - profile[static_cast<size_t>(k - 1)]); };
+            int best = -1; double best_score = 0;
+            for (int k = inner - steps; k <= inner + steps; ++k) {
+                const double g = grad(k), paired = -grad(k - stroke);
+                if (g <= 0 || paired <= 0) continue;
+                const double score = g + std::min(g, paired);
+                if (score > best_score) { best_score = score; best = k; }
+            }
+            if (best < 0 || grad(best) < 4.0) continue;
+            const double best_g = grad(best);
+            const double a = grad(best - 1), b = grad(best), c = grad(best + 1), denom = a - 2 * b + c;
+            const double sub = std::abs(denom) > 1e-9 ? std::clamp(0.5 * (a - c) / denom, -0.5, 0.5) : 0.0;
+            double x, y, nx, ny; base_point(side, i, x, y, nx, ny);
+            const double d = (best + sub - inner) * step;
+            ImagePoint p{}; if (!map_point(h, x + nx * d, y + ny * d, p)) continue;
+            found[static_cast<size_t>(side)].push_back({p.x, p.y, best_g});
+        }
+        // Weak steps are usually not the frame: keep those at least 40% of the median strength.
+        auto &points = found[static_cast<size_t>(side)];
+        if (points.size() < 10) return false;
+        std::vector<double> strengths; for (const auto &e : points) strengths.push_back(e.strength);
+        std::nth_element(strengths.begin(), strengths.begin() + static_cast<std::ptrdiff_t>(strengths.size() / 2), strengths.end());
+        const double median = strengths[strengths.size() / 2];
+        points.erase(std::remove_if(points.begin(), points.end(), [&](const FrameEdgePoint &e) { return e.strength < 0.4 * median; }), points.end());
+        if (points.size() < 8) return false;
+    }
+    return true;
+}
+
+struct EdgeLine { double nx, ny, d; };
+
+// Least-squares line through one side's points after undistorting them with
+// `lens`, dropping outliers; returns the sum of squared residuals of the
+// points kept (or a negative value if too few remain).
+double fit_edge_line(const std::vector<FrameEdgePoint> &side, const LensModel &lens, EdgeLine &line, size_t *kept_count = nullptr) {
+    std::vector<Point2> points; points.reserve(side.size());
+    for (const auto &e : side) { double x = e.x, y = e.y; lens_undistort(lens, x, y); points.push_back({x, y}); }
+    double error = 0;
+    for (int pass = 0; pass < 3; ++pass) {
+        if (points.size() < 8) return -1;
+        double mx = 0, my = 0; for (const auto &e : points) { mx += e.x; my += e.y; } mx /= points.size(); my /= points.size();
+        double sxx = 0, syy = 0, sxy = 0;
+        for (const auto &e : points) { sxx += (e.x - mx) * (e.x - mx); syy += (e.y - my) * (e.y - my); sxy += (e.x - mx) * (e.y - my); }
+        const double theta = 0.5 * std::atan2(2 * sxy, sxx - syy);
+        line = {-std::sin(theta), std::cos(theta), 0}; line.d = mx * line.nx + my * line.ny;
+        std::vector<double> residual; error = 0;
+        for (const auto &e : points) { residual.push_back(std::abs(e.x * line.nx + e.y * line.ny - line.d)); error += residual.back() * residual.back(); }
+        std::vector<double> sorted = residual; std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2), sorted.end());
+        const double limit = std::max(0.6, 2.5 * sorted[sorted.size() / 2]);
+        std::vector<Point2> kept; for (size_t k = 0; k < points.size(); ++k) if (residual[k] <= limit) kept.push_back(points[k]);
+        if (kept.size() == points.size()) break;
+        points.swap(kept);
+    }
+    if (kept_count) *kept_count = points.size();
+    return error / static_cast<double>(points.size());
+}
+
+// Radial distortion from the frame itself: the k1 that makes all four sides
+// straightest. Returns a lens with k1 = 0 unless bending the sides straight
+// clearly beats leaving them (so noise is not mistaken for a lens).
+LensModel estimate_lens(const std::array<std::vector<FrameEdgePoint>, 4> &sides, size_t width, size_t height) {
+    LensModel lens{0, 0.5 * static_cast<double>(width), 0.5 * static_cast<double>(height), static_cast<double>(std::max(width, height))};
+    const auto cost = [&](double k1) {
+        LensModel trial = lens; trial.k1 = k1; double total = 0;
+        for (const auto &side : sides) { EdgeLine line{}; const double e = fit_edge_line(side, trial, line); if (e < 0) return 1e300; total += e; }
+        return total;
+    };
+    const double flat = cost(0.0);
+    if (flat >= 1e300) return lens;
+    double best_k = 0, best = flat;
+    for (double k = -0.6; k <= 0.4001; k += 0.02) { const double c = cost(k); if (c < best) { best = c; best_k = k; } }
+    for (double span = 0.01; span > 0.0004; span /= 2) for (const double k : {best_k - span, best_k + span}) { const double c = cost(k); if (c < best) { best = c; best_k = k; } }
+    // Mean squared residual per point, in pixels squared.
+    if (best_k != 0 && flat - best > 0.02 && best < 0.6 * flat) lens.k1 = best_k;
+    return lens;
+}
+
+// Fits the four frame sides as straight lines (in undistorted space under the
+// active lens) and rewrites `quad` as the field corners they imply. A
+// straight line stays straight under perspective, so this is exact at any
+// tilt and does not depend on a hill climb converging. `reach` is the search
+// distance either side of the expected edge, in canonical units. With
+// `fit_lens`, the radial distortion is estimated first and installed as the
+// active lens for the caller's scope.
+bool fit_frame_edges(const uint8_t *gray, size_t width, size_t height, size_t stride, double quad[8], double reach, bool fit_lens = false) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    std::array<std::vector<FrameEdgePoint>, 4> sides;
+    if (!frame_edge_points(gray, width, height, stride, quad, reach, sides)) return false;
+    if (fit_lens) active_lens() = estimate_lens(sides, width, height);
+    const LensModel lens = active_lens();
+    std::array<EdgeLine, 4> lines{};
+    for (int side = 0; side < 4; ++side) if (fit_edge_line(sides[static_cast<size_t>(side)], lens, lines[static_cast<size_t>(side)]) < 0) return false;
+    double outer[8];
+    for (int c = 0; c < 4; ++c) {  // corner c joins side c - 1 and side c
+        const EdgeLine &a = lines[static_cast<size_t>((c + 3) % 4)], &b = lines[static_cast<size_t>(c)];
+        const double det = a.nx * b.ny - a.ny * b.nx;
+        if (std::abs(det) < 1e-9) return false;
+        outer[2 * c] = (a.d * b.ny - a.ny * b.d) / det; outer[2 * c + 1] = (a.nx * b.d - a.d * b.nx) / det;
+    }
+    // From the stroke's outer-edge square to the full field (undistorted space), then through the lens.
+    const double src[8] = {kFrameOuter, kFrameOuter, 29 - kFrameOuter, kFrameOuter, 29 - kFrameOuter, 29 - kFrameOuter, kFrameOuter, 29 - kFrameOuter};
+    double g[8]; if (!solve_homography_raw(src, outer, g)) return false;
+    double out[8];
+    for (int c = 0; c < 4; ++c) {
+        ImagePoint p{}; if (!map_point_raw(g, canonical[2 * c], canonical[2 * c + 1], p)) return false;
+        lens_distort(lens, p.x, p.y); out[2 * c] = p.x; out[2 * c + 1] = p.y;
+    }
+    const double unit_px = quad_mean_side(quad) / 29.0;
+    if (!valid_quad(out) || quad_corner_distance(out, quad) > 1.5 * reach * unit_px + 2.0) return false;
+    std::copy(out, out + 8, quad);
+    return true;
+}
+
+// Blur from a known edge. The frame stroke's outer edge is a sharp step in
+// the design, so its profile in the image is the camera's edge response, and
+// the width of that profile's gradient is the blur width (the standard
+// deviation of the point spread function), measured directly rather than
+// guessed from the data. Returned in canonical units; 0 if it cannot be
+// measured.
+double measure_edge_blur(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8]) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad, h)) return 0;
+    const double unit_px = quad_mean_side(quad) / 29.0;
+    if (unit_px < 1.5) return 0;
+    const double step = 0.5 / unit_px; const int half = std::clamp(static_cast<int>(std::ceil(0.3 / step)), 4, 24);
+    std::vector<double> widths;
+    for (int side = 0; side < 4; ++side) for (int i = 0; i < 12; ++i) {
+        const double t = 6.0 + 17.0 * i / 11.0;
+        double x, y, nx, ny;
+        if (side == 0) { x = t; y = kFrameOuter; nx = 0; ny = -1; }
+        else if (side == 1) { x = 29 - kFrameOuter; y = t; nx = 1; ny = 0; }
+        else if (side == 2) { x = 29 - t; y = 29 - kFrameOuter; nx = 0; ny = 1; }
+        else { x = kFrameOuter; y = 29 - t; nx = -1; ny = 0; }
+        std::vector<double> profile(static_cast<size_t>(2 * half + 1)); bool ok = true;
+        for (int k = -half; k <= half && ok; ++k) { profile[static_cast<size_t>(k + half)] = gray_sample(gray, width, height, stride, h, x + nx * k * step, y + ny * k * step, 0.0); ok = profile[static_cast<size_t>(k + half)] >= 0; }
+        if (!ok) continue;
+        const double sign = profile.back() >= profile.front() ? 1.0 : -1.0;
+        double total = 0, first = 0, second = 0;
+        for (int k = 0; k < 2 * half; ++k) {
+            const double g = std::max(0.0, sign * (profile[static_cast<size_t>(k + 1)] - profile[static_cast<size_t>(k)])), position = (k + 0.5 - half) * step;
+            total += g; first += g * position; second += g * position * position;
+        }
+        if (total < 8.0) continue;
+        const double mean = first / total, variance = second / total - mean * mean;
+        if (variance > 0) widths.push_back(std::sqrt(variance));
+    }
+    if (widths.size() < 12) return 0;
+    std::nth_element(widths.begin(), widths.begin() + static_cast<std::ptrdiff_t>(widths.size() / 2), widths.end());
+    return widths[widths.size() / 2];
+}
+
+// Sharpness of the module lattice under a quadrilateral: the spread of a
+// sample of Cartesian sites. Samples taken on module centres are either ink
+// or background; off-centre they mix, and the spread falls. It needs no
+// polarity, threshold or key.
+double lattice_sharpness(const ScalableLayout &L, const std::vector<uint32_t> &sites, const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8]) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad, h)) return 0;
+    double sum = 0, sq = 0; int n = 0;
+    for (uint32_t i : sites) {
+        const double v = gray_sample(gray, width, height, stride, h, L.nodes[i].x, L.nodes[i].y, 0.1 * L.pitch);
+        if (v < 0) continue;
+        sum += v; sq += v * v; ++n;
+    }
+    if (n < static_cast<int>(sites.size()) / 2 || n < 16) return 0;
+    const double mean = sum / n;
+    return std::sqrt(std::max(0.0, sq / n - mean * mean));
+}
+
+// Final registration on the data itself: per-corner moves that sharpen the
+// module lattice, limited to `limit_modules` from where the frame fit put
+// each corner (so the lattice cannot slip by a whole module).
+void refine_on_lattice(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, double quad[8], double limit_modules) {
+    std::vector<uint32_t> sites;
+    const size_t total = L.nodes.size(), stride_sites = std::max<size_t>(1, total / 700);
+    for (size_t i = 0; i < total; i += stride_sites) if (L.nodes[i].kind == 0) sites.push_back(static_cast<uint32_t>(i));
+    if (sites.size() < 48) { sites.clear(); for (size_t i = 0; i < total; ++i) if (L.nodes[i].kind == 0) sites.push_back(static_cast<uint32_t>(i)); }
+    if (sites.size() < 24) return;
+    const double module_px = quad_mean_side(quad) / L.grid, limit = limit_modules * module_px;
+    double start[8]; std::copy(quad, quad + 8, start);
+    double best = lattice_sharpness(L, sites, gray, width, height, stride, quad);
+    if (best <= 0) return;
+    for (double step = 0.3 * module_px; step >= 0.03 * module_px && step >= 0.05; step /= 2) {
+        for (int pass = 0; pass < 4; ++pass) {
+            bool improved = false;
+            for (int corner = 0; corner < 4; ++corner) for (const auto &[dx, dy] : {std::pair{1.0, 0.0}, {-1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}}) {
+                double q[8]; std::copy(quad, quad + 8, q);
+                q[2 * corner] += dx * step; q[2 * corner + 1] += dy * step;
+                if (std::hypot(q[2 * corner] - start[2 * corner], q[2 * corner + 1] - start[2 * corner + 1]) > limit) continue;
+                const double score = lattice_sharpness(L, sites, gray, width, height, stride, q);
+                if (score > best * 1.002) { best = score; std::copy(q, q + 8, quad); improved = true; }
+            }
+            if (!improved) break;
+        }
+    }
+}
+
+}  // namespace

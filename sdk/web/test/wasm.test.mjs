@@ -44,6 +44,8 @@ test('encode -> renderPixels -> decodeImageData round trip', { skip }, async () 
   for (const [text, opts] of [
     ['https://openckey.org', { version: 0, level: 'M', layout: 'standard' }],
     ['Grüße aus CKey ✓', { level: 'H', layout: 'print' }],
+    ['grouped ✓', { level: 'U', layout: 'standard-grouped' }],
+    ['grouped print ✓', { level: 'Q', layout: 'print-grouped' }],
   ]) {
     const sym = ckey.encode(text, opts);
     assert.equal(sym.level, opts.level);
@@ -58,7 +60,7 @@ test('encode -> renderPixels -> decodeImageData round trip', { skip }, async () 
     const r = ckey.decodeImageData(pad(img, 64));
     assert.ok(r, 'decoded');
     assert.equal(r.text, text);
-    assert.equal(r.profile, opts.layout === 'print' ? '0.1' : '0');
+    assert.equal(r.profile, opts.layout.startsWith('print') ? '0.1' : '0');
     assert.equal(r.version, sym.version);
     assert.equal(r.layout, opts.layout);
     sym.free();
@@ -101,6 +103,8 @@ test('errors carry the core diagnostics', { skip }, async () => {
   const { ckey } = await fresh();
   assert.throws(() => ckey.encode('x'.repeat(10000)), (e) => e instanceof Error && /exceeds|capacity|payload/i.test(e.message));
   assert.throws(() => ckey.encode('x', { level: 'Z' }), RangeError);
+  assert.equal(ckey.capacity(1, 'X'), 0);
+  assert.throws(() => ckey.encode('x', { version: 1, level: 'X' }), Error);
   const sym = ckey.encode('style');
   assert.throws(() => ckey.renderSVG(sym, { style: { ink: '#fafafa' } }), /contrast|:1/);
   assert.equal(ckey.checkStyle(sym, { style: { ink: '#fafafa' } }).ok, false);

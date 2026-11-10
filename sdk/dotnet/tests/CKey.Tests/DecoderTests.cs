@@ -23,6 +23,20 @@ namespace OpenCKey.Tests
             Assert.StartsWith("Profile 0 · v", result.ProfileName);
         }
 
+        [Theory]
+        [InlineData(Layout.StandardGrouped)]
+        [InlineData(Layout.PrintGrouped)]
+        public void RoundTripsGroupedLayouts(Layout layout)
+        {
+            var payload = new byte[] { 0, 1, 2, 0xff, 0xfe, 7, 0x80 };
+            var symbol = CKeySymbol.Encode(payload, layout: layout);
+            byte[] frame = Frames.Frame(symbol, out int w, out int h, out int stride);
+            CKeyResult? result = CKeyDecoder.Decode(frame, w, h, stride);
+            Assert.NotNull(result);
+            Assert.Equal(layout, result!.Layout);
+            Assert.Equal(payload, result.Payload);
+        }
+
         [Fact]
         public void RoundTripsPrintLayoutAndBinaryPayloads()
         {

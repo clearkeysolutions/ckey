@@ -9,7 +9,19 @@ enum class EccLevel(val code: Int) {
     /** About 22%. */
     Q(2),
     /** About 30%. */
-    H(3);
+    H(3),
+    /**
+     * Ultra: about 40% (80% of each block is parity). Carries about half of
+     * [H]'s payload. Readers before 0.1.0-build.86 reject it.
+     */
+    U(4),
+    /**
+     * Extreme: about 47.5% (95% parity). Carries about 5% of [L]'s payload,
+     * and nothing at all in the smallest versions (`CKeySymbol.capacity`
+     * returns 0 and encoding there fails). Readers before 0.1.0-build.86
+     * reject it.
+     */
+    X(5);
 
     companion object {
         @JvmStatic fun fromCode(code: Int): EccLevel = entries.firstOrNull { it.code == code }
@@ -22,7 +34,20 @@ enum class Layout(val code: Int) {
     /** Format 0.27, the screen layout. */
     STANDARD(0),
     /** Format 0.28 ("P0.1"): every mark and gap at least about one module, for small prints. */
-    PRINT(1);
+    PRINT(1),
+    /**
+     * Format 0.29: [STANDARD]'s geometry and capacity with byte-grouped
+     * placement, so a blot or logo costs only the bytes under it. Readers
+     * before 0.1.0-build.86 cannot read it; opt-in.
+     */
+    STANDARD_GROUPED(2),
+    /** Format 0.30: [PRINT]'s geometry and capacity, byte-grouped. Readers before 0.1.0-build.86 cannot read it; opt-in. */
+    PRINT_GROUPED(3);
+
+    /** True for the print geometry ("P0.1"): [PRINT] and [PRINT_GROUPED]. */
+    val isPrint: Boolean get() = this == PRINT || this == PRINT_GROUPED
+    /** True for byte-grouped placement: [STANDARD_GROUPED] and [PRINT_GROUPED]. */
+    val isGrouped: Boolean get() = this == STANDARD_GROUPED || this == PRINT_GROUPED
 
     companion object {
         @JvmStatic fun fromCode(code: Int): Layout = entries.firstOrNull { it.code == code }

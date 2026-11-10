@@ -243,6 +243,84 @@ bool rs_correct_generic(std::vector<uint8_t> &cw, size_t parity_bytes, uint32_t 
     return true;
 }
 
+// Errors-and-erasures decoding. `erasures` lists codeword positions the reader
+// already knows are unreliable. The code corrects any pattern with
+// 2 * errors + erasures <= parity, so a known-bad byte costs one parity byte
+// where an unknown one costs two. With `margin` > 0 a decode is accepted only
+// if 2 * errors + erasures <= parity - margin: the spare syndromes then act as
+// a check, which keeps a nearly-all-erased block from "correcting" to noise.
+// On success `corrected` is the number of unknown errors fixed. Forney's
+// formula gives the magnitudes; the syndromes are recomputed to confirm.
+bool rs_correct_erasures(std::vector<uint8_t> &cw, size_t parity_bytes, const std::vector<size_t> &erasures,
+                         size_t margin, uint32_t &corrected) {
+    const size_t n = cw.size(), P = parity_bytes, E = erasures.size();
+    if (n == 0 || n > 255 || P == 0 || P >= n || P > 254 || E + margin > P) return false;
+    std::vector<uint8_t> S(P, 0);
+    for (size_t j = 0; j < P; ++j) for (uint8_t b : cw) S[j] = gf.mul(S[j], gf.exp[j]) ^ b;
+    if (std::all_of(S.begin(), S.end(), [](uint8_t v) { return v == 0; })) { corrected = 0; return true; }
+    // Erasure locator G(x) = prod (1 - X_k x), X_k = alpha^(n - 1 - pos).
+    std::vector<uint8_t> G(1, 1);
+    for (size_t pos : erasures) {
+        if (pos >= n) return false;
+        const uint8_t X = gf.exp[n - 1 - pos];
+        G.push_back(0);
+        for (size_t i = G.size() - 1; i > 0; --i) G[i] ^= gf.mul(G[i - 1], X);
+    }
+    // Forney syndromes T = S * G mod x^P; T[E..P-1] depend on the errors only.
+    std::vector<uint8_t> T(P, 0);
+    for (size_t i = 0; i < P; ++i) for (size_t j = 0; j <= std::min(i, E); ++j) T[i] ^= gf.mul(S[i - j], G[j]);
+    // Berlekamp-Massey on T[E..P-1].
+    const size_t M = P - E;
+    std::vector<uint8_t> lambda(M + 1, 0), previous(M + 1, 0);
+    lambda[0] = previous[0] = 1;
+    size_t degree = 0, shift = 1; uint8_t last = 1;
+    for (size_t k = 0; k < M; ++k) {
+        uint8_t d = T[E + k];
+        for (size_t i = 1; i <= degree; ++i) d ^= gf.mul(lambda[i], T[E + k - i]);
+        if (!d) { ++shift; continue; }
+        const auto saved = lambda;
+        const uint8_t factor = gf.mul(d, gf.inv(last));
+        for (size_t i = 0; i + shift <= M; ++i) lambda[i + shift] ^= gf.mul(factor, previous[i]);
+        if (2 * degree <= k) { degree = k + 1 - degree; previous = saved; last = d; shift = 1; }
+        else ++shift;
+    }
+    if (2 * degree + E + margin > P) return false;
+    // Chien search for the error positions.
+    std::vector<size_t> positions(erasures.begin(), erasures.end());
+    size_t found = 0;
+    for (size_t pos = 0; pos < n && degree; ++pos) {
+        const uint8_t inverse = gf.inv(gf.exp[n - 1 - pos]);
+        uint8_t value = lambda[degree];
+        for (size_t i = degree; i-- > 0;) value = gf.mul(value, inverse) ^ lambda[i];
+        if (!value) {
+            if (std::find(erasures.begin(), erasures.end(), pos) != erasures.end()) return false;
+            positions.push_back(pos); ++found;
+        }
+    }
+    if (found != degree) return false;
+    // Combined locator Psi = lambda * G, evaluator Omega = S * Psi mod x^P.
+    std::vector<uint8_t> psi(degree + E + 1, 0);
+    for (size_t i = 0; i <= degree; ++i) for (size_t j = 0; j <= E; ++j) psi[i + j] ^= gf.mul(lambda[i], G[j]);
+    std::vector<uint8_t> omega(P, 0);
+    for (size_t i = 0; i < P; ++i) for (size_t j = 0; j <= std::min(i, psi.size() - 1); ++j) omega[i] ^= gf.mul(S[i - j], psi[j]);
+    for (size_t pos : positions) {
+        const uint8_t X = gf.exp[n - 1 - pos], inverse = gf.inv(X);
+        uint8_t numerator = 0, denominator = 0, power = 1;
+        for (size_t i = 0; i < P; ++i) { numerator ^= gf.mul(omega[i], power); power = gf.mul(power, inverse); }
+        // Formal derivative: odd-degree terms only (characteristic 2).
+        power = 1; const uint8_t inverse2 = gf.mul(inverse, inverse);
+        for (size_t i = 1; i < psi.size(); i += 2) { denominator ^= gf.mul(psi[i], power); power = gf.mul(power, inverse2); }
+        if (!denominator) return false;
+        cw[pos] ^= gf.mul(X, gf.mul(numerator, gf.inv(denominator)));
+    }
+    for (size_t j = 0; j < P; ++j) {
+        uint8_t syndrome = 0; for (uint8_t b : cw) syndrome = gf.mul(syndrome, gf.exp[j]) ^ b;
+        if (syndrome) return false;
+    }
+    corrected = static_cast<uint32_t>(degree);
+    return true;
+}
+
 uint32_t crc32c(const uint8_t *data, size_t len) {
     uint32_t crc = 0xffffffffu;
     for (size_t i = 0; i < len; ++i) {
@@ -670,7 +748,37 @@ void svg_corner_finders(std::ostringstream &o, double side, double inset,
 
 struct ImagePoint { double x, y; };
 
-bool solve_homography(const double src[8], const double dst[8], double h[8]) {
+// Lens model for the current thread. A camera lens bends straight lines
+// (radial distortion), so a symbol's image is a perspective view followed by
+// a radial stretch about the image centre:
+//     distorted = centre + (undistorted - centre) * (1 + k1 * r^2),
+// with r the undistorted distance from the centre in units of `scale`
+// pixels. When a lens is set, every mapping from the canonical field to the
+// image goes through it: solve_homography fits the perspective part to the
+// undistorted positions of the given image points, and map_point applies
+// the stretch. With k1 = 0 (the default) both are the plain projective maps.
+struct LensModel { double k1 = 0, cx = 0, cy = 0, scale = 1; };
+inline LensModel &active_lens() { static thread_local LensModel lens; return lens; }
+struct LensScope {
+    LensModel saved;
+    explicit LensScope(const LensModel &lens) : saved(active_lens()) { active_lens() = lens; }
+    ~LensScope() { active_lens() = saved; }
+    LensScope(const LensScope &) = delete; LensScope &operator=(const LensScope &) = delete;
+};
+inline void lens_distort(const LensModel &lens, double &x, double &y) {
+    if (lens.k1 == 0) return;
+    const double u = (x - lens.cx) / lens.scale, v = (y - lens.cy) / lens.scale, d = 1 + lens.k1 * (u * u + v * v);
+    x = lens.cx + lens.scale * u * d; y = lens.cy + lens.scale * v * d;
+}
+inline void lens_undistort(const LensModel &lens, double &x, double &y) {
+    if (lens.k1 == 0) return;
+    const double ud = (x - lens.cx) / lens.scale, vd = (y - lens.cy) / lens.scale;
+    double u = ud, v = vd;
+    for (int i = 0; i < 10; ++i) { const double d = 1 + lens.k1 * (u * u + v * v); if (std::abs(d) < 1e-6) break; u = ud / d; v = vd / d; }
+    x = lens.cx + lens.scale * u; y = lens.cy + lens.scale * v;
+}
+
+bool solve_homography_raw(const double src[8], const double dst[8], double h[8]) {
     double a[8][9]{};
     for (int i = 0; i < 4; ++i) {
         const double x = src[2*i], y = src[2*i+1], u = dst[2*i], v = dst[2*i+1];
@@ -689,10 +797,24 @@ bool solve_homography(const double src[8], const double dst[8], double h[8]) {
     return true;
 }
 
-bool map_point(const double h[8], double x, double y, ImagePoint &p) {
+bool map_point_raw(const double h[8], double x, double y, ImagePoint &p) {
     const double d=h[6]*x+h[7]*y+1.0;
     if (!std::isfinite(d) || std::abs(d)<1e-12) return false;
     p={(h[0]*x+h[1]*y+h[2])/d,(h[3]*x+h[4]*y+h[5])/d};
+    return std::isfinite(p.x) && std::isfinite(p.y);
+}
+
+bool solve_homography(const double src[8], const double dst[8], double h[8]) {
+    const LensModel &lens = active_lens();
+    if (lens.k1 == 0) return solve_homography_raw(src, dst, h);
+    double flat[8];
+    for (int i = 0; i < 4; ++i) { flat[2 * i] = dst[2 * i]; flat[2 * i + 1] = dst[2 * i + 1]; lens_undistort(lens, flat[2 * i], flat[2 * i + 1]); }
+    return solve_homography_raw(src, flat, h);
+}
+
+bool map_point(const double h[8], double x, double y, ImagePoint &p) {
+    if (!map_point_raw(h, x, y, p)) return false;
+    lens_distort(active_lens(), p.x, p.y);
     return std::isfinite(p.x) && std::isfinite(p.y);
 }
 
@@ -713,14 +835,34 @@ constexpr double kLocatorApertureRadius = 6.9;
 // agree: at least this fraction of key samples must match the expected print
 // pattern. Wrong orientations and non-symbols are rejected cheaply.
 constexpr double kDenseKeyGate = 0.8;
+// Least mark-to-background difference (grey levels) for Profile 0 keys.
+constexpr double kMinKeyContrast = 14.0;
+constexpr size_t kMaxDecodeAttempts = 8;  // version/orientation hypotheses sampled per decode
 constexpr double kModuleSpread = 0.06;   // 0.34-unit dense Cartesian modules
 constexpr double kDotSpread = 0.025;     // 0.15-0.20-unit ring dots and arcs
 constexpr double kRaySpread = 0.02;      // 0.10-0.16-unit radial strokes
 // A point inside the P3 Grid Key clearance: guaranteed unprinted.
 constexpr double kExtendedGridClearX = 7.75, kExtendedGridClearY = 45.5;
 
+// Work budget. Every image sample draws on a per-thread allowance that the
+// outermost public scan call sets. When it runs out, samples report "outside
+// the image" and every search loop winds down, so a call returns "no read"
+// instead of running on. The limits are far above what a real symbol needs.
+struct WorkBudget { uint64_t left = std::numeric_limits<uint64_t>::max(); int depth = 0; };
+inline WorkBudget &work_budget() { static thread_local WorkBudget b; return b; }
+struct WorkScope {
+    explicit WorkScope(uint64_t samples) { WorkBudget &b = work_budget(); if (b.depth++ == 0) b.left = samples; }
+    ~WorkScope() { WorkBudget &b = work_budget(); if (--b.depth == 0) b.left = std::numeric_limits<uint64_t>::max(); }
+    WorkScope(const WorkScope &) = delete; WorkScope &operator=(const WorkScope &) = delete;
+};
+inline bool work_exhausted() { return work_budget().left == 0; }
+constexpr uint64_t kFindWorkBudget = 400000;      // samples per ckey_find_borders_gray8
+constexpr uint64_t kRefineWorkBudget = 8000000;   // per ckey_refine_quad_gray8
+constexpr uint64_t kDecodeWorkBudget = 16000000;   // per ckey_decode_*_gray8
+
 double gray_sample(const uint8_t *gray, size_t width, size_t height, size_t stride,
                    const double h[8], double x, double y, double spread = kLocatorSampleSpread) {
+    { WorkBudget &b = work_budget(); if (b.left == 0) return -1; --b.left; }
     // A small center-weighted 3x3 sample tolerates rasterization and mild blur.
     const double offsets[3]={-spread,0.0,spread};
     constexpr double weights[3]={1.0,2.0,1.0};
@@ -961,19 +1103,33 @@ constexpr std::array<int, kScalableVersions> kScalableSlots = {72, 80, 80, 88, 9
 constexpr std::array<int, kScalableVersions> kScalableRings = {3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 23, 25, 27, 29, 32, 34, 37};
 constexpr std::array<int, kScalableVersions> kScalableGridCol = {2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8, 9, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 23};
 constexpr std::array<int, kScalableVersions> kScalableGridRow = {10, 12, 13, 14, 15, 16, 17, 18, 20, 21, 23, 25, 27, 28, 31, 33, 35, 38, 41, 44, 47, 50, 54, 58, 62, 67, 72, 77, 83, 88, 95};
-constexpr std::array<int, 4> kScalableParityPercent = {14, 28, 44, 60};  // L, M, Q, H
+// Parity as a percentage of each RS block. A level corrects half that
+// fraction in unknown bad bytes, or all of it in known-missing bytes
+// (erasures). U (Ultra) and X (Extreme) trade most of the payload for damage
+// tolerance: same code, same decoder, more parity.
+constexpr int kScalableLevels = 6;
+constexpr std::array<int, kScalableLevels> kScalableParityPercent = {14, 28, 44, 60, 80, 95};  // L, M, Q, H, U, X
+constexpr char kScalableLevelNames[] = "LMQHUX";
 constexpr double kScalableRingInner = 3.4, kScalableDialInner = 7.6;
 constexpr size_t kScalableHeaderBytes = 8, kScalableOverheadBytes = 12;  // header + CRC-32C
 
 struct ScalableNode { uint8_t kind; double x, y; int ring, slot; uint32_t id; };  // kind: 0 Cartesian, 1 dial, 2 ring
 
-// Layout families. 0 = standard (Format 0.27). 1 = print (Format 0.28): every
-// mark and gap is at least about one module, for small printed sizes.
+// Geometry families. 0 = standard. 1 = print: every mark and gap is at least
+// about one module, for small printed sizes. A layout (ckey_scalable_layout)
+// is a family plus a placement rule: layout & 1 is the family, layout >> 1 is
+// the placement (0 = bit-scattered, Formats 0.27/0.28; 1 = byte-grouped,
+// Formats 0.29/0.30). Both placements of a family share every site, mark and
+// key, so a symbol looks the same and a reader samples it the same way; only
+// the site-to-codeword-bit assignment differs.
 constexpr int kScalableFamilies = 2;
+constexpr int kScalableLayouts = 4;
 constexpr std::array<int, kScalableVersions> kScalablePrintRings = {2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 7, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 24, 25, 27, 29, 32};
 
 struct ScalableLayout {
     int version = 0, family = 0, grid = 0, rings = 0, col0 = 0, row0 = 0;
+    bool grouped = false;          // byte-grouped placement (Formats 0.29/0.30)
+    std::vector<uint32_t> base_index;  // grouped only: this site's index in the family's scattered layout
     int dial_slots = 0;            // dial ray slots (Ray Keys use these)
     int ring_stride = 0;           // max ring slots (ring_grid row length)
     std::vector<int> ring_slots;   // slots on each ring
@@ -1020,23 +1176,84 @@ DenseGeometry scalable_geometry(int col0, int row0, double p, int slots, double 
 // radius r is at least one module (print family).
 int equal_arc_slots(double r, double p) { return 8 * static_cast<int>(std::floor(kTau * r / (8.0 * p))); }
 
-std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int family) {
+// Byte-grouped placement (Formats 0.29 and 0.30). Each codeword byte's eight
+// bits go to eight neighbouring sites (a "clump"), so local damage costs the
+// bytes under it and no others.
+//   1. Each site kind has a path. Cartesian sites: the four quadrants in
+//      turn (top-left, top-right, bottom-right, bottom-left), each walked in
+//      a serpentine over its row pairs (pair k is the quadrant's rows 2k and
+//      2k+1; its columns ascending for even k, descending for odd k; at
+//      each column the upper row first). Dial rays by slot. Ring sites by
+//      ring, then slot.
+//   2. Each path is cut into runs of 8. The fewer-than-8 sites left over on
+//      each path are joined (Cartesian, dial, ring) and cut the same way. At
+//      most 7 sites then remain; they carry whitening only.
+//   3. Clumps are numbered in that order (Cartesian, dial, ring, mixed).
+//      Codeword byte j uses the clump with the j-th smallest value of
+//      (lowbias32(g XOR key), g), where g is the clump number and
+//      key = lowbias32(placement XOR version). This keyed shuffle spreads each
+//      RS block's bytes over the whole field.
+//   4. Bit 7 (the first) of a byte is the first site of its clump's run.
+void order_sites_grouped(std::vector<ScalableNode> &nodes, int grid, uint32_t key) {
+    std::array<std::vector<size_t>, 3> path;
+    std::vector<int> lattice(static_cast<size_t>(grid) * grid, -1);
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        if (nodes[i].kind == 0) lattice[static_cast<size_t>((nodes[i].id >> 12) & 0xfffu) * grid + (nodes[i].id & 0xfffu)] = static_cast<int>(i);
+        else path[nodes[i].kind].push_back(i);  // generated by slot, and by ring then slot
+    }
+    // Quadrants in the order top-left, top-right, bottom-right, bottom-left.
+    // Rows [0, half) are "top" and columns [0, half) are "left", half = ceil(grid / 2).
+    const int half = (grid + 1) / 2;
+    const int quadrant[4][4] = {{0, half, 0, half}, {0, half, half, grid}, {half, grid, half, grid}, {half, grid, 0, half}};  // row0, row1, col0, col1
+    for (const auto &q : quadrant) for (int pair = 0; q[0] + 2 * pair < q[1]; ++pair) for (int step = 0; step < q[3] - q[2]; ++step) {
+        const int col = pair % 2 == 0 ? q[2] + step : q[3] - 1 - step;
+        for (int row = q[0] + 2 * pair; row < std::min(q[0] + 2 * pair + 2, q[1]); ++row) {
+            const int index = lattice[static_cast<size_t>(row) * grid + col];
+            if (index >= 0) path[0].push_back(static_cast<size_t>(index));
+        }
+    }
+    std::vector<std::array<size_t, 8>> clumps; std::vector<size_t> rest;
+    for (const auto &run : path) {
+        const size_t whole = run.size() / 8;
+        for (size_t c = 0; c < whole; ++c) { std::array<size_t, 8> clump{}; std::copy_n(run.begin() + static_cast<std::ptrdiff_t>(8 * c), 8, clump.begin()); clumps.push_back(clump); }
+        rest.insert(rest.end(), run.begin() + static_cast<std::ptrdiff_t>(8 * whole), run.end());
+    }
+    const size_t mixed = rest.size() / 8;
+    for (size_t c = 0; c < mixed; ++c) { std::array<size_t, 8> clump{}; std::copy_n(rest.begin() + static_cast<std::ptrdiff_t>(8 * c), 8, clump.begin()); clumps.push_back(clump); }
+    std::vector<uint32_t> order(clumps.size());
+    std::iota(order.begin(), order.end(), 0u);
+    std::sort(order.begin(), order.end(), [key](uint32_t l, uint32_t r) {
+        const uint32_t hl = site_hash(l ^ key), hr = site_hash(r ^ key);
+        return hl != hr ? hl < hr : l < r;
+    });
+    std::vector<ScalableNode> out; out.reserve(nodes.size());
+    for (uint32_t g : order) for (size_t index : clumps[g]) out.push_back(nodes[index]);
+    for (size_t i = 8 * mixed; i < rest.size(); ++i) out.push_back(nodes[rest[i]]);
+    nodes.swap(out);
+}
+
+const ScalableLayout &scalable_layout(int v, int layout = 0);
+
+std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
     auto L = std::make_unique<ScalableLayout>();
+    const int family = layout & 1;
     const size_t i = static_cast<size_t>(v - 1);
-    L->version = v; L->family = family; L->grid = kScalableGrid[i];
+    L->version = v; L->family = family; L->grouped = (layout >> 1) != 0; L->grid = kScalableGrid[i];
     L->col0 = kScalableGridCol[i]; L->row0 = kScalableGridRow[i]; L->pitch = 29.0 / L->grid;
     const double p = L->pitch;
     if (family == 0) {
         L->rings = kScalableRings[i]; L->dial_slots = kScalableSlots[i];
         L->ring_slots.assign(static_cast<size_t>(L->rings), L->dial_slots);
         L->ring_pitch = 0.86 * p; L->dot = 0.2 * p; L->ray_width = 0.2 * p; L->long_len = 2.2 * p; L->short_len = 1.0 * p;
-        L->dial_sample = 1.6 * p; L->ring_key_span = 16; L->format = CKEY_SCALABLE_FORMAT_VERSION;
+        L->dial_sample = 1.6 * p; L->ring_key_span = 16;
+        L->format = L->grouped ? CKEY_SCALABLE_GROUPED_FORMAT_VERSION : CKEY_SCALABLE_FORMAT_VERSION;
     } else {
         L->rings = kScalablePrintRings[i]; L->ring_pitch = 1.0 * p;
         L->dial_slots = equal_arc_slots(kScalableDialInner, p);
         for (int k = 0; k < L->rings; ++k) L->ring_slots.push_back(equal_arc_slots(L->ring_radius(k), p));
         L->dot = 0.3 * p; L->ray_width = 0.35 * p; L->long_len = 2.4 * p; L->short_len = 1.0 * p;
-        L->dial_sample = 1.7 * p; L->ring_key_span = 8; L->format = CKEY_SCALABLE_PRINT_FORMAT_VERSION;
+        L->dial_sample = 1.7 * p; L->ring_key_span = 8;
+        L->format = L->grouped ? CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION : CKEY_SCALABLE_PRINT_FORMAT_VERSION;
         if (v == 1) L->row0 = 9;  // its longer rays need the v1 Grid Key one row higher for a pitch of clearance
     }
     L->ring_stride = *std::max_element(L->ring_slots.begin(), L->ring_slots.end());
@@ -1059,9 +1276,21 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int family) {
                                 site_identity(2, static_cast<uint32_t>(ring), static_cast<uint32_t>(slot))});
         }
     }
-    const uint32_t placement = family == 0 ? 0x434b5030u : 0x434b5031u;  // "CKP0" / "CKP1"
     const uint32_t whitening = family == 0 ? 0x434b5730u : 0x434b5731u;  // "CKW0" / "CKW1"
-    order_sites(L->nodes, site_hash(placement ^ static_cast<uint32_t>(v)));
+    if (L->grouped) {
+        const uint32_t placement = family == 0 ? 0x434b4730u : 0x434b4731u;  // "CKG0" / "CKG1"
+        order_sites_grouped(L->nodes, L->grid, site_hash(placement ^ static_cast<uint32_t>(v)));
+        const ScalableLayout &base = scalable_layout(v, family);
+        std::vector<std::pair<uint32_t, uint32_t>> ids; ids.reserve(base.nodes.size());
+        for (size_t n = 0; n < base.nodes.size(); ++n) ids.push_back({base.nodes[n].id, static_cast<uint32_t>(n)});
+        std::sort(ids.begin(), ids.end());
+        L->base_index.resize(L->nodes.size());
+        for (size_t n = 0; n < L->nodes.size(); ++n)
+            L->base_index[n] = std::lower_bound(ids.begin(), ids.end(), std::pair<uint32_t, uint32_t>{L->nodes[n].id, 0u})->second;
+    } else {
+        const uint32_t placement = family == 0 ? 0x434b5030u : 0x434b5031u;  // "CKP0" / "CKP1"
+        order_sites(L->nodes, site_hash(placement ^ static_cast<uint32_t>(v)));
+    }
     L->white = whitening_bits(whitening + static_cast<uint32_t>(v), L->nodes.size());
     L->codeword_bytes = L->nodes.size() / 8;
     L->ring_grid.assign(static_cast<size_t>(L->rings) * L->ring_stride, -1);
@@ -1070,11 +1299,11 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int family) {
     return L;
 }
 
-const ScalableLayout &scalable_layout(int v, int family = 0) {
-    static std::array<std::once_flag, kScalableVersions * kScalableFamilies> once;
-    static std::array<std::unique_ptr<ScalableLayout>, kScalableVersions * kScalableFamilies> cache;
-    const size_t i = static_cast<size_t>(family * kScalableVersions + v - 1);
-    std::call_once(once[i], [&] { cache[i] = build_scalable_layout(v, family); });
+const ScalableLayout &scalable_layout(int v, int layout) {
+    static std::array<std::once_flag, kScalableVersions * kScalableLayouts> once;
+    static std::array<std::unique_ptr<ScalableLayout>, kScalableVersions * kScalableLayouts> cache;
+    const size_t i = static_cast<size_t>(layout * kScalableVersions + v - 1);
+    std::call_once(once[i], [&] { cache[i] = build_scalable_layout(v, layout); });
     return *cache[i];
 }
 
@@ -1098,7 +1327,7 @@ size_t scalable_data_bytes(size_t codeword_bytes, int level) {
 }
 
 size_t scalable_capacity(int v, int level, int family = 0) {
-    if (v < 1 || v > kScalableVersions || level < 0 || level > 3 || family < 0 || family >= kScalableFamilies) return 0;
+    if (v < 1 || v > kScalableVersions || level < 0 || level >= kScalableLevels || family < 0 || family >= kScalableLayouts) return 0;
     const size_t k = scalable_data_bytes(scalable_layout(v, family).codeword_bytes, level);
     return k > kScalableOverheadBytes ? std::min<size_t>(k - kScalableOverheadBytes, 65535) : 0;
 }
@@ -1109,10 +1338,14 @@ bool scalable_site_value(const ScalableLayout &L, const ckey_scalable_symbol *s,
 }
 
 // Contrast/agreement fit of fixed samples (marks expected printed, empties
-// expected clear); invalid if any sample leaves the image.
-KeyFit sample_fit(const std::vector<double> &marks, const std::vector<double> &empty) {
-    if (marks.empty() || empty.empty() || std::any_of(marks.begin(), marks.end(), [](double v) { return v < 0; }) ||
-        std::any_of(empty.begin(), empty.end(), [](double v) { return v < 0; })) return {};
+// expected clear).
+KeyFit sample_fit(const std::vector<double> &all_marks, const std::vector<double> &all_empty) {
+    // Samples outside the image are dropped, so a symbol partly out of frame
+    // can still be fitted; at least 60% of each kind must remain.
+    std::vector<double> marks, empty;
+    for (double v : all_marks) if (v >= 0) marks.push_back(v);
+    for (double v : all_empty) if (v >= 0) empty.push_back(v);
+    if (marks.empty() || empty.empty() || marks.size() * 10 < all_marks.size() * 6 || empty.size() * 10 < all_empty.size() * 6) return {};
     const double mark_mean = std::accumulate(marks.begin(), marks.end(), 0.0) / marks.size();
     const double empty_mean = std::accumulate(empty.begin(), empty.end(), 0.0) / empty.size();
     const bool dark = mark_mean < empty_mean; const double threshold = (mark_mean + empty_mean) * .5;
@@ -1475,22 +1708,6 @@ int accent_of(uint32_t id, const ckey_style &st) {
 namespace {
 
 struct Point2 { double x, y; };
-
-uint8_t frame_threshold(const uint8_t *gray, size_t width, size_t height, size_t stride, bool dark_marks) {
-    std::array<size_t, 256> histogram{}; size_t samples = 0;
-    for (size_t y = 0; y < height; y += 8) for (size_t x = 0; x < width; x += 8) { ++histogram[gray[y * stride + x]]; ++samples; }
-    if (!samples) return dark_marks ? 92 : 164;
-    const auto percentile = [&](double fraction) {
-        const size_t target = static_cast<size_t>(static_cast<double>(samples - 1) * fraction); size_t total = 0;
-        for (int v = 0; v < 256; ++v) { total += histogram[v]; if (total > target) return v; }
-        return 255;
-    };
-    const int low = percentile(0.10), high = percentile(0.90);
-    if (high - low < 32) return dark_marks ? 92 : 164;
-    const double contrast = high - low;
-    const double value = dark_marks ? low + contrast * 0.32 : high - contrast * 0.32;
-    return static_cast<uint8_t>(std::clamp(static_cast<int>(std::lround(value)), 0, 255));
-}
 
 double cross(const Point2 &o, const Point2 &a, const Point2 &b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); }
 

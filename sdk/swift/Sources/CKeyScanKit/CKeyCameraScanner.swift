@@ -1,5 +1,6 @@
 #if canImport(AVFoundation) && (os(iOS) || os(macOS))
 import AVFoundation
+import Combine
 import CoreVideo
 import Foundation
 import QuartzCore
@@ -12,13 +13,32 @@ import UIKit
 import AppKit
 #endif
 
-/// A continuous AVFoundation camera scanner. It processes live frames on a
-/// background queue (at most `maxFramesPerSecond`), never needs a still
-/// capture, and emits the first valid decode of a session through
-/// `onResult` on the main queue. Frames are then ignored until `scanAgain()`.
+/// A continuous AVFoundation camera scanner that owns the camera: it picks
+/// the capture device, runs the session, decodes live frames, tracks the code
+/// on every frame and drives focus, exposure and zoom from the core's camera
+/// advice. The first valid decode of a session goes to `onResult` on the main
+/// queue; decoding then pauses until `scanAgain()`, while tracking continues.
+///
+/// **The scanner takes control of the camera by default.** Each part has a
+/// flag, all on by default:
+///
+/// | Flag | What it does |
+/// |---|---|
+/// | `controlsCamera` | Master switch for `focusOnCode`, `exposureControl` and `realDetailZoom`. |
+/// | `focusOnCode` | Continuous autofocus, near range, aimed at the code. |
+/// | `exposureControl` | Exposure metered on the code, with the core's exposure bias. |
+/// | `realDetailZoom` | Zoom on a small code, only as far as the sensor gives real detail. |
+/// | `regionOfInterest` | Two of every three frames decode only `scanRegion` plus a margin. |
+/// | `tracking` | Per-frame tracking, published through `onTrack`. |
+/// | `keepsScreenAwake` | No auto-lock while the camera runs (iOS apps). |
+///
+/// A host that manages its own capture device turns `controlsCamera` off, or
+/// uses `CKeyFrameProcessor` (and optionally `CKeyCameraControl`) with its
+/// own session instead of this class.
 ///
 /// Add `NSCameraUsageDescription` to the app's Info.plist. On macOS, sandboxed
-/// apps also need the camera entitlement.
+/// apps also need the camera entitlement. Call `start()`, `stop()` and
+/// `scanAgain()` from the main thread.
 ///
 /// The `CKey` product's `CKeyScanner` is this class with telemetry attached;
 /// apps that link only the scan-only product use this class directly.
@@ -30,19 +50,126 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     public var onResult: ((CKeyResult) -> Void)?
     /// Called on the main queue when the camera cannot be used.
     public var onError: ((CKeyError) -> Void)?
-    /// Frame-rate cap for decoding; stale frames are discarded.
-    public var maxFramesPerSecond: Double = 20
+    /// Frame-rate cap for decoding; stale frames are discarded. Tracking
+    /// runs on every frame regardless.
+    public var maxFramesPerSecond: Double {
+        get { processor.maxFramesPerSecond }
+        set { processor.maxFramesPerSecond = newValue }
+    }
+
+    // MARK: Camera control (on by default)
+
+    /// The master switch: the SDK drives focus, exposure and zoom from the
+    /// core's advice (default on). Off leaves the device alone after the
+    /// initial setup (continuous autofocus and auto exposure, and the wide
+    /// lens's field of view on a multi-camera device), whatever the three
+    /// flags below say. Region decoding and tracking do not touch the device
+    /// and have their own flags.
+    public var controlsCamera = true { didSet { updateControlFlags() } }
+    /// Continuous autofocus, restricted to the near range where supported,
+    /// aimed at the reticle and then at the found code; re-aimed only when
+    /// the code moves (default on).
+    public var focusOnCode = true { didSet { updateControlFlags() } }
+    /// Exposure metered on the code, with a negative bias when the code
+    /// clips and a 0 / -1 / -2 EV cycle while nothing decodes (default on).
+    public var exposureControl = true { didSet { updateControlFlags() } }
+    /// Zoom on a small code, only up to the active format's
+    /// `videoZoomFactorUpscaleThreshold`, where the sensor is cropped at
+    /// full resolution, or to a telephoto lens (default on).
+    public var realDetailZoom = true { didSet { updateControlFlags() } }
+
+    /// The control that drives the capture device, for its finer settings
+    /// (`closeFocusZoom`, `distortionCorrection`, `typicalCodeWidth`); `nil`
+    /// when there is no camera. Its three main flags are set by this scanner.
+    public let cameraControl: CKeyCameraControl?
+    /// The camera this scanner uses (see `CKeyCameraControl.preferredDevice()`),
+    /// for example for the torch; `nil` when there is none.
+    public var captureDevice: AVCaptureDevice? { cameraControl?.device }
+
+    // MARK: Region of interest
+
+    /// Region decoding (default on): two of every three analysed frames
+    /// decode only `scanRegion` plus an 18% margin, at full resolution and in
+    /// place; every third frame is decoded whole, so a code outside the
+    /// region or larger than it still reads.
+    public var regionOfInterest: Bool {
+        get { processor.regionOfInterest }
+        set { processor.regionOfInterest = newValue }
+    }
+
+    /// Where the code is expected, in capture-device coordinates (fractions
+    /// of the sensor frame): the reticle, converted with
+    /// `CKeyPreviewView.sensorRect(fromViewRect:)`. Decoding reads it first,
+    /// and focus and exposure rest on its centre. The default is the middle
+    /// of the frame; `nil` decodes whole frames only.
+    public var scanRegion: CGRect? {
+        get { processor.scanRegion }
+        set {
+            processor.scanRegion = newValue
+            guard let region = processor.scanRegion, let control = cameraControl else { return }
+            let centre = CGPoint(x: region.midX, y: region.midY)
+            let previous = control.restingPoint
+            guard abs(previous.x - centre.x) > 0.002 || abs(previous.y - centre.y) > 0.002 else { return }
+            control.restingPoint = centre
+            control.aimAtRest()
+        }
+    }
+
+    // MARK: Tracking and guidance
+
+    /// Per-frame tracking (default on): the code's four corners on every
+    /// frame, measured by the core on a small crop around the last corners,
+    /// on its own queue and separately from decoding. It keeps going after a
+    /// read. Tracks are published through `onTrack` whether or not an overlay
+    /// is shown.
+    public var tracking: Bool {
+        get { processor.tracking }
+        set { processor.tracking = newValue }
+    }
+
+    /// The raw track, for custom overlays: called on `trackQueue` for every
+    /// frame the code was measured on, and with `nil` once the track is lost.
+    /// `CKeyBracketOverlay` is the built-in drawing of the same data.
+    public var onTrack: ((CKeyTrack?) -> Void)? {
+        get { processor.onTrack }
+        set { processor.onTrack = newValue }
+    }
+
+    /// The queue `onTrack` is called on (default main).
+    public var trackQueue: DispatchQueue {
+        get { processor.trackQueue }
+        set { processor.trackQueue = newValue }
+    }
+
+    /// Called on the main queue when what the user should be told changes:
+    /// move closer, move back (a corner is cut off), hold steady, refocus,
+    /// glare. An empty set clears the hint.
+    public var onGuidance: ((CKeyGuidance) -> Void)? {
+        get { processor.onGuidance }
+        set { processor.onGuidance = newValue }
+    }
+
+    // MARK: Screen
+
+    /// Keeps the screen awake while the camera runs (default on), so the
+    /// device does not auto-lock mid-scan: `UIApplication.isIdleTimerDisabled`
+    /// is set at `start()` and cleared at `stop()`. iOS apps only; it does
+    /// nothing in app extensions and on macOS. Turn it off if the app manages
+    /// the idle timer itself.
+    public var keepsScreenAwake = true {
+        didSet { if keepsScreenAwake != oldValue, isStarted { setScreenAwake(keepsScreenAwake) } }
+    }
 
     private let observer: CKeyScanObserver?
+    private let processor: CKeyFrameProcessor
     private let sessionQueue = DispatchQueue(label: "org.openckey.scanner.session")
     private let frameQueue = DispatchQueue(label: "org.openckey.scanner.frames", qos: .userInitiated)
     private let output = AVCaptureVideoDataOutput()
     private var configured = false
-    // Frame-queue state.
-    private var didDecode = false
-    private var lastFrameTime: CFTimeInterval = 0
     // Main-thread state.
     private var sessionOpen = false
+    private var isStarted = false
+    private var heldScreenAwake = false
 
     /// Capture resolution. `.uhd4K` reads the densest symbols; `.hd1080` uses
     /// far less memory (camera extensions, older devices).
@@ -54,14 +181,28 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     ///     held strongly. `nil` for none.
     ///   - resolution: preferred capture resolution; falls back to the best
     ///     the device supports.
-    public init(observer: CKeyScanObserver?, resolution: Resolution = .uhd4K) {
+    ///   - device: the camera to use; `nil` (default) picks
+    ///     `CKeyCameraControl.preferredDevice()`.
+    public init(observer: CKeyScanObserver?, resolution: Resolution = .uhd4K, device: AVCaptureDevice? = nil) {
         self.observer = observer
         self.resolution = resolution
+        processor = CKeyFrameProcessor(observer: observer)
+        cameraControl = (device ?? CKeyCameraControl.preferredDevice()).map { CKeyCameraControl(device: $0) }
         super.init()
+        processor.onResult = { [weak self] result in self?.onResult?(result) }
+        if let control = cameraControl {
+            let processor = self.processor
+            processor.onAdvice = { [weak control] advice in control?.apply(advice) }
+            control.onZoomChange = { [weak processor] ratio in processor?.zoomDidChange(by: ratio) }
+            if let region = processor.scanRegion {
+                control.restingPoint = CGPoint(x: region.midX, y: region.midY)
+            }
+        }
     }
 
     deinit {
         if sessionOpen { observer?.scanSessionDidEnd() }
+        if heldScreenAwake { CKeyCameraScanner.setIdleTimerDisabled(false) }
         let session = self.session
         sessionQueue.async { if session.isRunning { session.stopRunning() } }
     }
@@ -86,15 +227,38 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     /// Stops the camera and ends the scan session (a session without a decode fails).
     public func stop() {
         endSession()
+        isStarted = false
+        setScreenAwake(false)
+        processor.reset()
         let session = self.session
         sessionQueue.async { if session.isRunning { session.stopRunning() } }
     }
 
     /// Starts a new scan session after a decode, keeping the camera running.
+    /// The track is dropped and the zoom and exposure return to rest.
     public func scanAgain() {
         endSession()
         beginSession()
-        frameQueue.async { self.didDecode = false }
+        processor.scanAgain()
+        cameraControl?.reset()
+    }
+
+    /// When a frame was captured, in host-clock seconds: its presentation
+    /// timestamp converted from the session's synchronization clock. Tracks
+    /// carry this time so an overlay can time its motion by when the camera
+    /// saw the code, not by when the result arrived. Hosts with their own
+    /// session pass it to `CKeyFrameProcessor.process(pixelBuffer:captureTime:)`.
+    public static func captureTime(of sampleBuffer: CMSampleBuffer, session: AVCaptureSession) -> TimeInterval {
+        let host = CMClockGetHostTimeClock()
+        let clock: CMClock
+        if #available(iOS 15.4, macOS 12.3, *) {
+            clock = session.synchronizationClock ?? host
+        } else {
+            clock = session.masterClock ?? host
+        }
+        let seconds = CMTimeGetSeconds(CMSyncConvertTime(CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
+                                                         from: clock, to: host))
+        return seconds.isFinite && seconds > 0 ? seconds : CACurrentMediaTime()
     }
 
     private func beginSession() {
@@ -111,12 +275,18 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     }
 
     private func fail(_ message: String, _ code: CKeyError.Code = .cameraUnavailable) {
-        DispatchQueue.main.async { self.onError?(CKeyError(code, message)) }
+        DispatchQueue.main.async {
+            self.isStarted = false
+            self.setScreenAwake(false)
+            self.onError?(CKeyError(code, message))
+        }
     }
 
     private func run() {
         if !sessionOpen { beginSession() }
-        frameQueue.async { self.didDecode = false }
+        isStarted = true
+        setScreenAwake(keepsScreenAwake)
+        processor.scanAgain()
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if !self.configured {
@@ -126,6 +296,8 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                 }
                 self.configured = true
             }
+            // Zoom limits depend on the format the session settled on.
+            self.cameraControl?.prepare()
             if !self.session.isRunning { self.session.startRunning() }
         }
     }
@@ -133,6 +305,11 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     private func configure() -> Bool {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
+        guard let camera = cameraControl?.device, let input = try? AVCaptureDeviceInput(device: camera),
+              session.canAddInput(input) else {
+            return false
+        }
+        session.addInput(input)
         // Dense symbols need many camera pixels per unit: prefer 4K unless asked otherwise.
         if resolution == .uhd4K, session.canSetSessionPreset(.hd4K3840x2160) {
             session.sessionPreset = .hd4K3840x2160
@@ -141,28 +318,8 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         } else {
             session.sessionPreset = .high
         }
-        #if os(iOS)
-        // The physical wide camera, so iOS cannot swap lenses mid-measurement.
-        let camera = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera],
-                                                      mediaType: .video, position: .back).devices.first
-            ?? AVCaptureDevice.default(for: .video)
-        #else
-        let camera = AVCaptureDevice.default(for: .video)
-        #endif
-        guard let camera, let input = try? AVCaptureDeviceInput(device: camera), session.canAddInput(input) else {
-            return false
-        }
-        session.addInput(input)
-        if (try? camera.lockForConfiguration()) != nil {
-            if camera.isFocusModeSupported(.continuousAutoFocus) { camera.focusMode = .continuousAutoFocus }
-            if camera.isExposureModeSupported(.continuousAutoExposure) { camera.exposureMode = .continuousAutoExposure }
-            #if os(iOS)
-            if camera.isAutoFocusRangeRestrictionSupported { camera.autoFocusRangeRestriction = .none }
-            camera.videoZoomFactor = 1.0
-            camera.isSubjectAreaChangeMonitoringEnabled = false
-            #endif
-            camera.unlockForConfiguration()
-        }
+        // Frames stay in the sensor's native orientation (the connection is
+        // not rotated), so normalized coordinates are capture-device coordinates.
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
@@ -173,40 +330,165 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         return true
     }
 
+    /// The three device flags, gated by the master switch.
+    private func updateControlFlags() {
+        guard let control = cameraControl else { return }
+        control.focusOnCode = controlsCamera && focusOnCode
+        control.exposureControl = controlsCamera && exposureControl
+        control.realDetailZoom = controlsCamera && realDetailZoom
+    }
+
+    // MARK: Screen awake
+
+    private func setScreenAwake(_ awake: Bool) {
+        if !Thread.isMainThread { DispatchQueue.main.async { self.setScreenAwake(awake) }; return }
+        guard awake != heldScreenAwake else { return }
+        heldScreenAwake = awake
+        CKeyCameraScanner.setIdleTimerDisabled(awake)
+    }
+
+    /// Sets `UIApplication.shared.isIdleTimerDisabled` on the main thread.
+    /// The application object is reached by name and the property by key, so
+    /// this file also compiles for (and does nothing in) app extensions,
+    /// which have no `UIApplication`.
+    private static func setIdleTimerDisabled(_ disabled: Bool) {
+        #if os(iOS)
+        let apply = {
+            guard !Bundle.main.bundlePath.hasSuffix(".appex") else { return }
+            let selector = NSSelectorFromString("sharedApplication")
+            guard UIApplication.responds(to: selector),
+                  let application = UIApplication.perform(selector)?.takeUnretainedValue() as? UIApplication else {
+                return
+            }
+            application.setValue(disabled, forKey: "idleTimerDisabled")
+        }
+        if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
+        #endif
+    }
+
     // MARK: AVCaptureVideoDataOutputSampleBufferDelegate
 
+    /// Hands each frame to the tracker and the decoder and returns at once;
+    /// the work happens on the processor's queues.
     open func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
                             from connection: AVCaptureConnection) {
-        if didDecode { return }
-        let now = CACurrentMediaTime()
-        if maxFramesPerSecond > 0, now - lastFrameTime < 1 / maxFramesPerSecond { return }
-        lastFrameTime = now
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let result = CKeyDecoder.decode(pixelBuffer: pixelBuffer)
-        observer?.scanFrameProcessed(milliseconds: (CACurrentMediaTime() - now) * 1000)
-        guard let result else { return }
-        didDecode = true
-        observer?.scanSessionDidDecode(result)
-        DispatchQueue.main.async { self.onResult?(result) }
+        processor.process(pixelBuffer: pixelBuffer,
+                          captureTime: CKeyCameraScanner.captureTime(of: sampleBuffer, session: session))
+    }
+}
+
+/// Converts between capture-device coordinates (the normalized sensor
+/// coordinates of `CKeyTrack.corners`, `scanRegion` and AVFoundation's points
+/// of interest) and a preview layer's own coordinates, accounting for
+/// aspect-fill cropping, rotation and mirroring. It holds the layer weakly;
+/// `CKeyCameraPreview(session:geometry:)` fills it in, or set `layer` to your
+/// own `AVCaptureVideoPreviewLayer`. Use it on the main thread.
+///
+/// A custom overlay laid exactly over the preview draws a track with:
+///
+///     scanner.onTrack = { track in
+///         let points = track.flatMap { geometry.viewPoints(fromSensorPoints: $0.corners) }
+///         myOverlay.show(points)          // nil: nothing to draw
+///     }
+public final class CKeyPreviewGeometry: ObservableObject {
+    /// The preview layer to convert with.
+    public weak var layer: AVCaptureVideoPreviewLayer?
+
+    public init(layer: AVCaptureVideoPreviewLayer? = nil) {
+        self.layer = layer
+    }
+
+    /// Sensor points in the layer's coordinates; `nil` until the layer shows a camera.
+    public func viewPoints(fromSensorPoints points: [CGPoint]) -> [CGPoint]? {
+        guard let layer = layer else { return nil }
+        return CKeyPreviewGeometry.viewPoints(fromSensorPoints: points, in: layer)
+    }
+
+    /// A sensor rectangle's bounding box in the layer's coordinates.
+    public func viewRect(fromSensorRect rect: CGRect) -> CGRect? {
+        guard let layer = layer else { return nil }
+        return CKeyPreviewGeometry.viewRect(fromSensorRect: rect, in: layer)
+    }
+
+    /// A rectangle of the layer (for example the reticle) in sensor
+    /// coordinates: the value for `CKeyCameraScanner.scanRegion`.
+    public func sensorRect(fromViewRect rect: CGRect) -> CGRect? {
+        guard let layer = layer else { return nil }
+        return CKeyPreviewGeometry.sensorRect(fromViewRect: rect, in: layer)
+    }
+
+    /// Normalized sensor points (`CKeyTrack.corners`) in `layer`'s
+    /// coordinates, by `layerPointConverted(fromCaptureDevicePoint:)`; `nil`
+    /// until the layer is connected to a camera.
+    public static func viewPoints(fromSensorPoints points: [CGPoint],
+                                  in layer: AVCaptureVideoPreviewLayer) -> [CGPoint]? {
+        guard layer.connection != nil else { return nil }
+        return points.map { layer.layerPointConverted(fromCaptureDevicePoint: $0) }
+    }
+
+    /// A normalized sensor rectangle's bounding box in `layer`'s coordinates.
+    public static func viewRect(fromSensorRect rect: CGRect, in layer: AVCaptureVideoPreviewLayer) -> CGRect? {
+        guard layer.connection != nil else { return nil }
+        let converted = layer.layerRectConverted(fromMetadataOutputRect: rect)
+        return converted.isNull || converted.isEmpty ? nil : converted
+    }
+
+    /// A rectangle of `layer` (for example the reticle) in normalized sensor
+    /// coordinates.
+    public static func sensorRect(fromViewRect rect: CGRect, in layer: AVCaptureVideoPreviewLayer) -> CGRect? {
+        guard layer.connection != nil, !rect.isNull, !rect.isEmpty else { return nil }
+        let converted = layer.metadataOutputRectConverted(fromLayerRect: rect)
+        return converted.width > 0 && converted.height > 0 ? converted : nil
     }
 }
 
 #if canImport(SwiftUI)
+extension CKeyCameraPreview {
+    /// Normalized sensor points (`CKeyTrack.corners`) in `layer`'s
+    /// coordinates, by `layerPointConverted(fromCaptureDevicePoint:)`; `nil`
+    /// until the layer is connected to a camera.
+    public static func viewPoints(fromSensorPoints points: [CGPoint],
+                                  in layer: AVCaptureVideoPreviewLayer) -> [CGPoint]? {
+        CKeyPreviewGeometry.viewPoints(fromSensorPoints: points, in: layer)
+    }
+
+    /// A normalized sensor rectangle's bounding box in `layer`'s coordinates.
+    public static func viewRect(fromSensorRect rect: CGRect, in layer: AVCaptureVideoPreviewLayer) -> CGRect? {
+        CKeyPreviewGeometry.viewRect(fromSensorRect: rect, in: layer)
+    }
+
+    /// A rectangle of `layer` (for example the reticle) in normalized sensor
+    /// coordinates: the value for `CKeyCameraScanner.scanRegion`.
+    public static func sensorRect(fromViewRect rect: CGRect, in layer: AVCaptureVideoPreviewLayer) -> CGRect? {
+        CKeyPreviewGeometry.sensorRect(fromViewRect: rect, in: layer)
+    }
+}
+
 #if os(iOS)
-/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session.
+/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session. Its static
+/// functions convert between sensor and view coordinates for custom overlays.
 public struct CKeyCameraPreview: UIViewRepresentable {
     public let session: AVCaptureSession
-    public init(session: AVCaptureSession) { self.session = session }
+    /// Receives the preview layer, for `CKeyBracketOverlayView` or a custom overlay.
+    public let geometry: CKeyPreviewGeometry?
+
+    public init(session: AVCaptureSession, geometry: CKeyPreviewGeometry? = nil) {
+        self.session = session
+        self.geometry = geometry
+    }
 
     public func makeUIView(context: Context) -> CKeyPreviewView {
         let view = CKeyPreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        geometry?.layer = view.previewLayer
         return view
     }
 
     public func updateUIView(_ view: CKeyPreviewView, context: Context) {
         if view.previewLayer.session !== session { view.previewLayer.session = session }
+        geometry?.layer = view.previewLayer
     }
 }
 
@@ -217,12 +499,36 @@ public final class CKeyPreviewView: UIView {
         // layerClass guarantees the type.
         layer as! AVCaptureVideoPreviewLayer // swiftlint:disable:this force_cast
     }
+
+    /// Normalized sensor points (`CKeyTrack.corners`) in this view's
+    /// coordinates; `nil` until the preview shows a camera.
+    public func viewPoints(fromSensorPoints points: [CGPoint]) -> [CGPoint]? {
+        CKeyCameraPreview.viewPoints(fromSensorPoints: points, in: previewLayer)
+    }
+
+    /// A normalized sensor rectangle's bounding box in this view's coordinates.
+    public func viewRect(fromSensorRect rect: CGRect) -> CGRect? {
+        CKeyCameraPreview.viewRect(fromSensorRect: rect, in: previewLayer)
+    }
+
+    /// A rectangle of this view (for example the reticle) in normalized
+    /// sensor coordinates: the value for `CKeyCameraScanner.scanRegion`.
+    public func sensorRect(fromViewRect rect: CGRect) -> CGRect? {
+        CKeyCameraPreview.sensorRect(fromViewRect: rect, in: previewLayer)
+    }
 }
 #elseif os(macOS)
-/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session.
+/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session. Its static
+/// functions convert between sensor and view coordinates for custom overlays.
 public struct CKeyCameraPreview: NSViewRepresentable {
     public let session: AVCaptureSession
-    public init(session: AVCaptureSession) { self.session = session }
+    /// Receives the preview layer, for a custom overlay.
+    public let geometry: CKeyPreviewGeometry?
+
+    public init(session: AVCaptureSession, geometry: CKeyPreviewGeometry? = nil) {
+        self.session = session
+        self.geometry = geometry
+    }
 
     public func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -230,12 +536,14 @@ public struct CKeyCameraPreview: NSViewRepresentable {
         layer.videoGravity = .resizeAspectFill
         view.layer = layer
         view.wantsLayer = true
+        geometry?.layer = layer
         return view
     }
 
     public func updateNSView(_ view: NSView, context: Context) {
-        if let layer = view.layer as? AVCaptureVideoPreviewLayer, layer.session !== session {
-            layer.session = session
+        if let layer = view.layer as? AVCaptureVideoPreviewLayer {
+            if layer.session !== session { layer.session = session }
+            geometry?.layer = layer
         }
     }
 }

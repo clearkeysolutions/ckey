@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.85"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.86"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -202,6 +202,152 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
                                        size_t stride, const double border_quad[8],
                                        ckey_field field, double out_quad[8]);
 /*
+ * One-call frame scan: border search, refinement and decoding for every
+ * profile, in the order the reference readers use. This is the call camera
+ * integrations should make; the three functions above remain for callers that
+ * need the stages separately.
+ *
+ * Region of interest: with roi_width and roi_height set, only that rectangle
+ * of the frame is searched, at full resolution and in place (no copy). A
+ * region around the expected symbol is faster and removes the rest of the
+ * scene from the search; alternate it with whole frames so symbols outside
+ * the region still read. Coordinates in the result are always full-frame.
+ *
+ * Lens distortion: set k1 (Brown radial coefficient on focal-normalised
+ * coordinates; focal_px and the principal point describe the camera) to have
+ * the region undistorted before the search. Leave k1 at 0 when the platform
+ * already corrects distortion or the lens is a normal wide or tele camera.
+ */
+#define CKEY_SCAN_PROFILE_SCALABLE 1u
+#define CKEY_SCAN_PROFILE_LOCATOR 2u
+#define CKEY_SCAN_PROFILE_TEXT 4u
+#define CKEY_SCAN_PROFILE_EXTENDED 8u
+#define CKEY_SCAN_PROFILE_ALL 15u
+/* Result flags. */
+#define CKEY_SCAN_FLAG_SYMBOL_CUT 1u   /* a symbol-like border runs off the frame or region: back off */
+#define CKEY_SCAN_FLAG_BUDGET 2u       /* the scan stopped at its work budget */
+typedef struct ckey_scan_options {
+    uint32_t abi_version;      /* CKEY_ABI_VERSION */
+    uint32_t profiles;         /* CKEY_SCAN_PROFILE_* mask; 0 = all */
+    uint32_t max_candidates;   /* border candidates to try; 0 = 6 */
+    uint32_t reserved;
+    double roi_x, roi_y, roi_width, roi_height;  /* pixels; zero width or height = whole frame */
+    double k1;                 /* radial distortion; 0 = none */
+    double focal_px;           /* focal length in pixels for k1; 0 = the longer frame side */
+    double center_x, center_y; /* principal point in pixels; both 0 = frame centre */
+} ckey_scan_options;
+typedef struct ckey_scan_result {
+    uint32_t abi_version;
+    ckey_status status;        /* CKEY_OK when a payload was decoded */
+    uint32_t profile;          /* ckey_field of the decoded symbol */
+    uint32_t version;          /* Profile 0 version, else 0 */
+    uint32_t layout;           /* ckey_scalable_layout for Profile 0 */
+    uint32_t corrected_symbols;
+    uint32_t erasures_used;
+    uint32_t candidates;       /* border candidates found */
+    uint32_t flags;            /* CKEY_SCAN_FLAG_* */
+    uint32_t located;          /* 1 if quad holds a symbol-like candidate, decoded or not */
+    size_t payload_length;
+    double quad[8];            /* field corners, full-frame pixels; canonical symbol order when decoded */
+    double score;              /* fit score of quad (see ckey_refine_quad_gray8) */
+    char message[96];
+} ckey_scan_result;
+CKEY_API void ckey_scan_options_init(ckey_scan_options *options);
+CKEY_API ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                            const ckey_scan_options *options,
+                                            uint8_t *out_payload, size_t out_capacity,
+                                            ckey_scan_result *out_result);
+/*
+ * Tracking: the four corners of a symbol on every frame, for live brackets or
+ * any overlay. It is separate from decoding and keeps going after a read.
+ *   - With no track, ckey_track_gray8 searches the frame for a symbol-like
+ *     candidate. With a track, it re-detects in a crop around the last
+ *     corners (cheap enough for every frame), so the corners are measured,
+ *     not extrapolated, and do not drift.
+ *   - A candidate must fit the CKey skeleton and keys (score >= gate). A
+ *     strong fit or a decode locks at once; a weak one needs a second
+ *     agreeing sighting. A track survives up to 8 missed frames.
+ *   - Continuity: a re-detection is accepted only if its centre moved less
+ *     than half the symbol's size and its size changed by less than 25%.
+ *   - Corners keep a stable order from frame to frame (the order that is
+ *     closest to the previous frame's), so an overlay never twists.
+ * Call ckey_track_seed after a scan that located or decoded a symbol; it
+ * re-seeds the track on that symbol's corners.
+ */
+#define CKEY_TRACK_NONE 0u
+#define CKEY_TRACK_TENTATIVE 1u  /* one weak sighting; do not draw yet */
+#define CKEY_TRACK_LOCKED 2u
+typedef struct ckey_track_state {
+    uint32_t abi_version;
+    uint32_t status;           /* CKEY_TRACK_* */
+    uint32_t missed_frames;    /* consecutive frames without a re-detection */
+    uint32_t sightings;
+    uint32_t decoded;          /* 1 once this symbol has decoded */
+    uint32_t fresh;            /* 1 if quad was measured on the last frame given */
+    double quad[8];            /* field corners, full-frame pixels, stable order */
+    double score;              /* fit score of the last measurement */
+    double gate;               /* minimum score; 0 = default (15) */
+    double lock_score;         /* score that locks at once; 0 = default (150) */
+} ckey_track_state;
+CKEY_API void ckey_track_init(ckey_track_state *track);
+CKEY_API void ckey_track_seed(ckey_track_state *track, const double quad_xy[8], double score, int decoded);
+/* Returns the track status after this frame. */
+CKEY_API uint32_t ckey_track_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                   ckey_track_state *track);
+/* Reorders quad_xy (cyclically, either winding) to the order closest to
+ * previous_xy. Use it before comparing or smoothing corner sets. */
+CKEY_API void ckey_match_corner_order(const double previous_xy[8], double quad_xy[8]);
+/*
+ * Camera advice. The capture policy lives in the core so every platform
+ * behaves the same: an SDK owns the camera, calls ckey_camera_advise_gray8
+ * once per analysed frame, and applies what it returns.
+ *   exposure_bias_ev  exposure target bias to set, in EV. Negative when the
+ *                     symbol clips. While nothing decodes for a while it
+ *                     cycles 0, -1, -2 (a screen too bright to detect at all
+ *                     comes into range on one of them); it resets on a
+ *                     decode or when the candidate is lost.
+ *   zoom_factor       multiply the current zoom by this (1 = keep). Above 1
+ *                     when the symbol is small in the frame. Apply it only up
+ *                     to the device's real-detail limit; zoom that merely
+ *                     enlarges pixels does not help.
+ *   point_x, point_y  where to meter and focus (0..1 of the frame): the
+ *                     candidate's centre, or the frame centre without one.
+ *   flags             what to tell the user, if anything.
+ */
+#define CKEY_ADVICE_MOVE_CLOSER 1u   /* too few pixels per module */
+#define CKEY_ADVICE_MOVE_BACK 2u     /* the symbol is cut by the frame edge */
+#define CKEY_ADVICE_HOLD_STEADY 4u   /* blurred */
+#define CKEY_ADVICE_REFOCUS 8u       /* out of focus: re-aim focus at point_x, point_y */
+#define CKEY_ADVICE_GLARE 16u        /* part of the symbol is washed out: tilt the phone or the surface */
+#define CKEY_ADVICE_REAIM 32u        /* the metering point moved enough to re-aim exposure and focus */
+typedef struct ckey_camera_policy {
+    uint32_t abi_version;
+    uint32_t failed_frames;    /* analysed frames since the last decode */
+    uint32_t bias_step;        /* position in the 0 / -1 / -2 EV cycle */
+    uint32_t lost_frames;      /* frames since a candidate was last seen */
+    double last_point_x, last_point_y;
+    double reserved[4];
+} ckey_camera_policy;
+typedef struct ckey_camera_advice {
+    uint32_t abi_version;
+    uint32_t has_candidate;
+    uint32_t flags;            /* CKEY_ADVICE_* */
+    uint32_t reserved;
+    double point_x, point_y;   /* metering and focus point, 0..1 */
+    double size;               /* candidate side / shorter frame side; 0 without one */
+    double clipped_fraction;   /* share of the candidate at or near white clipping */
+    double contrast;           /* Michelson contrast inside the candidate, 0..1 */
+    double sharpness;          /* 0 (soft) .. 1 (sharp) at the frame stroke */
+    double exposure_bias_ev;
+    double zoom_factor;
+} ckey_camera_advice;
+CKEY_API void ckey_camera_policy_init(ckey_camera_policy *policy);
+/* quad_xy: the located or tracked symbol (NULL when none). decoded: nonzero
+ * if this frame decoded. */
+CKEY_API ckey_status ckey_camera_advise_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                               const double *quad_xy, int decoded,
+                                               ckey_camera_policy *policy, ckey_camera_advice *out_advice);
+/*
  * Profile 0: the scalable family (Format 0.27). One skeleton (frame, finders,
  * polar centre) at every size; version 1..31 sets the module pitch, from
  * Profile 1-like modules (v1, 29 across) to Profile 3 density (v31, 232
@@ -212,22 +358,44 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
  */
 #define CKEY_SCALABLE_FORMAT_VERSION 27u
 #define CKEY_SCALABLE_PRINT_FORMAT_VERSION 28u
+#define CKEY_SCALABLE_GROUPED_FORMAT_VERSION 29u
+#define CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION 30u
 /* Profile 0 layout families. STANDARD is Format 0.27. PRINT (Format 0.28,
  * "P0.1") keeps every mark and gap at least about one module (equal-arc ring
  * slots, larger dots, wider and fewer rays) so symbols survive small prints:
  * lower capacity per version, readable at a smaller printed size. */
+/* Byte-grouped placement (Formats 0.29 and 0.30). The symbol's geometry,
+ * marks, keys and capacity are those of STANDARD or PRINT; only the rule that
+ * assigns codeword bits to sites differs. Each byte's eight bits sit on eight
+ * neighbouring sites, so a blot, glare spot or logo costs only the bytes under
+ * it, where the scattered placement of 0.27/0.28 lets it touch a few bits of
+ * many bytes. Readers before 0.1.0-build.86 cannot read grouped symbols, so
+ * the encoder emits them only when asked. Image decoders identify the
+ * placement themselves and report it in out_layout. */
 typedef enum ckey_scalable_layout {
-    CKEY_LAYOUT_STANDARD = 0,
-    CKEY_LAYOUT_PRINT = 1
+    CKEY_LAYOUT_STANDARD = 0,          /* Format 0.27 */
+    CKEY_LAYOUT_PRINT = 1,             /* Format 0.28 */
+    CKEY_LAYOUT_STANDARD_GROUPED = 2,  /* Format 0.29: STANDARD geometry, byte-grouped */
+    CKEY_LAYOUT_PRINT_GROUPED = 3      /* Format 0.30: PRINT geometry, byte-grouped */
 } ckey_scalable_layout;
 #define CKEY_SCALABLE_VERSION_COUNT 31u
 #define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u
+/* Parity is 14/28/44/60/80/95% of each Reed-Solomon block. A level corrects
+ * half that share in unknown bad bytes, or all of it in bytes the reader
+ * knows are missing (erasures: glare, occlusion, sites outside the image).
+ * U and X spend most of the symbol on parity: U carries about half of H's
+ * payload, X about 5% of L's, and the smallest versions carry nothing at
+ * all (ckey_scalable_capacity returns 0). Readers before 0.1.0-build.86
+ * reject U and X symbols. */
 typedef enum ckey_ecc_level {
-    CKEY_ECC_L = 0,  /* ~7% of each block correctable */
-    CKEY_ECC_M = 1,  /* ~14% */
-    CKEY_ECC_Q = 2,  /* ~22% */
-    CKEY_ECC_H = 3   /* ~30% */
+    CKEY_ECC_L = 0,  /* ~7% of each block correctable, 14% as erasures */
+    CKEY_ECC_M = 1,  /* ~14%, 28% */
+    CKEY_ECC_Q = 2,  /* ~22%, 44% */
+    CKEY_ECC_H = 3,  /* ~30%, 60% */
+    CKEY_ECC_U = 4,  /* Ultra: ~40%, 80% */
+    CKEY_ECC_X = 5   /* Extreme: ~47.5%, 95% */
 } ckey_ecc_level;
+#define CKEY_ECC_LEVEL_COUNT 6u
 typedef struct ckey_scalable_symbol {
     uint32_t abi_version;
     uint32_t version;          /* 1..CKEY_SCALABLE_VERSION_COUNT */
@@ -252,6 +420,20 @@ CKEY_API ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codewo
                                            uint32_t version, ckey_scalable_layout layout,
                                            uint8_t *out_payload, size_t out_capacity,
                                            size_t *out_payload_len, ckey_diagnostics *out_diagnostics);
+/* Soft-decision decode. reliability (may be NULL: all bytes trusted) holds one
+ * value per codeword byte, 0 = known bad (an erasure) up to 255 = certain.
+ * When plain correction fails, the least reliable bytes are erased in a few
+ * capped steps and decoding is retried (generalised minimum distance). An
+ * erased byte costs one parity byte, an unknown bad byte two. Acceptance is
+ * unchanged: every block must pass Reed-Solomon with spare syndromes left as
+ * a check, and the frame must pass its header and CRC-32C.
+ * out_diagnostics->erasures_used counts the bytes erased in the decode that
+ * succeeded. */
+CKEY_API ckey_status ckey_decode_scalable_soft(const uint8_t *codeword, const uint8_t *reliability,
+                                                size_t codeword_len, uint32_t version,
+                                                ckey_scalable_layout layout,
+                                                uint8_t *out_payload, size_t out_capacity,
+                                                size_t *out_payload_len, ckey_diagnostics *out_diagnostics);
 /* Identifies the layout and version from the keys, then decodes.
  * out_version and out_layout may be NULL. */
 CKEY_API ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width,

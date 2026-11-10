@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
         if (!read) ++failures;
 
         char version[48];
-        std::snprintf(version, sizeof version, "%u%s", symbol.version, e.layout == CKEY_LAYOUT_PRINT ? " (print)" : "");
+        std::snprintf(version, sizeof version, "%u%s", symbol.version, e.layout == CKEY_LAYOUT_PRINT ? " (print)" : e.layout == CKEY_LAYOUT_STANDARD_GROUPED ? " (grouped)" : e.layout == CKEY_LAYOUT_PRINT_GROUPED ? " (print, grouped)" : "");
         md += "| <img src=\"" + std::string(e.file) + "\" width=\"180\" alt=\"" + e.title + "\"> | **" + e.title +
               "**<br>" + e.about + " | " + std::to_string(e.payload.size()) + " bytes | " + version + " | " +
               (read ? "yes" : "**no**") + " | " + grade + " |\n";

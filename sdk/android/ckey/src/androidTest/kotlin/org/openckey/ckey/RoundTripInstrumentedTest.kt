@@ -56,8 +56,10 @@ class RoundTripInstrumentedTest {
         for (layout in Layout.entries) for (level in EccLevel.entries) {
             val payload = "CKey ${layout.name} ${level.name} Grüße 👋".toByteArray()
             val symbol = CKeySymbol.encode(payload, 0, level, layout)
-            val gray = symbol.toGray(400)
-            val result = CKeyDecoder.decode(gray, 400, 400)
+            // U and X need a much larger version for the same payload; keep the modules resolvable.
+            val side = if (level == EccLevel.U || level == EccLevel.X) 2000 else 400
+            val gray = symbol.toGray(side)
+            val result = CKeyDecoder.decode(gray, side, side)
             assertNotNull("$layout $level", result)
             assertArrayEquals(payload, result!!.bytes)
             assertEquals(layout, result.layout)

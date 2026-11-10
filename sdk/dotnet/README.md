@@ -17,7 +17,7 @@ dotnet add package CKey.Wpf   # optional, WPF only
 ```
 
 ```xml
-<PackageReference Include="CKey" Version="0.1.0-build.85" />
+<PackageReference Include="CKey" Version="0.1.0-build.86" />
 ```
 
 The namespace is `OpenCKey`.
@@ -29,6 +29,7 @@ using OpenCKey;
 
 CKeySymbol symbol = CKeySymbol.Encode("https://openckey.org/hello");      // version 0 = smallest that fits
 CKeySymbol big = CKeySymbol.Encode(bytes, version: 12, level: EccLevel.Q, layout: Layout.Print);
+CKeySymbol tough = CKeySymbol.Encode(bytes, level: EccLevel.U, layout: Layout.StandardGrouped);  // needs build 86+ readers
 
 // Native pixels: size x size RGBA8, straight alpha, no padding.
 CKeyImage image = symbol.RenderRgba(512, RasterPolicy.Coverage, transparent: false, style: CKeyStyle.Concept);
@@ -40,6 +41,8 @@ string svg = symbol.ToSvg(scale: 8, style: CKeyStyle.Plain);
 byte[] pdf = symbol.ToPdf(widthPt: 144);                 // 2 inches wide, vector
 CKeyGrayImage print = symbol.RenderPrint(1.0, 600);      // 1 inch at 600 dpi, pure black/white
 ```
+
+`EccLevel` is `L`, `M` (default), `Q`, `H`, `U` (Ultra, 80% parity) and `X` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity; the smallest versions carry nothing at those levels (`CKeySymbol.Capacity` returns 0 and `Encode` throws a `CKeyException` with the core's message). `Layout` is `Standard` (default), `Print` (Profile 0.1), and their byte-grouped forms `StandardGrouped` (Format 0.29) and `PrintGrouped` (Format 0.30), which keep the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. `CKeyDecoder` reports the layout it found. The assembly requires a native library with ABI version 5.
 
 `CKeySymbol` is a managed copy of the C symbol struct. It holds no native resources, so it needs no `Dispose`.
 

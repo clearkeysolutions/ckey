@@ -109,7 +109,7 @@ std::vector<ckey_shape> build_scalable_scene(const ScalableLayout &L, const ckey
 // Validates arguments shared by every scene consumer and returns the layout.
 const ScalableLayout *scene_layout(const ckey_scalable_symbol *s, const ckey_style *style, ckey_style &st) {
     if (!s || s->abi_version != CKEY_ABI_VERSION || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT ||
-        s->ecc_level > 3 || s->layout >= static_cast<uint32_t>(kScalableFamilies)) return nullptr;
+        s->ecc_level >= static_cast<uint32_t>(kScalableLevels) || s->layout >= static_cast<uint32_t>(kScalableLayouts)) return nullptr;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return nullptr;
     if (style) st = effective_style(L, *s, *style); else ckey_style_default(&st);

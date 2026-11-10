@@ -234,8 +234,8 @@ size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level, ckey_scala
 ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uint32_t version, ckey_ecc_level level,
                                  ckey_scalable_layout layout, ckey_scalable_symbol *out, ckey_diagnostics *diag) {
     const int family = static_cast<int>(layout);
-    if ((!payload && payload_len) || !out || static_cast<int>(level) < 0 || static_cast<int>(level) > 3 || version > CKEY_SCALABLE_VERSION_COUNT ||
-        family < 0 || family >= kScalableFamilies) {
+    if ((!payload && payload_len) || !out || static_cast<int>(level) < 0 || static_cast<int>(level) >= kScalableLevels || version > CKEY_SCALABLE_VERSION_COUNT ||
+        family < 0 || family >= kScalableLayouts) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 payload, version, level, or output"); return CKEY_INVALID_ARGUMENT;
     }
     int v = static_cast<int>(version);
@@ -268,48 +268,96 @@ ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uin
     // Byte-interleave the blocks so local damage spreads across all of them.
     size_t pos = 0;
     for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) out->codeword[pos++] = coded[b][j];
-    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0%s v%d level %c; %zu RS blocks", family ? ".1 (print)" : "", v, "LMQH"[level], blocks.size());
+    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0%s v%d level %c; %zu RS blocks%s", (family & 1) ? ".1 (print)" : "", v, kScalableLevelNames[level], blocks.size(), L.grouped ? ", grouped" : "");
     set_status(diag, CKEY_OK, message);
     return CKEY_OK;
 }
 
-ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, uint32_t version, ckey_scalable_layout layout,
-                                 uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, ckey_diagnostics *diag) {
+namespace {
+// Frame check shared by every decode path: header, length, CRC-32C, padding.
+bool scalable_frame_ok(const ScalableLayout &L, const std::vector<uint8_t> &framed, uint32_t version, int level, size_t &length) {
+    if (framed.size() < kScalableOverheadBytes) return false;
+    if (framed[0] != 0xc7 || framed[1] != 0x4b || framed[2] != L.format || framed[3] != 0 || framed[4] != version || framed[5] != level) return false;
+    length = (static_cast<size_t>(framed[6]) << 8) | framed[7];
+    if (kScalableOverheadBytes + length > framed.size()) return false;
+    const size_t crc_index = kScalableHeaderBytes + length;
+    uint32_t expected = 0; for (int b = 0; b < 4; ++b) expected = (expected << 8) | framed[crc_index + b];
+    return crc32c(framed.data(), crc_index) == expected && padding_matches(framed.data(), crc_index + 4, framed.size(), crc_index + 4);
+}
+
+// Erasure steps tried per block after plain correction fails, as fractions
+// of the block's parity (generalised minimum distance, capped).
+constexpr std::array<double, 5> kErasureSteps = {0.25, 0.5, 0.7, 0.85, 1.0};
+}  // namespace
+
+ckey_status ckey_decode_scalable_soft(const uint8_t *codeword, const uint8_t *reliability, size_t codeword_len, uint32_t version,
+                                      ckey_scalable_layout layout, uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len,
+                                      ckey_diagnostics *diag) {
     const int family = static_cast<int>(layout);
-    if (!codeword || !out_payload_len || version < 1 || version > CKEY_SCALABLE_VERSION_COUNT || family < 0 || family >= kScalableFamilies) {
+    if (!codeword || !out_payload_len || version < 1 || version > CKEY_SCALABLE_VERSION_COUNT || family < 0 || family >= kScalableLayouts) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 codeword, version, or layout"); return CKEY_INVALID_ARGUMENT;
     }
     const ScalableLayout &L = scalable_layout(static_cast<int>(version), family);
     if (codeword_len != L.codeword_bytes) { set_status(diag, CKEY_INVALID_ARGUMENT, "codeword length does not match the Profile 0 version"); return CKEY_INVALID_ARGUMENT; }
-    for (int level = 0; level < 4; ++level) {
-        const auto blocks = scalable_blocks(L.codeword_bytes, level);
-        std::vector<std::vector<uint8_t>> work(blocks.size());
-        for (size_t b = 0; b < blocks.size(); ++b) work[b].resize(blocks[b].n);
-        size_t pos = 0;
-        for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) work[b][j] = codeword[pos++];
-        std::vector<uint8_t> framed; uint32_t corrections = 0; bool ok = true;
-        for (size_t b = 0; b < blocks.size() && ok; ++b) {
-            uint32_t fixed = 0;
-            ok = rs_correct_generic(work[b], blocks[b].n - blocks[b].k, fixed);
-            corrections += fixed;
-            framed.insert(framed.end(), work[b].begin(), work[b].begin() + static_cast<std::ptrdiff_t>(blocks[b].k));
-        }
-        if (!ok || framed.size() < kScalableOverheadBytes) continue;
-        if (framed[0] != 0xc7 || framed[1] != 0x4b || framed[2] != L.format || framed[3] != 0 ||
-            framed[4] != version || framed[5] != level) continue;
-        const size_t length = (static_cast<size_t>(framed[6]) << 8) | framed[7];
-        if (kScalableOverheadBytes + length > framed.size()) continue;
-        const size_t crc_index = kScalableHeaderBytes + length;
-        uint32_t expected = 0; for (int b = 0; b < 4; ++b) expected = (expected << 8) | framed[crc_index + b];
-        if (crc32c(framed.data(), crc_index) != expected || !padding_matches(framed.data(), crc_index + 4, framed.size(), crc_index + 4)) continue;
+    const size_t block_count = (L.codeword_bytes + 254) / 255;
+    // The header is systematic: byte 5 of block 0 is the level. If the raw
+    // header looks intact, try its level first.
+    std::array<int, kScalableLevels> order{}; std::iota(order.begin(), order.end(), 0);
+    if (L.codeword_bytes >= 6 * block_count) {
+        const int raw = codeword[5 * block_count];
+        if (raw < kScalableLevels && codeword[0] == 0xc7 && codeword[block_count] == 0x4b) std::rotate(order.begin(), order.begin() + raw, order.begin() + raw + 1);
+    }
+    const auto finish = [&](const std::vector<uint8_t> &framed, int level, uint32_t corrections, uint32_t erased, size_t length) {
         if (out_capacity < length || (!out_payload && length)) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 payload exceeds output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
         if (length) std::memcpy(out_payload, framed.data() + kScalableHeaderBytes, length);
         *out_payload_len = length;
-        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0%s v%u level %c", family ? ".1 (print)" : "", version, "LMQH"[level]);
-        set_status(diag, CKEY_OK, message); if (diag) diag->corrected_symbols = corrections;
+        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0%s v%u level %c%s", (family & 1) ? ".1 (print)" : "", version, kScalableLevelNames[level], L.grouped ? ", grouped" : "");
+        set_status(diag, CKEY_OK, message); if (diag) { diag->corrected_symbols = corrections; diag->erasures_used = erased; }
         return CKEY_OK;
+    };
+    for (int pass = 0; pass < (reliability ? 2 : 1); ++pass) for (int level : order) {
+        const auto blocks = scalable_blocks(L.codeword_bytes, level);
+        std::vector<std::vector<uint8_t>> work(blocks.size()); std::vector<std::vector<size_t>> where(blocks.size());
+        for (size_t b = 0; b < blocks.size(); ++b) { work[b].resize(blocks[b].n); where[b].resize(blocks[b].n); }
+        size_t pos = 0;
+        for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) { where[b][j] = pos; work[b][j] = codeword[pos++]; }
+        std::vector<uint8_t> framed; uint32_t corrections = 0, erased = 0; bool ok = true;
+        for (size_t b = 0; b < blocks.size() && ok; ++b) {
+            const size_t parity = blocks[b].n - blocks[b].k;
+            uint32_t fixed = 0;
+            if (pass == 0) ok = rs_correct_generic(work[b], parity, fixed);
+            else {
+                // Least reliable bytes first; ties keep codeword order.
+                std::vector<size_t> rank(blocks[b].n); std::iota(rank.begin(), rank.end(), size_t{0});
+                std::stable_sort(rank.begin(), rank.end(), [&](size_t l, size_t r) { return reliability[where[b][l]] < reliability[where[b][r]]; });
+                const size_t margin = parity >= 8 ? 2 : 0;
+                const std::vector<uint8_t> original = work[b];
+                ok = rs_correct_generic(work[b], parity, fixed);
+                size_t previous = 0;
+                for (size_t s = 0; s < kErasureSteps.size() && !ok; ++s) {
+                    const size_t count = std::min(parity - margin, 2 * static_cast<size_t>(kErasureSteps[s] * static_cast<double>(parity) / 2.0));
+                    if (count <= previous) continue;
+                    previous = count;
+                    work[b] = original;
+                    const std::vector<size_t> erasures(rank.begin(), rank.begin() + static_cast<std::ptrdiff_t>(count));
+                    ok = rs_correct_erasures(work[b], parity, erasures, margin, fixed);
+                    if (ok) erased += static_cast<uint32_t>(count);
+                }
+                // Block 0 carries the header: a wrong level stops here.
+                if (ok && b == 0 && blocks[0].k >= 6 && (work[0][0] != 0xc7 || work[0][1] != 0x4b || work[0][2] != L.format || work[0][4] != version || work[0][5] != level)) ok = false;
+            }
+            corrections += fixed;
+            framed.insert(framed.end(), work[b].begin(), work[b].begin() + static_cast<std::ptrdiff_t>(blocks[b].k));
+        }
+        size_t length = 0;
+        if (ok && scalable_frame_ok(L, framed, version, level, length)) return finish(framed, level, corrections, erased, length);
     }
     set_status(diag, CKEY_UNCORRECTABLE, "no Profile 0 level passed Reed-Solomon, frame, and CRC checks"); return CKEY_UNCORRECTABLE;
+}
+
+ckey_status ckey_decode_scalable(const uint8_t *codeword, size_t codeword_len, uint32_t version, ckey_scalable_layout layout,
+                                 uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, ckey_diagnostics *diag) {
+    return ckey_decode_scalable_soft(codeword, nullptr, codeword_len, version, layout, out_payload, out_capacity, out_payload_len, diag);
 }
 
 }  // extern "C"

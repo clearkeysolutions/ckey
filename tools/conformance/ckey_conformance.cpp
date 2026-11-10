@@ -94,7 +94,7 @@ std::vector<Input> default_inputs() {
     v.push_back({"p0-v1-L", "0", 1, 0, 0, bytes(30, 1)});
     for (uint32_t ver : {2u, 7u, 16u, 31u}) for (uint32_t level : {0u, 3u}) {
         const size_t cap = ckey_scalable_capacity(ver, static_cast<ckey_ecc_level>(level), CKEY_LAYOUT_STANDARD);
-        v.push_back({"p0-v" + std::to_string(ver) + "-" + "LMQH"[level] + "-full", "0", ver, level, 0, bytes(cap, ver * 7 + level)});
+        v.push_back({"p0-v" + std::to_string(ver) + "-" + "LMQHUX"[level] + "-full", "0", ver, level, 0, bytes(cap, ver * 7 + level)});
     }
     for (uint32_t ver : {1u, 3u, 12u, 31u}) {
         const size_t cap = ckey_scalable_capacity(ver, CKEY_ECC_M, CKEY_LAYOUT_PRINT);

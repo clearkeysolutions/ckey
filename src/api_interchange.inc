@@ -48,7 +48,7 @@ extern "C" {
 
 ckey_status ckey_write_interchange(const ckey_scalable_symbol *s, const ckey_style *style, uint8_t *out, size_t cap, size_t *required) {
     if (!s || !required || s->abi_version != CKEY_ABI_VERSION || s->version < 1 || s->version > CKEY_SCALABLE_VERSION_COUNT ||
-        s->ecc_level > 3 || s->layout >= static_cast<uint32_t>(kScalableFamilies)) return CKEY_INVALID_ARGUMENT;
+        s->ecc_level >= static_cast<uint32_t>(kScalableLevels) || s->layout >= static_cast<uint32_t>(kScalableLayouts)) return CKEY_INVALID_ARGUMENT;
     const ScalableLayout &L = scalable_layout(static_cast<int>(s->version), static_cast<int>(s->layout));
     if (s->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
     std::vector<uint8_t> o = {'C', 'K', 'E', 'Y', static_cast<uint8_t>(CKEY_INTERCHANGE_VERSION), 0, 0, 0,
@@ -83,7 +83,7 @@ ckey_status ckey_read_interchange(const uint8_t *data, size_t len, ckey_scalable
     if (data[5] || data[6] || data[7]) return fail(".ckey reserved header bytes must be zero");
     if (crc32c(data, len - 4) != get32(data + len - 4)) return fail(".ckey CRC-32C mismatch");
     const uint8_t format = data[8], version = data[9], level = data[10], layout = data[11];
-    if (version < 1 || version > CKEY_SCALABLE_VERSION_COUNT || level > 3 || layout >= kScalableFamilies) return fail(".ckey symbol header out of range");
+    if (version < 1 || version > CKEY_SCALABLE_VERSION_COUNT || level >= kScalableLevels || layout >= kScalableLayouts) return fail(".ckey symbol header out of range");
     const ScalableLayout &L = scalable_layout(version, layout);
     if (format != L.format) return fail(".ckey format byte does not match its layout");
     bool have_codeword = false, have_style = false;
