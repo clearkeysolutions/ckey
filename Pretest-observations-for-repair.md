@@ -5,7 +5,7 @@
 **Source:** owner discussion during the CKTEST-RH-001 hardening campaign (`clearkeysolutions/key-test`), 2026-11-09. The campaign tests the reader at `ede38f5` (0.1.0-build.85) and was still running when this was written.
 
 **Rules for using this file:**
-* Numbers below are **interim** (about 727,000 of 1.5M cases) and come from simulation. The final campaign reports (`REPORT_1M`, the adaptive report, minimal counterexamples) supersede them.
+* Numbers in sections 0–1.9 are **interim** (about 727,000 of 1.5M cases) and come from simulation. **Section 1.10 has the final numbers** (2026-11-10); where they differ, 1.10 wins. The full analysis is `reports/CKTEST-RH-001-analysis.md` in `clearkeysolutions/key-test` (branch `claude/gifted-edison-fjs8l3`), and the frozen report is `evidence/reports/structured_1m.md` there.
 * Use the final reports to prioritise, not to decide *whether* to do the items in sections 1 and 2. Those apply either way.
 * Validate every reader change with the harness: `./ckt build-candidate --ckey <this checkout> --label <name>`, then `./ckt regress --label <name>`, before it ships.
 
@@ -222,6 +222,51 @@ Every case reads. This explains much of the app's field gain.
 * **Core:** compute the border-search threshold locally (per tile, or around each candidate), not from the whole-frame histogram. Re-run this test and the campaign's S09 (contrast) and S13 (screens) strata.
 * **SDK:** ship region-of-interest decoding by default (see 1.8).
 * **Styles:** do not add vignettes for scanning's sake. A dark background helps on screens in bright rooms only because of this same threshold effect, which the core fix removes.
+
+### 1.10 Final campaign results and new items (2026-11-10)
+**Status.** 1,364,000 cases completed: 1M structured, 350k adaptive failure-targeted, 4k cross-condition, 10k pilot. The run then stalled (see the last item), so the boundary-search pool and the 100k holdout never ran. Label: **UNQUALIFIED**. G1 holds for everything that ran; G2, G3 and G7 fail.
+
+**Final numbers that replace section 0:**
+* **0 wrong payloads** in 1,364,000 cases, including the 350k hardest. 95% upper bound: 3.0e-6 (structured). The acceptance path stays as it is.
+* Valid symbols: 50.1% decoded; **physically recoverable: 68.9%**.
+* **S01 clean, recoverable: 98.77%, not 99.92%.** 421 misses, all at or below 6.7 px/module, with localization error of 1.0–1.9 modules on frames that have no degradation. The working clean floor is about 7 px/module, against the declared 6. Fix at 6–7 px/module (1.4, 1.5) rather than raise the declared minimum.
+* Weakest recoverable strata:
+
+| Stratum | Recoverable | Limited by |
+|---|---|---|
+| S09 contrast | 26.8% | localization (1.1, 1.9) |
+| S06 defocus | 37.1% | sampling |
+| S07 motion blur | 38.5% | sampling |
+| S04 perspective | 50.8% | localization (1.7) |
+| S15 colour | 54.6% | localization; the only stratum where localization-limited outnumbers sampling-limited |
+
+**New items** (not covered above):
+
+1. **Lens distortion and the ultrawide camera.**
+   * The ultrawide device decodes **0.8%** (90 of 11,080).
+   * S19 class 1 (ultrawide barrel distortion, k1 −0.08 to −0.15, code off-centre) decodes 1%, against 76–82% with mild distortion.
+   * The quad fit is a planar homography and cannot follow a distorted field.
+   * **Core:** add a radial (k1) term to the quad and refine fit, or accept undistortion parameters from the caller.
+   * **SDK camera layer (section 2):** never pick the ultrawide for scanning; prefer the wide or tele camera with real optical zoom (as the iOS app does), and apply the device's distortion correction where the platform provides it.
+2. **Partial crops are a cliff.** A symbol cut 3–25% out of frame (S16 class 4) decodes **2.3%**, against about 81% for any amount of clutter or distractors.
+   * Sites outside the image must become erasures (1.2, 3.1), and localization must not require all four borders inside the frame.
+   * The SDK's region of interest and bracket guidance should also ask the user to back off when a corner is cut.
+3. **Finder loss is a cliff.**
+   * Finder covered 1–3% (S19 class 2): 59–63%.
+   * Finder covered 3–6% plus one glare spot (class 3): **0.1%**.
+   * Add a localization fallback that works from the field edge and keys when one finder is unreadable, and mark the covered sites as erasures.
+4. **Glare beyond 5% of the symbol: about 1%** (S10 bin 1; 0% beyond 10%). This confirms "clipped pixels are unknown, not white" (1.1) and erasure decoding (1.2) as the fix. Re-measure U (3.5a) only after these land.
+5. **ECC level helps less than expected.** P0 goes from L 41.2% to H 50.7%; P0.1 from 50.4% to 56.8%. Most losses happen before RS (localization) or exceed parity as bursts. Higher levels only pay off after erasures (3.1) and placement (3.3, 3.4).
+6. **Density.** P0 v25–31 decodes 32.9%, against about 52% for v1–16; P0.1 holds up better at 46.8%. The renderer should default to P0.1 and the lowest version that fits.
+7. **Possible unbounded compute (G6).**
+   * The cross-condition pool (the ten worst conditions recombined pairwise) sealed 4 shards in 13 minutes, decoding 1 of 4,000. Then nothing sealed for 10.5 hours.
+   * The likeliest cause is a case that keeps the reader searching indefinitely.
+   * **Core:** put a hard cap on border candidates, refine iterations and soft-decision retries per frame (1.3), and add a work budget that makes a call return "no read" instead of running on.
+   * **Harness** (key-test, not here): add a per-case timeout recorded as a result, and a stall alarm in `check.sh`.
+   * Regenerate the cross-condition plan from the locked selection to find the case.
+8. **Memory.** Worker peak heap: P99 477 MB, max 551 MB, against the G6 limit of 512 MB. This includes the simulator. Measure the reader alone; if it is the reader, cap working-image size and candidate counts.
+
+**Re-run plan:** the same locked design on the fixed build, so G5 compares against this run as the baseline. Run the full adaptive pool, and use the still-unopened holdout (seed commitment `5b1ea0cc…`). Name a reference iOS device so G4 and the real-device corpus can run.
 
 ## 2. Own the camera (ship it in the SDK, not app code)
 
