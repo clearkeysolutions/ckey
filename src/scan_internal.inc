@@ -379,15 +379,37 @@ struct CircularStats {
     }
 };
 
-// Sequence detection along one ring. Ring slots sit as close as 0.3 module
-// apart, so blur makes each sample a mix of several neighbouring dots, and a
-// per-site threshold fails long before the modules do. The samples are
-// modelled as
-//     base + dot * sum_j bit_j K(distance to dot j) + join * sum_j bit_j bit_j+1 K(distance to the gap after j)
-// with a Gaussian K whose width (the blur) is fitted to this image, and the
-// most likely bit sequence is found with the Viterbi algorithm. `join` is
-// the ink that fills the gap between two printed neighbours (joined arcs).
-struct RingModel { double base = 0, dot = 1, join = 0, sigma = 0.1, noise = 0.1; bool valid = false; };
+// Sequence detection along the rings, with a physical model. Ring slots sit
+// as close as 0.3 module apart, so blur makes each sample a mix of several
+// neighbouring dots and a per-site threshold fails long before the modules do.
+//
+// What is printed on a ring is known exactly as a function of the bits: a dot
+// of the layout's diameter at each printed slot, and, where two neighbours are
+// both printed, ink filling the gap between them (dots join into arcs). Blur
+// spreads that ink along the ring. So the sample at any slot is
+//     base + gain * [ sum_j bit_j D(distance to dot j) + join * sum_j bit_j bit_j+1 J(distance to gap j) ]
+// where D and J are a dot and a gap smeared by a Gaussian of the blur's width.
+// Nothing about the kernels is fitted from uncertain decisions:
+//   * the blur comes from the module lattice, where the reader has already
+//     measured how far each module leaks east-west, north-south and along
+//     both diagonals (a 2x2 covariance, so motion blur has its direction).
+//     Ring geometry is a fixed multiple of the module pitch, which converts
+//     that measurement into ring slots. Each part of a ring uses the blur
+//     along its own direction of travel;
+//   * base and gain are the levels of long gaps and long arcs, which stay
+//     readable under blur that hides single dots.
+// The most likely bit sequence under the model is found with the Viterbi
+// algorithm. An isolated dot is then read by how much it lifts the known
+// tail of its neighbours, not by an absolute threshold.
+constexpr int kRingReach = 3;     // neighbours on each side that the detector models
+constexpr int kRingSectors = 8;   // directions of travel around a ring
+
+struct RingModel {
+    double base = 0, gain = 1, join = 1;   // join: 1 joined arcs, 0 separate dots
+    double cov_xx = 0, cov_xy = 0, cov_yy = 0;  // blur covariance, canonical units squared
+    double half = 0.1;                     // the dot's radius, canonical units
+    double noise = 0.1; bool valid = false;
+};
 
 struct RingLine {
     int slots = 0; double spacing = 0;       // slot pitch in canonical units
@@ -395,126 +417,89 @@ struct RingLine {
     std::vector<int8_t> fixed;               // known printed value (0/1), -1 for data
     std::vector<double> y; std::vector<uint8_t> has;  // normalised sample per slot
     std::vector<uint8_t> bit;                // current decision per slot
+    // Kernels per sector: dot[t + reach] for the dot t slots away, gap[t + reach + 1]
+    // for the gap between slots t and t + 1.
+    std::array<std::array<double, 2 * kRingReach + 1>, kRingSectors> dot{};
+    std::array<std::array<double, 2 * kRingReach + 2>, kRingSectors> gap{};
+    int sector(int s) const { return std::min(kRingSectors - 1, s * kRingSectors / std::max(1, slots)); }
+    // Registration of this ring: how far along the ring (canonical units) the
+    // dots really sit from where the samples were taken, and the ring's own
+    // levels (a radial offset shows up as a lower gain).
+    double shift = 0, base = 0, gain = 1, noise = 1;
+    // Weight of the gap kernel between two printed neighbours: +join where
+    // dots are further apart than their diameter (the gap is filled when
+    // dots join into arcs), -1 where they are closer (the dots overlap, and
+    // the overlap must not be counted twice).
+    double pair = 0;
 };
 
-double ring_kernel(double distance, double sigma) { return std::exp(-distance * distance / (2 * sigma * sigma)); }
+double normal_cdf(double x) { return 0.5 * std::erfc(-x * 0.70710678118654752440); }
 
-constexpr int kRingReach = 3;  // neighbours on each side that the detector models
+// Fraction of full ink seen at distance x from the centre of a strip of half-width `half`, blur sigma.
+double smeared_strip(double x, double half, double sigma) { return normal_cdf((x + half) / sigma) - normal_cdf((x - half) / sigma); }
 
-void ring_features(const RingLine &line, double sigma, int s, double &dots, double &joins) {
-    dots = joins = 0;
-    const int S = line.slots;
-    for (int t = -kRingReach; t <= kRingReach; ++t) {
-        const int j = ((s + t) % S + S) % S, k = (j + 1) % S;
-        if (line.bit[static_cast<size_t>(j)]) {
-            dots += ring_kernel(t * line.spacing, sigma);
-            if (line.bit[static_cast<size_t>(k)]) joins += ring_kernel((t + 0.5) * line.spacing, sigma);
-        }
+void prepare_ring(RingLine &line, const RingModel &m, double pitch, double shift = 0) {
+    line.shift = shift;
+    for (int k = 0; k < kRingSectors; ++k) {
+        // Direction of travel in the middle of the sector (slot angle a is measured from the top, clockwise).
+        const double a = kTau * (k + 0.5) / kRingSectors, tx = std::cos(a), ty = std::sin(a);
+        const double variance = m.cov_xx * tx * tx + 2 * m.cov_xy * tx * ty + m.cov_yy * ty * ty;
+        const double sigma = std::sqrt(std::max(variance, (0.05 * pitch) * (0.05 * pitch)));
+        const double half_gap = line.spacing / 2 - m.half;
+        line.pair = half_gap > 0 ? m.join : -1.0;
+        for (int t = -kRingReach; t <= kRingReach; ++t) line.dot[static_cast<size_t>(k)][static_cast<size_t>(t + kRingReach)] = smeared_strip(t * line.spacing + shift, m.half, sigma);
+        for (int t = -kRingReach - 1; t <= kRingReach; ++t) line.gap[static_cast<size_t>(k)][static_cast<size_t>(t + kRingReach + 1)] = half_gap != 0 ? smeared_strip((t + 0.5) * line.spacing + shift, std::abs(half_gap), sigma) : 0.0;
     }
-    // The gap just before the window's first dot.
-    const int j = ((s - kRingReach - 1) % S + S) % S, k = (j + 1) % S;
-    if (line.bit[static_cast<size_t>(j)] && line.bit[static_cast<size_t>(k)]) joins += ring_kernel((-kRingReach - 0.5) * line.spacing, sigma);
 }
 
-// Least-squares base, dot and join for a given blur width, from the current
-// decisions.
-RingModel fit_ring_model(const std::vector<RingLine> &lines, double sigma) {
-    RingModel best; double best_error = std::numeric_limits<double>::infinity();
-    {
-        double a[6][6] = {}, b[6] = {}; double yy = 0; size_t n = 0;
-        for (const auto &line : lines) for (int s = 0; s < line.slots; ++s) {
-            if (!line.has[static_cast<size_t>(s)]) continue;
-            double dots, joins; ring_features(line, sigma, s, dots, joins);
-            const double f[3] = {1.0, dots, joins}, y = line.y[static_cast<size_t>(s)];
-            for (int r = 0; r < 3; ++r) { b[r] += f[r] * y; for (int q = 0; q < 3; ++q) a[r][q] += f[r] * f[q]; }
-            yy += y * y; ++n;
-        }
-        if (n < 40) return best;
-        double a0[6][6]; std::copy(&a[0][0], &a[0][0] + 36, &a0[0][0]); double b0[6]; std::copy(b, b + 6, b0);
-        for (int r = 0; r < 3; ++r) a[r][r] += 1e-6;
-        if (!solve_small(a, b, 3)) return best;
-        if (b[2] < 0) {  // no negative joins: refit without the term
-            double a2[6][6] = {}, b2[6] = {b0[0], b0[1]};
-            a2[0][0] = a0[0][0] + 1e-6; a2[0][1] = a0[0][1]; a2[1][0] = a0[1][0]; a2[1][1] = a0[1][1] + 1e-6;
-            if (!solve_small(a2, b2, 2)) return best;
-            b[0] = b2[0]; b[1] = b2[1]; b[2] = 0;
-        }
-        if (b[1] <= 0.02) return best;
-        double error = yy;  // sum (y - f.w)^2 = yy - 2 w.b0 + w'Aw
-        for (int r = 0; r < 3; ++r) { error -= 2 * b[r] * b0[r]; for (int q = 0; q < 3; ++q) error += b[r] * a0[r][q] * b[q]; }
-        if (error < best_error) { best_error = error; best = {b[0], b[1], b[2], sigma, std::sqrt(std::max(error, 0.0) / static_cast<double>(n)), true}; }
+// Ink seen at slot s under the current decisions (1 = a long arc).
+double ring_ink(const RingLine &line, const RingModel &, int s) {
+    const int S = line.slots; const auto &dot = line.dot[static_cast<size_t>(line.sector(s))]; const auto &gap = line.gap[static_cast<size_t>(line.sector(s))];
+    double ink = 0;
+    for (int t = -kRingReach - 1; t <= kRingReach; ++t) {
+        const int j = ((s + t) % S + S) % S;
+        if (!line.bit[static_cast<size_t>(j)]) continue;
+        if (t >= -kRingReach) ink += dot[static_cast<size_t>(t + kRingReach)];
+        if (line.pair != 0 && line.bit[static_cast<size_t>((j + 1) % S)]) ink += line.pair * gap[static_cast<size_t>(t + kRingReach + 1)];
     }
-    return best;
+    return ink;
 }
 
-// Blind first estimate of the model, without any decisions. Whitening makes
-// the bits independent and half printed, so the samples' statistics along a
-// ring give the model directly: the ratio of the lag-1 covariance to the
-// variance depends only on the blur width, the variance then gives the dot
-// amplitude, and the mean gives the base. (The join term starts at zero and
-// is fitted once decisions exist.)
-RingModel blind_ring_model(const std::vector<RingLine> &lines, double pitch) {
-    RingModel m;
-    double sigma_sum = 0, weight_sum = 0;
-    struct Moments { double mean, var, c1; int n; double spacing; };
-    std::vector<Moments> moments;
-    for (const auto &line : lines) {
-        double sum = 0; int n = 0;
-        for (int s = 0; s < line.slots; ++s) if (line.has[static_cast<size_t>(s)] && line.fixed[static_cast<size_t>(s)] < 0) { sum += line.y[static_cast<size_t>(s)]; ++n; }
-        if (n < 32) continue;
-        const double mean = sum / n; double var = 0, c1 = 0; int pairs = 0;
-        for (int s = 0; s < line.slots; ++s) {
-            const int t = (s + 1) % line.slots;
-            if (!line.has[static_cast<size_t>(s)] || line.fixed[static_cast<size_t>(s)] >= 0) continue;
-            const double d = line.y[static_cast<size_t>(s)] - mean; var += d * d;
-            if (line.has[static_cast<size_t>(t)] && line.fixed[static_cast<size_t>(t)] < 0) { c1 += d * (line.y[static_cast<size_t>(t)] - mean); ++pairs; }
-        }
-        if (!pairs || var <= 0) continue;
-        moments.push_back({mean, var / n, c1 / pairs, n, line.spacing});
+// Base and gain of one ring from its own samples and current decisions.
+bool fit_line_levels(RingLine &line, const RingModel &m) {
+    double n = 0, sf = 0, sy = 0, sff = 0, sfy = 0, syy = 0;
+    for (int s = 0; s < line.slots; ++s) {
+        if (!line.has[static_cast<size_t>(s)]) continue;
+        const double f = ring_ink(line, m, s), y = line.y[static_cast<size_t>(s)];
+        n += 1; sf += f; sy += y; sff += f * f; sfy += f * y; syy += y * y;
     }
-    if (moments.empty()) return m;
-    const auto sums = [](double sigma, double spacing, double &kk, double &kk1, double &k) {
-        kk = kk1 = k = 0;
-        for (int t = -6; t <= 6; ++t) { const double a = ring_kernel(t * spacing, sigma), b = ring_kernel((t + 1) * spacing, sigma); kk += a * a; kk1 += a * b; k += a; }
-    };
-    for (const auto &mo : moments) {
-        const double ratio = std::clamp(mo.c1 / mo.var, 0.0, 0.97);
-        double lo = 0.05 * pitch, hi = 1.0 * pitch;
-        for (int it = 0; it < 30; ++it) {
-            const double mid = (lo + hi) / 2; double kk, kk1, k; sums(mid, mo.spacing, kk, kk1, k);
-            if (kk1 / kk < ratio) lo = mid; else hi = mid;
-        }
-        sigma_sum += mo.n * (lo + hi) / 2; weight_sum += mo.n;
-    }
-    m.sigma = sigma_sum / weight_sum;
-    double dot_sum = 0, base_sum = 0;
-    for (const auto &mo : moments) {
-        double kk, kk1, k; sums(m.sigma, mo.spacing, kk, kk1, k);
-        const double dot = 2 * std::sqrt(mo.var / kk);
-        dot_sum += mo.n * dot; base_sum += mo.n * (mo.mean - 0.5 * dot * k);
-    }
-    m.dot = dot_sum / weight_sum; m.base = base_sum / weight_sum; m.join = 0; m.noise = 0.1 * m.dot; m.valid = m.dot > 0.02;
-    return m;
+    const double det = n * sff - sf * sf;
+    if (n < 24 || det < 1e-9 * n * n) return false;
+    const double gain = (n * sfy - sf * sy) / det, base = (sy - gain * sf) / n;
+    if (gain <= 0.03) return false;
+    line.base = base; line.gain = gain;
+    line.noise = std::sqrt(std::max(0.0, (syy - 2 * base * sy - 2 * gain * sfy + n * base * base + 2 * base * gain * sf + gain * gain * sff) / n));
+    return true;
 }
 
 // Most likely bits of one ring under the model (Viterbi over a window of
 // 2 * reach + 1 slots; the ring is unrolled with an overlap so it closes).
-void detect_ring(RingLine &line, const RingModel &m) {
+void detect_ring(RingLine &line, const RingModel &) {
     const int S = line.slots;
     int reach = 1;
-    while (reach < kRingReach && ring_kernel((reach + 1) * line.spacing, m.sigma) * m.dot > 0.06 * m.dot) ++reach;
+    for (int k = 0; k < kRingSectors; ++k) while (reach < kRingReach && std::max(line.dot[static_cast<size_t>(k)][static_cast<size_t>(kRingReach + reach + 1)], line.dot[static_cast<size_t>(k)][static_cast<size_t>(kRingReach - reach - 1)]) > 0.03) ++reach;
     if (S < 4 * reach + 4) return;
     const int width = 2 * reach + 1, states = 1 << (width - 1), windows = 1 << width;
-    // Prediction for every window; bit (width - 1 - k) is the slot at offset k - reach.
-    std::vector<double> prediction(static_cast<size_t>(windows));
-    for (int w = 0; w < windows; ++w) {
-        double v = m.base;
+    // Prediction for every window, per sector; bit (width - 1 - k) is the slot at offset k - reach.
+    std::vector<double> prediction(static_cast<size_t>(kRingSectors) * windows);
+    for (int sector = 0; sector < kRingSectors; ++sector) for (int w = 0; w < windows; ++w) {
+        double ink = 0;
         for (int k = 0; k < width; ++k) {
             if (!((w >> (width - 1 - k)) & 1)) continue;
-            v += m.dot * ring_kernel((k - reach) * line.spacing, m.sigma);
-            if (k + 1 < width && ((w >> (width - 2 - k)) & 1)) v += m.join * ring_kernel((k - reach + 0.5) * line.spacing, m.sigma);
+            ink += line.dot[static_cast<size_t>(sector)][static_cast<size_t>(k - reach + kRingReach)];
+            if (k + 1 < width && ((w >> (width - 2 - k)) & 1)) ink += line.pair * line.gap[static_cast<size_t>(sector)][static_cast<size_t>(k - reach + kRingReach + 1)];
         }
-        prediction[static_cast<size_t>(w)] = v;
+        prediction[static_cast<size_t>(sector) * windows + w] = line.base + line.gain * ink;
     }
     const int overlap = 4 * reach + 6, length = S + 2 * overlap;
     constexpr double kInfinity = 1e300;
@@ -525,6 +510,7 @@ void detect_ring(RingLine &line, const RingModel &m) {
         const int centre = ((i - overlap) % S + S) % S, incoming = ((i - overlap + reach) % S + S) % S;
         const int8_t fixed = line.fixed[static_cast<size_t>(incoming)];
         const bool scored = line.has[static_cast<size_t>(centre)] != 0; const double y = line.y[static_cast<size_t>(centre)];
+        const double *table = prediction.data() + static_cast<size_t>(line.sector(centre)) * windows;
         std::fill(next.begin(), next.end(), kInfinity);
         for (int state = 0; state < states; ++state) {
             if (cost[static_cast<size_t>(state)] >= kInfinity) continue;
@@ -532,7 +518,7 @@ void detect_ring(RingLine &line, const RingModel &m) {
                 if (fixed >= 0 && bit != fixed) continue;
                 const int window = (state << 1) | bit, to = window & (states - 1);
                 double c = cost[static_cast<size_t>(state)];
-                if (scored && i >= reach) { const double d = y - prediction[static_cast<size_t>(window)]; c += d * d; }
+                if (scored && i >= reach) { const double d = y - table[window]; c += d * d; }
                 if (c < next[static_cast<size_t>(to)]) { next[static_cast<size_t>(to)] = c; back[static_cast<size_t>(i) * states + to] = static_cast<uint8_t>(state >> (width - 2)); }
             }
         }
@@ -548,6 +534,147 @@ void detect_ring(RingLine &line, const RingModel &m) {
     for (int s = 0; s < S; ++s) if (line.fixed[static_cast<size_t>(s)] >= 0) line.bit[static_cast<size_t>(s)] = static_cast<uint8_t>(line.fixed[static_cast<size_t>(s)]);
 }
 
+// Refits one ring's kernels freely from its own decisions: a level for every
+// dot offset and every gap offset in reach (least squares, lightly
+// regularised towards the current kernels). The physical model starts the
+// detector; this lets the ring then learn what the camera really did to it,
+// including what the model leaves out: sharpening, the tone curve, ink that
+// saturates, a residual shift (an off-centre kernel). The kernel's centre of
+// mass must stay within 0.6 slot of its sample, so the refit can never
+// re-label the ring one slot round. Returns false (kernels unchanged) if the
+// ring is too short or the fit is unsound.
+bool fit_line_taps(RingLine &line, const RingModel &m) {
+    constexpr int D = 2 * kRingReach + 1, G = 2 * kRingReach + 2, N = 1 + D + G;
+    const int S = line.slots; if (S < 6 * N) return false;
+    const bool joins = line.pair != 0; const int n = joins ? N : 1 + D;
+    std::vector<double> a(static_cast<size_t>(n) * n, 0.0), b(static_cast<size_t>(n), 0.0), f(static_cast<size_t>(n));
+    int used = 0;
+    for (int s = 0; s < S; ++s) {
+        if (!line.has[static_cast<size_t>(s)]) continue;
+        std::fill(f.begin(), f.end(), 0.0); f[0] = 1;
+        for (int t = -kRingReach - 1; t <= kRingReach; ++t) {
+            const int j = ((s + t) % S + S) % S;
+            if (!line.bit[static_cast<size_t>(j)]) continue;
+            if (t >= -kRingReach) f[static_cast<size_t>(1 + t + kRingReach)] = 1;
+            if (joins && line.bit[static_cast<size_t>((j + 1) % S)]) f[static_cast<size_t>(1 + D + t + kRingReach + 1)] = 1;
+        }
+        const double y = line.y[static_cast<size_t>(s)];
+        for (int r = 0; r < n; ++r) { if (f[static_cast<size_t>(r)] == 0) continue; b[static_cast<size_t>(r)] += y; for (int q = 0; q < n; ++q) a[static_cast<size_t>(r) * n + q] += f[static_cast<size_t>(q)]; }
+        ++used;
+    }
+    if (used < 6 * n) return false;
+    // Ridge towards the current kernels (sector 0 holds the ring's working kernel after the first refit).
+    const double ridge = 0.005 * used;
+    std::vector<double> prior(static_cast<size_t>(n), 0.0); prior[0] = line.base;
+    for (int t = 0; t < D; ++t) prior[static_cast<size_t>(1 + t)] = line.gain * line.dot[0][static_cast<size_t>(t)];
+    if (joins) for (int t = 0; t < G; ++t) prior[static_cast<size_t>(1 + D + t)] = line.gain * line.pair * line.gap[0][static_cast<size_t>(t)];
+    for (int r = 1; r < n; ++r) { a[static_cast<size_t>(r) * n + r] += ridge; b[static_cast<size_t>(r)] += ridge * prior[static_cast<size_t>(r)]; }
+    // Gaussian elimination with partial pivoting.
+    for (int col = 0; col < n; ++col) {
+        int pivot = col; for (int r = col + 1; r < n; ++r) if (std::abs(a[static_cast<size_t>(r) * n + col]) > std::abs(a[static_cast<size_t>(pivot) * n + col])) pivot = r;
+        if (std::abs(a[static_cast<size_t>(pivot) * n + col]) < 1e-9) return false;
+        if (pivot != col) { for (int q = 0; q < n; ++q) std::swap(a[static_cast<size_t>(pivot) * n + q], a[static_cast<size_t>(col) * n + q]); std::swap(b[static_cast<size_t>(pivot)], b[static_cast<size_t>(col)]); }
+        for (int r = 0; r < n; ++r) if (r != col) {
+            const double k = a[static_cast<size_t>(r) * n + col] / a[static_cast<size_t>(col) * n + col];
+            if (k == 0) continue;
+            for (int q = col; q < n; ++q) a[static_cast<size_t>(r) * n + q] -= k * a[static_cast<size_t>(col) * n + q];
+            b[static_cast<size_t>(r)] -= k * b[static_cast<size_t>(col)];
+        }
+    }
+    std::vector<double> w(static_cast<size_t>(n)); for (int r = 0; r < n; ++r) w[static_cast<size_t>(r)] = b[static_cast<size_t>(r)] / a[static_cast<size_t>(r) * n + r];
+    // Sanity: a positive kernel centred on its own slot.
+    double mass = 0, moment = 0;
+    for (int t = 0; t < D; ++t) { const double v = std::max(0.0, w[static_cast<size_t>(1 + t)]); mass += v; moment += v * (t - kRingReach); }
+    if (mass <= 0.02 || std::abs(moment / mass) > 0.6 || w[static_cast<size_t>(1 + kRingReach)] <= 0) return false;
+    line.base = w[0]; line.gain = 1;
+    for (int k = 0; k < kRingSectors; ++k) {
+        for (int t = 0; t < D; ++t) line.dot[static_cast<size_t>(k)][static_cast<size_t>(t)] = w[static_cast<size_t>(1 + t)];
+        for (int t = 0; t < G; ++t) line.gap[static_cast<size_t>(k)][static_cast<size_t>(t)] = joins ? w[static_cast<size_t>(1 + D + t)] / line.pair : 0.0;
+    }
+    double sum_sq = 0;
+    for (int s = 0; s < S; ++s) if (line.has[static_cast<size_t>(s)]) { const double r = line.y[static_cast<size_t>(s)] - line.base - ring_ink(line, m, s); sum_sq += r * r; }
+    line.noise = std::sqrt(sum_sq / used);
+    return true;
+}
+
+// Detects one ring at a given shift: levels from its own long gaps and long
+// arcs, then detection and a level refit, twice. Returns the residual.
+double detect_ring_at(RingLine &line, const RingModel &m, double pitch, double shift) {
+    prepare_ring(line, m, pitch, shift);
+    std::vector<double> values;
+    for (int s = 0; s < line.slots; ++s) if (line.has[static_cast<size_t>(s)]) values.push_back(line.y[static_cast<size_t>(s)]);
+    if (values.size() < 24) return std::numeric_limits<double>::infinity();
+    std::sort(values.begin(), values.end());
+    line.base = values[values.size() / 10]; line.gain = std::max(0.05, values[values.size() * 9 / 10] - line.base);
+    for (int round = 0; round < 2; ++round) { detect_ring(line, m); if (!fit_line_levels(line, m)) return std::numeric_limits<double>::infinity(); }
+    return line.noise;
+}
+
+// Hard expectation-maximisation on one ring from its current kernels:
+// detect, let the ring relearn its kernels from the decisions, repeat.
+void refine_ring(RingLine &line, const RingModel &m) {
+    for (int round = 0; round < 4; ++round) {
+        const std::vector<uint8_t> before = line.bit;
+        if (!fit_line_taps(line, m)) break;
+        detect_ring(line, m);
+        if (line.bit == before || work_exhausted()) break;
+    }
+}
+
+// Copies a converged ring's learned kernels to another ring, resampled for
+// the other ring's slot spacing (the kernels are functions of distance
+// along the ring, and neighbouring rings see the same blur).
+void adopt_kernels(RingLine &line, const RingLine &from) {
+    const auto at = [](const double *taps, int count, double x) {  // linear interpolation, zero outside
+        if (x <= -1 || x >= count) return 0.0;
+        const int i = static_cast<int>(std::floor(x)); const double f = x - i;
+        const double lo = i >= 0 && i < count ? taps[i] : 0.0, hi = i + 1 >= 0 && i + 1 < count ? taps[i + 1] : 0.0;
+        return lo * (1 - f) + hi * f;
+    };
+    const double ratio = line.spacing / from.spacing;
+    const double pair = line.pair != 0 ? line.pair : 1.0;
+    for (int k = 0; k < kRingSectors; ++k) {
+        for (int t = -kRingReach; t <= kRingReach; ++t)
+            line.dot[static_cast<size_t>(k)][static_cast<size_t>(t + kRingReach)] = from.gain * at(from.dot[static_cast<size_t>(k)].data(), 2 * kRingReach + 1, t * ratio + kRingReach);
+        for (int t = -kRingReach - 1; t <= kRingReach; ++t)
+            line.gap[static_cast<size_t>(k)][static_cast<size_t>(t + kRingReach + 1)] = from.gain * from.pair * at(from.gap[static_cast<size_t>(k)].data(), 2 * kRingReach + 2, (t + 0.5) * ratio + kRingReach + 0.5) / pair;
+    }
+    line.base = from.base; line.gain = 1;
+}
+
+// Detects every ring. Each starts from the physical model and refines its
+// own kernels. The refinement can settle on a wrong reading when its start
+// is poor; such a ring shows a residual well above its neighbours'. It is
+// then restarted from the kernels a well-converged neighbour learned, and
+// keeps whichever reading explains its samples better.
+void register_and_detect_rings(std::vector<RingLine> &rings, const RingModel &m, double pitch) {
+    for (auto &line : rings) { detect_ring_at(line, m, pitch, 0.0); refine_ring(line, m); if (work_exhausted()) return; }
+    const int R = static_cast<int>(rings.size());
+    if (R < 2) return;
+    for (int sweep = 0; sweep < 3; ++sweep) {
+        std::vector<double> noise; for (const auto &line : rings) noise.push_back(line.noise);
+        std::vector<double> sorted = noise; std::sort(sorted.begin(), sorted.end());
+        const double good = sorted[static_cast<size_t>(R / 3)];  // a well-converged ring's residual
+        bool changed = false;
+        for (int k = 0; k < R; ++k) {
+            if (noise[static_cast<size_t>(k)] <= 1.25 * good) continue;
+            // Nearest well-converged ring.
+            int source = -1;
+            for (int d = 1; d < R && source < 0; ++d) for (const int j : {k - d, k + d}) if (j >= 0 && j < R && rings[static_cast<size_t>(j)].noise <= 1.15 * good) { source = j; break; }
+            if (source < 0) continue;
+            RingLine trial = rings[static_cast<size_t>(k)];
+            adopt_kernels(trial, rings[static_cast<size_t>(source)]);
+            detect_ring(trial, m);
+            if (!fit_line_levels(trial, m)) continue;
+            detect_ring(trial, m);
+            refine_ring(trial, m);
+            if (trial.noise < 0.9 * rings[static_cast<size_t>(k)].noise) { rings[static_cast<size_t>(k)] = trial; changed = true; }
+            if (work_exhausted()) return;
+        }
+        if (!changed) break;
+    }
+}
+
 // How firmly each ring decision stands: the extra squared error of flipping
 // that one bit, as a distance in noise deviations.
 void ring_confidence(const RingLine &line, const RingModel &m, std::vector<float> &confidence) {
@@ -560,13 +687,27 @@ void ring_confidence(const RingLine &line, const RingModel &m, std::vector<float
         for (int t = -kRingReach - 1; t <= kRingReach + 1; ++t) {
             const int u = ((s + t) % S + S) % S;
             if (!line.has[static_cast<size_t>(u)]) continue;
-            double d0, j0, d1, j1; ring_features(line, m.sigma, u, d0, j0); ring_features(flipped, m.sigma, u, d1, j1);
-            const double p0 = m.base + m.dot * d0 + m.join * j0, p1 = m.base + m.dot * d1 + m.join * j1, y = line.y[static_cast<size_t>(u)];
+            const double p0 = line.base + line.gain * ring_ink(line, m, u), p1 = line.base + line.gain * ring_ink(flipped, m, u), y = line.y[static_cast<size_t>(u)];
             delta += (y - p1) * (y - p1) - (y - p0) * (y - p0); signal += (p1 - p0) * (p1 - p0);
         }
         flipped.bit[static_cast<size_t>(s)] ^= 1;
-        confidence[static_cast<size_t>(site)] = signal > 1e-12 ? static_cast<float>(std::max(0.0, delta) / (2 * std::sqrt(signal) * std::max(m.noise, 0.01))) : 0.0f;
+        confidence[static_cast<size_t>(site)] = signal > 1e-12 ? static_cast<float>(std::max(0.0, delta) / (2 * std::sqrt(signal) * std::max(line.noise, 0.01))) : 0.0f;
     }
+}
+
+// Blur width (standard deviation, canonical units) from how much a module
+// leaks into the neighbour `distance` away, as a fraction of its own level.
+// Modules are squares of side `side`; the leak ratio of a Gaussian blur is
+// monotonic in its width, so it is inverted by bisection.
+double blur_from_leak(double ratio, double distance, double side) {
+    if (ratio <= 1e-4) return 0;
+    double lo = 0.02 * distance, hi = 2.0 * distance;
+    for (int it = 0; it < 40; ++it) {
+        const double mid = (lo + hi) / 2;
+        const double r = smeared_strip(distance, side / 2, mid) / std::max(1e-9, smeared_strip(0, side / 2, mid));
+        if (r < ratio) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
 }
 
 // Reads every site under homography h.
@@ -809,6 +950,7 @@ bool scalable_decide_sites(const ScalableLayout &L, const SiteSamples &S, unsign
     if (out.unknown * 2 > N) return false;
     // ---- Decisions ----
     out.printed.assign(N, 0); out.confidence.assign(N, 0.0f);
+    double lattice_blur[3] = {0, 0, 0}; bool lattice_blur_valid = false;  // blur covariance (xx, xy, yy) measured on the modules
     for (int kind = 0; kind < 3; ++kind) {
         std::vector<uint32_t> sites; std::vector<double> values;
         for (size_t i = 0; i < N; ++i) if (known[i] && L.nodes[i].kind == kind) { sites.push_back(static_cast<uint32_t>(i)); values.push_back(level[i]); }
@@ -816,56 +958,51 @@ bool scalable_decide_sites(const ScalableLayout &L, const SiteSamples &S, unsign
         const double cut = class_threshold(values);
         for (uint32_t i : sites) out.printed[i] = level[i] > cut;
         if (kind == 2 && (mode & kReadRingSequence)) {
-            // Ring dots: sequence detection, re-fitting the model to its own decisions.
+            // Ring dots: sequence detection under the physical model.
+            std::vector<double> ring_values;
             for (auto &line : rings) for (int s = 0; s < line.slots; ++s) {
                 const int32_t i = line.site[static_cast<size_t>(s)];
-                if (i >= 0 && known[static_cast<size_t>(i)]) { line.y[static_cast<size_t>(s)] = level[static_cast<size_t>(i)]; line.has[static_cast<size_t>(s)] = 1; }
+                if (i >= 0 && known[static_cast<size_t>(i)]) { line.y[static_cast<size_t>(s)] = level[static_cast<size_t>(i)]; line.has[static_cast<size_t>(s)] = 1; ring_values.push_back(level[static_cast<size_t>(i)]); }
                 line.bit[static_cast<size_t>(s)] = line.fixed[static_cast<size_t>(s)] >= 0 ? static_cast<uint8_t>(line.fixed[static_cast<size_t>(s)]) : (i >= 0 ? out.printed[static_cast<size_t>(i)] : 0);
             }
-            // Start from the blind estimate, then alternate detection and a
-            // least-squares refit of base, dot and join. Two neighbouring blur
-            // widths are also tried on a few rings; the width that leaves the
-            // smallest residual after detection is used for all of them.
             RingModel model;
-            {
-                RingModel blind = blind_ring_model(rings, p);
-                // Prefer the blur measured on the frame edge to the blind
-                // estimate; a dot's own size and the sampling footprint add to it.
-                if (blind.valid && S.edge_blur > 0) {
-                    const double measured = std::sqrt(S.edge_blur * S.edge_blur + (0.3 * L.dot) * (0.3 * L.dot));
-                    blind.sigma = std::clamp(measured, 0.06 * p, 0.9 * p);
-                    std::vector<RingLine> copy = rings; const RingModel levels = fit_ring_model(copy, blind.sigma);
-                    if (levels.valid) { blind.base = levels.base; blind.dot = levels.dot; blind.join = levels.join; }
+            if (ring_values.size() >= 48) {
+                // Long gaps and long arcs give the first base and gain.
+                std::sort(ring_values.begin(), ring_values.end());
+                const double low = ring_values[ring_values.size() / 10], high = ring_values[ring_values.size() * 9 / 10];
+                // Candidate blurs: the lattice measurement and two scalings of
+                // it, the frame-edge measurement, and "sharp". Each is tried on
+                // a few rings; the one that leaves the least unexplained
+                // signal after detection is used for all rings.
+                struct Blur { double xx, xy, yy; };
+                std::vector<Blur> candidates;
+                const double floor_variance = (0.08 * p) * (0.08 * p);
+                if (lattice_blur_valid) for (const double scale : {1.0, 0.6, 1.6}) candidates.push_back({lattice_blur[0] * scale + floor_variance, lattice_blur[1] * scale, lattice_blur[2] * scale + floor_variance});
+                if (S.edge_blur > 0) candidates.push_back({S.edge_blur * S.edge_blur + floor_variance, 0, S.edge_blur * S.edge_blur + floor_variance});
+                for (const double sigma : {0.12 * p, 0.25 * p, 0.4 * p}) candidates.push_back({sigma * sigma, 0, sigma * sigma});
+                std::vector<RingLine> probe;
+                for (int k : {0, L.rings / 2, L.rings - 1}) { bool seen = false; for (const auto &q : probe) seen = seen || q.spacing == rings[static_cast<size_t>(k)].spacing; if (!seen) probe.push_back(rings[static_cast<size_t>(k)]); }
+                double best_noise = std::numeric_limits<double>::infinity(); RingModel best;
+                for (size_t c = 0; c <= candidates.size(); ++c) {
+                    // Last pass: the best blur again, as separate dots (the "dots" ring style).
+                    if (c == candidates.size() && !best.valid) break;
+                    const Blur blur = c < candidates.size() ? candidates[c] : Blur{best.cov_xx, best.cov_xy, best.cov_yy};
+                    const double join = c < candidates.size() ? 1.0 : 0.0;
+                    RingModel m; m.cov_xx = blur.xx; m.cov_xy = blur.xy; m.cov_yy = blur.yy; m.half = L.dot; m.join = join;
+                    m.base = low; m.gain = std::max(0.1, high - low); m.valid = true;
+                    std::vector<RingLine> trial = probe; double total = 0;
+                    for (auto &line : trial) { const double noise = detect_ring_at(line, m, p, 0.0); total += noise * noise; }
+                    m.noise = std::sqrt(total / static_cast<double>(trial.size()));
+                    if (std::isfinite(m.noise) && m.noise < best_noise) { best_noise = m.noise; best = m; }
+                    if (work_exhausted()) break;
                 }
-                double best_sigma = blind.valid ? blind.sigma : 0;
-                if (blind.valid && L.rings > 0) {
-                    std::vector<RingLine> probe;
-                    for (int k : {0, L.rings / 2, L.rings - 1}) { bool seen = false; for (const auto &q : probe) seen = seen || q.spacing == rings[static_cast<size_t>(k)].spacing; if (!seen) probe.push_back(rings[static_cast<size_t>(k)]); }
-                    double best_noise = std::numeric_limits<double>::infinity();
-                    for (const double scale : {0.75, 1.0, 1.3}) {
-                        std::vector<RingLine> trial = probe; RingModel m = blind; m.sigma = blind.sigma * scale;
-                        if (scale != 1.0) { const RingModel rescaled = blind_ring_model(trial, p); m.base = rescaled.base; m.dot = rescaled.dot; }
-                        for (int round = 0; round < 3 && m.valid; ++round) { for (auto &line : trial) detect_ring(line, m); m = fit_ring_model(trial, m.sigma); }
-                        if (m.valid && m.noise < best_noise) { best_noise = m.noise; best_sigma = m.sigma; }
-                    }
-                }
-                if (best_sigma > 0) {
-                    model = blind; model.sigma = best_sigma;
-                    for (int round = 0; round < 4 && model.valid; ++round) {
-                        for (auto &line : rings) detect_ring(line, model);
-                        const RingModel fitted = fit_ring_model(rings, best_sigma);
-                        if (!fitted.valid) break;
-                        const bool settled = std::abs(fitted.dot - model.dot) < 0.02 * model.dot && std::abs(fitted.join - model.join) < 0.02 * model.dot;
-                        model = fitted;
-                        if (settled) break;
-                    }
-                }
+                if (best.valid) { model = best; register_and_detect_rings(rings, model, p); }
             }
             if (model.valid) {
-                for (auto &line : rings) detect_ring(line, model);
-                model = fit_ring_model(rings, model.sigma);
                 for (const auto &line : rings) for (int s = 0; s < line.slots; ++s) { const int32_t i = line.site[static_cast<size_t>(s)]; if (i >= 0) out.printed[static_cast<size_t>(i)] = line.bit[static_cast<size_t>(s)]; }
-                if (model.valid) { for (const auto &line : rings) ring_confidence(line, model, out.confidence); for (uint32_t i : sites) if (!known[i]) out.confidence[i] = 0; continue; }
+                for (const auto &line : rings) ring_confidence(line, model, out.confidence);
+                for (uint32_t i : sites) if (!known[i]) out.confidence[i] = 0;
+                continue;
             }
             double sum_sq = 0; for (uint32_t i : sites) { const double d = level[i] - cut; sum_sq += d * d; }
             const double spread = std::sqrt(sum_sq / static_cast<double>(sites.size()));
@@ -907,6 +1044,19 @@ bool scalable_decide_sites(const ScalableLayout &L, const SiteSamples &S, unsign
             if (!changed) break;
         }
         if (fitted) centre = w[1] / 2;
+        if (fitted && kind == 0) {
+            // The measured leaks give the blur's covariance in canonical
+            // units: widths along x, y and both diagonals, then
+            // var(direction u) = u' C u. The module sampling footprint
+            // (about 0.1 pitch) is part of what was measured; remove it.
+            const double side = 0.68 * p, footprint = (0.1 * p) * (0.1 * p);
+            const double sx = blur_from_leak(w[2] / w[1], p, side), sy = blur_from_leak(w[3] / w[1], p, side);
+            const double d1 = blur_from_leak(w[4] / w[1], 1.41421356 * p, side), d2 = blur_from_leak(w[5] / w[1], 1.41421356 * p, side);
+            lattice_blur[0] = std::max(0.0, sx * sx - footprint); lattice_blur[2] = std::max(0.0, sy * sy - footprint);
+            // Class 2 neighbours are (row - 1, col - 1) and (row + 1, col + 1): the direction (1, 1); class 3 is (1, -1).
+            lattice_blur[1] = std::clamp((d1 * d1 - d2 * d2) / 2, -0.9 * std::sqrt(lattice_blur[0] * lattice_blur[2]), 0.9 * std::sqrt(lattice_blur[0] * lattice_blur[2]));
+            lattice_blur_valid = true;
+        }
         sigma = std::max(sigma, fitted ? 0.03 * w[1] : 0.03);
         for (uint32_t i : sites) {
             double distance;
@@ -1109,6 +1259,58 @@ bool fit_frame_edges(const uint8_t *gray, size_t width, size_t height, size_t st
     if (!valid_quad(out) || quad_corner_distance(out, quad) > 1.5 * reach * unit_px + 2.0) return false;
     std::copy(out, out + 8, quad);
     return true;
+}
+
+// Lens from the rings. A corner-anchored perspective fit is exact at the
+// corners, but radial lens distortion moves the middle of the symbol
+// relative to them: by 2 to 3 pixels on a large symbol for a k1 of only
+// -0.02, which bows the frame's sides by a fraction of a pixel (too little
+// to measure there) yet is half a slot on the rings. The rings themselves
+// show it: samples taken on dot centres are either ink or background, and
+// off-centre they mix, so the right k1 is the one that makes the ring
+// samples spread widest. `quad` holds the field corners in the image, in
+// the attempt's orientation. Returns the lens (k1 = 0 if nothing beats it).
+LensModel lens_from_rings(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8]) {
+    LensModel lens{0, 0.5 * static_cast<double>(width), 0.5 * static_cast<double>(height), static_cast<double>(std::max(width, height))};
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    // A sample of each kind of site. Rings are the sensitive ones; modules
+    // and rays keep a wrong lens from winning by landing ring samples on
+    // some other, higher-contrast mark.
+    std::array<std::vector<uint32_t>, 3> sites; std::array<size_t, 3> count{};
+    for (const auto &n : L.nodes) ++count[n.kind];
+    std::array<size_t, 3> seen{};
+    for (size_t i = 0; i < L.nodes.size(); ++i) { const int k = L.nodes[i].kind; if (seen[static_cast<size_t>(k)]++ % std::max<size_t>(1, count[static_cast<size_t>(k)] / 600) == 0) sites[static_cast<size_t>(k)].push_back(static_cast<uint32_t>(i)); }
+    if (sites[2].size() < 64 || sites[0].size() < 32) return lens;
+    const auto spread = [&](double k1, std::array<double, 3> &variance) {
+        LensModel trial = lens; trial.k1 = k1; const LensScope scope(trial);
+        double h[8]; if (!solve_homography(canonical, quad, h)) return false;
+        for (int kind = 0; kind < 3; ++kind) {
+            double sum = 0, sq = 0; int n = 0;
+            for (uint32_t i : sites[static_cast<size_t>(kind)]) {
+                const auto &node = L.nodes[i];
+                const double v = kind == 1 ? polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + L.dial_sample, node.slot, L.dial_slots, 0.0)
+                                           : gray_sample(gray, width, height, stride, h, node.x, node.y, 0.0);
+                if (v < 0) continue;
+                sum += v; sq += v * v; ++n;
+            }
+            if (n < static_cast<int>(sites[static_cast<size_t>(kind)].size()) * 3 / 4) { if (kind != 1) return false; variance[static_cast<size_t>(kind)] = 0; continue; }
+            const double mean = sum / n; variance[static_cast<size_t>(kind)] = sq / n - mean * mean;
+        }
+        return true;
+    };
+    std::array<double, 3> flat{}; if (!spread(0.0, flat) || flat[0] <= 0 || flat[2] <= 0) return lens;
+    const auto gain = [&](double k1) {
+        std::array<double, 3> v{}; if (!spread(k1, v)) return 0.0;
+        // Each kind relative to no lens; the modules must not get worse.
+        if (v[0] < 0.97 * flat[0]) return 0.0;
+        return v[2] / flat[2] + v[0] / flat[0] + (flat[1] > 0 ? v[1] / flat[1] : 1.0);
+    };
+    double best = gain(0.0), best_k = 0; const double none = best;
+    for (double k = -0.20; k <= 0.0801; k += 0.01) { const double v = gain(k); if (v > best) { best = v; best_k = k; } }
+    for (double span = 0.005; span > 0.0006; span /= 2) for (const double k : {best_k - span, best_k + span}) { const double v = gain(k); if (v > best) { best = v; best_k = k; } }
+    // An optimum at the end of the range is not a lens.
+    if (best > 1.01 * none && best_k > -0.195 && best_k < 0.075) lens.k1 = best_k;
+    return lens;
 }
 
 // Blur from a known edge. The frame stroke's outer edge is a sharp step in

@@ -56,7 +56,7 @@ No wrong payload in either run. This is a simulated, host-side comparison on a s
 
 * The reader is slower than build 85: about 1.5 times on frames that decode and more than 3 times on frames that do not (table above). A strong first-pass candidate skips the extra search passes, and non-symbol rectangles are dropped before refinement, but several reading strategies and both placements are still tried on a frame that fails. Region-of-interest scanning in the SDK reduces the per-frame cost on a phone; the latency gate has not been measured on a device.
 * 71 of 6,000 cases that build 85 read are now missed, and the occlusion stratum is lower on its 29 recoverable cases. These were not investigated.
-* The standard layout's ring dots (0.2 module wide, 0.3 module apart) still fail first under blur; see `CONTEXT.md`.
+* The standard layout's rings still fail first under blur. Their dots have a radius of 0.2 module and sit 0.3 module apart on the inner ring, so one unprinted slot between two printed ones is a gap of about 0.2 module. See `CONTEXT.md` and `docs/research/reading-through-blur.md`.
 
 ## 0.1.0-build.85 — 2026-11-07
 

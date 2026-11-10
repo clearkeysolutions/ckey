@@ -131,11 +131,12 @@ int main() {
     // Grades rank styles by how much larger than plain black on white they must be to scan.
     {
         const auto v11 = encode(11, url);
-        ckey_style faint = plain; faint.ink = faint.ink_shade = {0xaa, 0xaa, 0xaa}; faint.policy = CKEY_POLICY_OVERRIDE;
+        // (#aaaaaa and #cccccc certify with the build-86 reader, so the example is #dddddd, below the 1.5:1 minimum.)
+        ckey_style faint = plain; faint.ink = faint.ink_shade = {0xdd, 0xdd, 0xdd}; faint.policy = CKEY_POLICY_OVERRIDE;
         CKEY_CHECK(ckey_certify_scalable_style(&v11, &faint, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 0);
         // The grade is "marginal" or "fails" depending on the reader; either way it is not certified on margin.
         CKEY_CHECK(std::string(c.message).find("not certified") == 0 && std::string(c.message).find("scan margin") != std::string::npos);
-        std::printf("faint #aaaaaa (override): %s\n", c.message);
+        std::printf("faint #dddddd (override): %s\n", c.message);
         ckey_style decorated; ckey_style_preset_fill(&decorated, CKEY_PRESET_CONCEPT);
         CKEY_CHECK(ckey_certify_scalable_style(&v11, &decorated, 0, nullptr, nullptr, nullptr, &c) == CKEY_OK && c.certified == 1);
         CKEY_CHECK(std::string(c.message).find("plain black on white down to") != std::string::npos);

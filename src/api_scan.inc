@@ -372,8 +372,38 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         std::array<std::vector<FrameEdgePoint>, 4> sides;
         if (frame_edge_points(gray, width, height, stride, quad_xy, 0.7, sides)) measured = estimate_lens(sides, width, height);
     }
-    for (int lens_pass = 0; lens_pass < (measured.k1 != 0 ? 2 : 1); ++lens_pass) {
-    const LensScope lens_scope(lens_pass == 0 ? measured : LensModel{});
+    // A second, more sensitive estimate comes from the rings themselves (see
+    // lens_from_rings): find the best-fitting version and orientation with no
+    // lens, then ask which lens makes its marks sharpest.
+    LensModel from_rings{};
+    {
+        const LensScope none(LensModel{});
+        double best_score = 0; int best_v = 0, best_f = 0, best_reverse = 0, best_start = 0;
+        for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
+            double h[8]; bool ok; orientation_homography(quad_xy, reverse, start, h, ok); if (!ok) continue;
+            const KeyFit skeleton = scalable_skeleton_fit(gray, width, height, stride, h);
+            if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < kMinKeyContrast) continue;
+            for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
+                const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
+                if (!keys.valid || keys.evidence < 0.85) continue;
+                const double score = keys.contrast * keys.evidence * keys.evidence;
+                if (score > best_score) { best_score = score; best_v = v; best_f = f; best_reverse = reverse; best_start = start; }
+            }
+        }
+        if (best_v > 0) {
+            double oriented[8];
+            for (int i = 0; i < 4; ++i) { const int q = (best_start + (best_reverse ? -i : i) + 8) % 4; oriented[2 * i] = quad_xy[2 * q]; oriented[2 * i + 1] = quad_xy[2 * q + 1]; }
+            from_rings = lens_from_rings(scalable_layout(best_v, best_f), gray, width, height, stride, oriented);
+        }
+    }
+    std::vector<LensModel> lenses;
+    // The ring estimate supersedes the frame-bow one when it found a lens.
+    for (const LensModel &candidate_lens : {from_rings, from_rings.k1 != 0 ? from_rings : measured, LensModel{}}) {
+        bool seen = false; for (const auto &l : lenses) seen = seen || std::abs(l.k1 - candidate_lens.k1) < 0.004;
+        if (!seen) lenses.push_back(candidate_lens);
+    }
+    for (const LensModel &lens_choice : lenses) {
+    const LensScope lens_scope(lens_choice);
     const double edge_blur = measure_edge_blur(gray, width, height, stride, quad_xy);
     // 1. The skeleton gates orientation. 2. Each version's keys are tested at
     //    that orientation; only agreeing versions are fully sampled, best
@@ -401,8 +431,10 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         if (!scalable_sample_sites(L, gray, width, height, stride, attempt.h, samples)) continue;
         samples.edge_blur = edge_blur;
       bool hopeless = false;
+      const bool leading = &attempt - attempts.data() < 2;  // sequence detection is costly: only for the two best hypotheses
       for (const unsigned mode : kReadModes) {
         if (work_exhausted()) break;
+        if ((mode & kReadRingSequence) && !leading) continue;
         if (hopeless && !(mode & kReadLocalLevels)) continue;  // only a change of levels can rescue a reading this far off
         if (!scalable_decide_sites(L, samples, mode, read)) continue;
         // Both placements share the sites. Try the one whose raw header reads
