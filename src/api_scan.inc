@@ -426,7 +426,13 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         std::copy(quad_xy, quad_xy + 8, bent_quad.begin());
         // (A strong bend seen at a tilt bows a side by more than a unit, hence the wide search.)
         std::array<std::vector<FrameEdgePoint>, 4> frame_points;
-        const bool refitted = fit_frame_curves(gray, width, height, stride, bent_quad.data(), 1.8, &frame_points);
+        double bow = 0;
+        // A bend that matters shows in the frame: its sides curve. Frames
+        // whose sides are straight (most unreadable frames are flat and
+        // blurred) skip the search. The dearer search over every low version
+        // needs a clearer curve.
+        constexpr double kBowToSearch = 0.06, kBowToSearchAllLow = 0.15;
+        const bool refitted = fit_frame_curves(gray, width, height, stride, bent_quad.data(), 1.8, &frame_points, &bow) && bow >= kBowToSearch;
         // No frame stroke on all four sides: not a symbol's own border (the
         // candidates include outlines inside a symbol), so nothing to bend.
         for (int given = 0; refitted && given < 2 && geometry_index == geometries.size(); ++given) {
@@ -437,7 +443,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
             // surface search is cheap (large modules need only a coarse one),
             // so each is tried; a wrong version seldom fits any surface, and the
             // keys, Reed-Solomon and the CRC reject it when it does.
-            if (found == 0 && given == 0) for (int v = 1; v <= kScalableVersions && scalable_layout(v, 0).pitch >= 0.45; ++v) candidates[found++] = v;
+            if (found == 0 && given == 0 && bow >= kBowToSearchAllLow) for (int v = 1; v <= kScalableVersions && scalable_layout(v, 0).pitch >= 0.45; ++v) candidates[found++] = v;
             for (size_t i = 0; i < found && !surface_work_spent(); ++i) {
                 const ScalableLayout &layout = scalable_layout(candidates[i], 0);
                 SurfaceModel surface = surface_from_marks(layout, gray, width, height, stride, bent_quad.data());

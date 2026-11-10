@@ -898,7 +898,7 @@ inline bool work_exhausted() { return work_budget().left == 0; }
 constexpr uint64_t kFindWorkBudget = 400000;      // samples per ckey_find_borders_gray8
 constexpr uint64_t kRefineWorkBudget = 8000000;   // per ckey_refine_quad_gray8
 constexpr uint64_t kDecodeWorkBudget = 16000000;   // per ckey_decode_*_gray8
-constexpr uint64_t kSurfaceWorkBudget = 2500000;  // of which, at most this much on finding a bent surface
+constexpr uint64_t kSurfaceWorkBudget = 1200000;  // of which, at most this much on finding a bent surface
 
 double gray_sample(const uint8_t *gray, size_t width, size_t height, size_t stride,
                    const double h[8], double x, double y, double spread = kLocatorSampleSpread) {

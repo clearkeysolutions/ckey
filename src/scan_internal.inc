@@ -1270,8 +1270,10 @@ bool fit_frame_edges(const uint8_t *gray, size_t width, size_t height, size_t st
 // the corners are where neighbouring parabolas cross. On a flat symbol this
 // agrees with the line fit but is noisier, so it is used only by the bent-
 // surface pass. `quad` is the starting estimate and receives the result.
+// `bow_out` receives how far the most curved side departs from its chord
+// over the fitted span, in canonical units.
 bool fit_frame_curves(const uint8_t *gray, size_t width, size_t height, size_t stride, double quad[8], double reach,
-                      std::array<std::vector<FrameEdgePoint>, 4> *edge_points = nullptr) {
+                      std::array<std::vector<FrameEdgePoint>, 4> *edge_points = nullptr, double *bow_out = nullptr) {
     constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
     std::array<std::vector<FrameEdgePoint>, 4> sides;
     if (!frame_edge_points(gray, width, height, stride, quad, reach, sides)) return false;
@@ -1292,6 +1294,7 @@ bool fit_frame_curves(const uint8_t *gray, size_t width, size_t height, size_t s
         std::copy(best, best + 3, bow[side]);
     }
     if (!frame_edge_points(gray, width, height, stride, quad, 0.3, sides, bow)) return false;
+    if (bow_out) { *bow_out = 0; for (int side = 0; side < 4; ++side) *bow_out = std::max(*bow_out, std::abs(bow[side][2]) * 9.5 * 9.5); }
     if (edge_points) *edge_points = sides;
     // A side as: mean point m, unit tangent (tx, ty), unit normal (nx, ny), and
     // offset along the normal = c0 + c1 t + c2 t^2 at distance t along the tangent.
