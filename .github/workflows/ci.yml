@@ -7,6 +7,10 @@ permissions:
   contents: read
 jobs:
   core:
+    # This is a public repository and the runner is a private machine: never
+    # run a pull request from a fork on it. Pushes and same-repository pull
+    # requests run; fork pull requests are covered by "Community checks".
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     strategy:
       fail-fast: false
@@ -45,14 +49,19 @@ jobs:
 
   benchmarks:
     name: optical benchmarks (synthetic, with QR/Data Matrix via zxing-cpp)
+    # This is a public repository and the runner is a private machine: never
+    # run a pull request from a fork on it. Pushes and same-repository pull
+    # requests run; fork pull requests are covered by "Community checks".
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # The self-hosted runner is a Mac: zxing-cpp comes from Homebrew.
       - name: Install zxing-cpp
-        run: sudo apt-get update && sudo apt-get install -y libzxing-dev
+        run: brew list zxing-cpp >/dev/null 2>&1 || brew install zxing-cpp
       - name: Build
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCKEY_BUILD_TESTS=OFF -DCKEY_BENCH_ZXING=ON
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCKEY_BUILD_TESTS=OFF -DCKEY_BENCH_ZXING=ON -DCMAKE_PREFIX_PATH="$(brew --prefix)"
           cmake --build build --target ckey-bench --parallel 2
       - name: Run
         run: ./build/ckey-bench --quick --md benchmarks.md --json benchmarks.json
