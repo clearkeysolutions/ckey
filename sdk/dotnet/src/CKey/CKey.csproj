@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+    <AssemblyName>CKey</AssemblyName>
+    <RootNamespace>OpenCKey</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>CKey</PackageId>
+    <Title>CKey</Title>
+    <Description>CKey optical codes for .NET: encode, render native RGBA pixels (plus PNG, SVG and PDF export) and scan grayscale frames, over the CKey C core via P/Invoke. Headless; no UI dependencies. Anonymous aggregate telemetry is on by default (CKey.Telemetry = 0 turns it off).</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="CKeyVersion" Value="$(CKeyVersion)" />
+    <InternalsVisibleTo Include="CKey.Tests" />
+    <!-- The WPF Safe Action confirmation is the only caller of CKeySafeActionRequest.Decide outside this assembly. -->
+    <InternalsVisibleTo Include="CKey.Wpf" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <!-- .NET Framework consumers do not probe runtimes/<rid>/native: copy the win-x64 library. -->
+    <None Include="build/CKey.targets" Pack="true" PackagePath="build/;buildTransitive/" />
+  </ItemGroup>
+
+  <!-- Native assets: runtimes/<rid>/native/ in the package. A local pack
+       includes whichever exist; CI packs with -p:CKeyRequireAllNatives=true. -->
+  <ItemGroup>
+    <CKeyNativeAsset Include="$(CKeyNativeRoot)win-x64/ckeynative.dll" Rid="win-x64" />
+    <CKeyNativeAsset Include="$(CKeyNativeRoot)linux-x64/libckeynative.so" Rid="linux-x64" />
+    <CKeyNativeAsset Include="$(CKeyNativeRoot)osx-arm64/libckeynative.dylib" Rid="osx-arm64" />
+    <CKeyNativeAsset Include="$(CKeyNativeRoot)osx-x64/libckeynative.dylib" Rid="osx-x64" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(CKeyNativeRoot)win-x64/ckeynative.dll" Condition="Exists('$(CKeyNativeRoot)win-x64/ckeynative.dll')" Pack="true" PackagePath="runtimes/win-x64/native/" Visible="false" />
+    <None Include="$(CKeyNativeRoot)linux-x64/libckeynative.so" Condition="Exists('$(CKeyNativeRoot)linux-x64/libckeynative.so')" Pack="true" PackagePath="runtimes/linux-x64/native/" Visible="false" />
+    <None Include="$(CKeyNativeRoot)osx-arm64/libckeynative.dylib" Condition="Exists('$(CKeyNativeRoot)osx-arm64/libckeynative.dylib')" Pack="true" PackagePath="runtimes/osx-arm64/native/" Visible="false" />
+    <None Include="$(CKeyNativeRoot)osx-x64/libckeynative.dylib" Condition="Exists('$(CKeyNativeRoot)osx-x64/libckeynative.dylib')" Pack="true" PackagePath="runtimes/osx-x64/native/" Visible="false" />
+  </ItemGroup>
+
+  <!-- Local builds and tests (project references): copy the host's native
+       library next to the assembly, where the default probing finds it.
+       CI passes -p:CKeyHostRid=<rid> explicitly. -->
+  <PropertyGroup>
+    <CKeyHostRid Condition="'$(CKeyHostRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</CKeyHostRid>
+    <CKeyHostLib Condition="$(CKeyHostRid.StartsWith('win'))">ckeynative.dll</CKeyHostLib>
+    <CKeyHostLib Condition="$(CKeyHostRid.StartsWith('osx'))">libckeynative.dylib</CKeyHostLib>
+    <CKeyHostLib Condition="'$(CKeyHostLib)' == ''">libckeynative.so</CKeyHostLib>
+    <CKeyHostLibPath>$(CKeyNativeRoot)$(CKeyHostRid)/$(CKeyHostLib)</CKeyHostLibPath>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(CKeyHostLibPath)')">
+    <None Include="$(CKeyHostLibPath)" Link="$(CKeyHostLib)" CopyToOutputDirectory="PreserveNewest" Pack="false" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="CKeyRequireAllNatives" BeforeTargets="GenerateNuspec" Condition="'$(CKeyRequireAllNatives)' == 'true'">
+    <Error Condition="!Exists('%(CKeyNativeAsset.FullPath)')" Text="Missing native library for %(CKeyNativeAsset.Rid): %(CKeyNativeAsset.FullPath)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,89 @@
+ckey_diagnostics size 112
+ckey_diagnostics.status 4
+ckey_diagnostics.corrected_symbols 8
+ckey_diagnostics.erasures_used 12
+ckey_diagnostics.message 16
+ckey_scalable_symbol size 8216
+ckey_scalable_symbol.version 4
+ckey_scalable_symbol.ecc_level 8
+ckey_scalable_symbol.layout 12
+ckey_scalable_symbol.payload_length 16
+ckey_scalable_symbol.codeword_length 20
+ckey_scalable_symbol.codeword 24
+ckey_rgb size 3
+ckey_style size 96
+ckey_style.background 0
+ckey_style.background_edge 3
+ckey_style.ink 6
+ckey_style.ink_shade 9
+ckey_style.accents 12
+ckey_style.accent_count 24
+ckey_style.accent_percent 28
+ckey_style.modules 32
+ckey_style.rings 36
+ckey_style.rays 40
+ckey_style.bevel 48
+ckey_style.shadow 56
+ckey_style.texture 64
+ckey_style.logo_href 72
+ckey_style.logo_radius 80
+ckey_style.logo_plate 88
+ckey_style.policy 92
+ckey_logo_image size 24
+ckey_logo_image.rgba 0
+ckey_logo_image.width 8
+ckey_logo_image.height 12
+ckey_logo_image.stride 16
+ckey_raster_options size 48
+ckey_raster_options.size_px 4
+ckey_raster_options.policy 8
+ckey_raster_options.format 12
+ckey_raster_options.transparent 16
+ckey_raster_options.supersample 20
+ckey_raster_options.min_feature_px 24
+ckey_raster_options.materials 32
+ckey_raster_options.logo 40
+ckey_backdrop size 40
+ckey_backdrop.colours 0
+ckey_backdrop.colour_count 8
+ckey_backdrop.rgba 16
+ckey_backdrop.width 24
+ckey_backdrop.height 28
+ckey_backdrop.stride 32
+ckey_scan_model size 48
+ckey_scan_model.px_per_module 8
+ckey_scan_model.blur_px 16
+ckey_scan_model.noise 24
+ckey_scan_model.glare 32
+ckey_scan_model.trials 40
+ckey_certification size 304
+ckey_certification.certified 4
+ckey_certification.policy 8
+ckey_certification.adjustments 12
+ckey_certification.trials 16
+ckey_certification.trials_passed 20
+ckey_certification.min_contrast 24
+ckey_certification.feature_separation 32
+ckey_certification.logo_load 40
+ckey_certification.message 48
+ckey_telemetry_histogram size 96
+ckey_telemetry_histogram.sum 8
+ckey_telemetry_histogram.buckets 16
+ckey_telemetry_counters size 264
+ckey_telemetry_counters.sessions_succeeded 8
+ckey_telemetry_counters.sessions_failed 16
+ckey_telemetry_counters.frames 24
+ckey_telemetry_counters.decoded 32
+ckey_telemetry_counters.time_to_decode_ms 72
+ckey_telemetry_counters.frame_ms 168
+ckey_safe_action size 1736
+ckey_safe_action.scope 4
+ckey_safe_action.issuer 8
+ckey_safe_action.app 262
+ckey_safe_action.action 518
+ckey_safe_action.key_id 583
+ckey_safe_action.request_id 616
+ckey_safe_action.issued_at 688
+ckey_safe_action.expires_at 696
+ckey_safe_action.params 704
+ckey_safe_action.params_len 1728

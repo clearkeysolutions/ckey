@@ -1,0 +1,36 @@
+# Marks a published release deprecated (spec §8.2; docs/BRANCHES-AND-RELEASES.md):
+# retitles it "Deprecated - {release name}" and prepends a notice. The tag
+# and its source stay available. Runnable only by users with write access.
+name: Deprecate release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.1.0-build.66
+        required: true
+      replacement:
+        description: Tag that replaces it
+        required: true
+      reason:
+        description: Why it is deprecated
+        required: true
+permissions:
+  contents: write
+jobs:
+  deprecate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Retitle and annotate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPLACEMENT: ${{ inputs.replacement }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          title="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json name -q .name)"
+          case "$title" in "Deprecated - "*) echo "already deprecated"; exit 0;; esac
+          body="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body -q .body)"
+          printf '> **Deprecated:** use %s instead. %s\n\n%s\n' "$REPLACEMENT" "$REASON" "$body" > notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Deprecated - ${title}" --notes-file notes.md
+      - name: Reminder
+        run: echo "Also mark ${{ inputs.tag }} deprecated in CHANGELOG-STABLE.md, docs/support-matrix.json and the map's release table, and deprecate registry versions (npm deprecate, NuGet unlist, Maven note)."

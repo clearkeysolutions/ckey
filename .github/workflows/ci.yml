@@ -1,0 +1,62 @@
+name: CKey CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            build_type: Release
+            cxx_flags: ""
+          - name: debug-sanitizers
+            build_type: Debug
+            cxx_flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
+    name: core (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_CXX_FLAGS="${{ matrix.cxx_flags }}"
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Field tests are valid, current and encodable
+        if: matrix.name == 'release'
+        run: |
+          python3 tools/field_tests.py --check
+          python3 tools/field_tests.py --verify-with build/ckey
+      - name: Safe Action vectors match their independent generator
+        if: matrix.name == 'release'
+        run: node tools/safe_actions_vectors.mjs --check
+      - name: Install and consume the CMake package
+        if: matrix.name == 'release'
+        run: |
+          cmake --install build --prefix "$RUNNER_TEMP/ckey"
+          cmake -S examples/c -B "$RUNNER_TEMP/example" -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ckey"
+          cmake --build "$RUNNER_TEMP/example"
+          (cd "$RUNNER_TEMP/example" && ./render_and_scan)
+
+  benchmarks:
+    name: optical benchmarks (synthetic, with QR/Data Matrix via zxing-cpp)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install zxing-cpp
+        run: sudo apt-get update && sudo apt-get install -y libzxing-dev
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCKEY_BUILD_TESTS=OFF -DCKEY_BENCH_ZXING=ON
+          cmake --build build --target ckey-bench --parallel 2
+      - name: Run
+        run: ./build/ckey-bench --quick --md benchmarks.md --json benchmarks.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: benchmarks
+          path: benchmarks.*

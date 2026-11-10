@@ -1,4 +1,4 @@
-# CKey Payload Conventions (informative, draft 0.1)
+# CKey Payload Conventions (informative, draft 0.2)
 
 A CKey payload is bytes. No format reserves a content-type field. This
 document says how a **reader** should interpret those bytes. It is not part
@@ -27,6 +27,7 @@ existing standards, so phones and other code readers already understand them.
 | `geo:` | RFC 5870 | `geo:37.33490,-122.00900?q=Apple%20Park` | Show the coordinates in a map app |
 | `address:` | **CKey convention** (below) | `address:1 Infinite Loop, Cupertino, CA 95014` | Show the address in a map app |
 | `BEGIN:VCARD` … `END:VCARD` | RFC 6350 (vCard 3.0/4.0) | a complete vCard | Offer to add the contact |
+| `ckey-action:1:` | **CKey Safe Actions** ([spec](CKey-Safe-Actions.md)) | `ckey-action:1:AQEL…` | Verify; then run, or confirm first, as below |
 
 **Phone numbers:** encode them in E.164 international form (`+` and country code). The number then carries its country, and no per-country form is needed.
 
@@ -40,9 +41,10 @@ The reader hands the address text to the platform's map application, which geoco
 
 ## Safety rules
 
-1. **Never act automatically.** A decode only displays the payload and its proposed action, and the user must tap to proceed. The action states its target, for example "Open citeory.com", "Call +1 555…" or "Email hello@…".
-2. **Allowlist only.** Offer actions only for the forms above. Treat `javascript:`, `data:`, `file:`, `intent:`, custom application schemes, and anything else as plain text with no action.
-3. **Keep the payload visible.** The decoded text, and the raw bytes on request, remain visible next to any action.
+1. **Never act automatically, except on a verified Safe Action.** A decode only displays the payload and its proposed action, and the user must tap to proceed. The action states its target, for example "Open citeory.com", "Call +1 555…" or "Email hello@…".
+   The one exception is a `ckey-action:1:` payload that passes every check in [CKey Safe Actions](CKey-Safe-Actions.md): signed by the issuer it names, for this app and an action this app registered, unused and in time. A verified **same-device** Safe Action runs without a prompt. A verified **cross-device** Safe Action runs only after the SDK's own confirmation, which names the issuer and the requesting device. A `ckey-action:` payload that fails any check runs nothing, and the reader says it could not be verified.
+2. **Allowlist only.** Offer actions only for the forms above (a Safe Action only as rule 1 describes). Treat `javascript:`, `data:`, `file:`, `intent:`, custom application schemes, and anything else as plain text with no action.
+3. **Keep the payload visible.** The decoded text, and the raw bytes on request, remain visible next to any action. A same-device Safe Action that ran is listed afterwards, with its issuer and action, wherever the reader keeps its history.
 4. **Validate before offering.**
    - `mailto:` must contain an `@`.
    - `tel:` and `sms:` need at least three digits; only `+` and digits are kept.

@@ -1,0 +1,107 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* CKeyReaderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* CKeyReaderApp.swift */; };
+		A10000000000000000000002 /* CameraScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* CameraScanner.swift */; };
+		A10000000000000000000003 /* ckey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* ckey.cpp */; };
+		A10000000000000000000004 /* LocatorRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* LocatorRanker.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* CKeyReaderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CKeyReader/CKeyReaderApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* CameraScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CKeyReader/CameraScanner.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* ckey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = ../src/ckey.cpp; sourceTree = "<group>"; };
+		A20000000000000000000004 /* CKeyReader-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CKeyReader/CKeyReader-Bridging-Header.h; sourceTree = "<group>"; };
+		A20000000000000000000005 /* CKeyReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CKeyReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000006 /* LocatorRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CKeyReader/LocatorRanker.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {isa = PBXGroup; children = (
+			A20000000000000000000001 /* CKeyReaderApp.swift */,
+			A20000000000000000000002 /* CameraScanner.swift */,
+			A20000000000000000000003 /* ckey.cpp */,
+			A20000000000000000000004 /* CKeyReader-Bridging-Header.h */,
+			A20000000000000000000006 /* LocatorRanker.swift */,
+			A40000000000000000000002 /* Products */,
+		); sourceTree = "<group>"; };
+		A40000000000000000000002 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000005 /* CKeyReader.app */,); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* CKeyReader */ = {isa = PBXNativeTarget; buildConfigurationList = A90000000000000000000002 /* Build configuration list for PBXNativeTarget "CKeyReader" */; buildPhases = (
+			A60000000000000000000001 /* Sources */,
+			A30000000000000000000001 /* Frameworks */,
+			A60000000000000000000002 /* Resources */,
+		); buildRules = (); dependencies = (); name = CKeyReader; productName = CKeyReader; productReference = A20000000000000000000005 /* CKeyReader.app */; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A70000000000000000000001 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {A50000000000000000000001 = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = A90000000000000000000001 /* Build configuration list for PBXProject "CKeyReader" */; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A40000000000000000000001; productRefGroup = A40000000000000000000002 /* Products */; projectDirPath = ""; projectRoot = ""; targets = (A50000000000000000000001 /* CKeyReader */,); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			A10000000000000000000001 /* CKeyReaderApp.swift in Sources */,
+			A10000000000000000000002 /* CameraScanner.swift in Sources */,
+			A10000000000000000000003 /* ckey.cpp in Sources */,
+			A10000000000000000000004 /* LocatorRanker.swift in Sources */,
+		); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A80000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_STRICT_OBJC_MSGSEND = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Debug; };
+		A80000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Release; };
+		A80000000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+			CODE_SIGN_STYLE = Automatic;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_KEY_NSCameraUsageDescription = "CKey Reader uses the camera to find and decode CKey symbols on your device.";
+			INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+			INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			PRODUCT_BUNDLE_IDENTIFIER = solutions.clearkey.CKeyReader;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/CKeyReader/CKeyReader-Bridging-Header.h";
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";
+		}; name = Debug; };
+		A80000000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+			CODE_SIGN_STYLE = Automatic;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_KEY_NSCameraUsageDescription = "CKey Reader uses the camera to find and decode CKey symbols on your device.";
+			INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+			INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+			PRODUCT_BUNDLE_IDENTIFIER = solutions.clearkey.CKeyReader;
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/CKeyReader/CKeyReader-Bridging-Header.h";
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = "1,2";
+			HEADER_SEARCH_PATHS = "$(SRCROOT)/../include";
+		}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A90000000000000000000001 /* Build configuration list for PBXProject "CKeyReader" */ = {isa = XCConfigurationList; buildConfigurations = (A80000000000000000000001 /* Debug */, A80000000000000000000002 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A90000000000000000000002 /* Build configuration list for PBXNativeTarget "CKeyReader" */ = {isa = XCConfigurationList; buildConfigurations = (A80000000000000000000003 /* Debug */, A80000000000000000000004 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+	};
+	rootObject = A70000000000000000000001 /* Project object */;
+}

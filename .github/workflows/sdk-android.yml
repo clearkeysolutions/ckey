@@ -1,0 +1,97 @@
+name: SDK Android
+on:
+  push:
+    paths:
+      - "sdk/android/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-android.yml"
+  pull_request:
+    paths:
+      - "sdk/android/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-android.yml"
+  workflow_dispatch:
+  workflow_call:   # the release workflow builds release packages with this file
+permissions:
+  contents: read
+concurrency:
+  group: sdk-android-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  GRADLE_VERSION: "8.10.2"
+jobs:
+  # JNI bridge on a desktop JVM: signature check (javac -h), host build of
+  # libckey_jni.so from the core sources, Java harness round trips, and the
+  # Kotlin sources + JUnit tests compiled with Gradle's embedded compiler.
+  jni-host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Host JNI harness
+        run: sdk/android/jni-host-test/run.sh
+
+  # The real Android build: AAR for every ABI via the NDK, unit tests, and a
+  # Maven publication to a local directory (no credentials).
+  gradle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Build, unit test, publish locally
+        run: >
+          gradle -p sdk/android --no-daemon --stacktrace
+          :ckey:testDebugUnitTest
+          assembleRelease
+          publishAllPublicationsToLocalRepository
+      - name: Scan-only and render-only native variants
+        run: |
+          gradle -p sdk/android --no-daemon :ckey:assembleRelease -Pckey.native.render=false -Pckey.native.telemetry=false
+          gradle -p sdk/android --no-daemon :ckey:assembleRelease -Pckey.native.scan=false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ckey-android-maven
+          path: sdk/android/build/maven
+          if-no-files-found: error
+
+  # Instrumented round trips on an emulator (x86_64, KVM).
+  instrumented:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: gradle -p sdk/android --no-daemon :ckey:connectedDebugAndroidTest

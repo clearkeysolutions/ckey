@@ -1,0 +1,16 @@
+{
+  "software_version": "0.1.0-dev.33",
+  "format_version": "0.12.0",
+  "profile": "locator-v1",
+  "payload_hex": "000102030405060708090a0b0c0d0e0f",
+  "frame_hex": "c74b0c010010000102030405060708090a0b0c0d0e0ffa372453",
+  "rs_parameters": {
+    "n": 77,
+    "k": 26,
+    "field_polynomial": "0x11d",
+    "primitive_element": 2,
+    "roots": "alpha^0 through alpha^50",
+    "parity_hex": "599c03ac4e1f1931a648fbce5eac2a0a18f053ac68d195cffd7c9f1798d47778127d43ba4d5ad45989436dd4ed8f5c9ebcbf53"
+  },
+  "codeword_hex": "c74b0c010010000102030405060708090a0b0c0d0e0ffa372453599c03ac4e1f1931a648fbce5eac2a0a18f053ac68d195cffd7c9f1798d47778127d43ba4d5ad45989436dd4ed8f5c9ebcbf53"
+}

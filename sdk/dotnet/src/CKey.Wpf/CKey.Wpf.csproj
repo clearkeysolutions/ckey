@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Optional WPF adapter: CKey pixels as WriteableBitmap, and BitmapSource
+       frames into the scanner. The core CKey package has no UI dependency. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>CKey.Wpf</AssemblyName>
+    <RootNamespace>OpenCKey.Wpf</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <PackageId>CKey.Wpf</PackageId>
+    <Title>CKey for WPF</Title>
+    <Description>WPF adapter for the CKey package: render CKey symbols to WriteableBitmap and scan BitmapSource frames.</Description>
+    <PackageTags>$(PackageTags);wpf</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../CKey/CKey.csproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

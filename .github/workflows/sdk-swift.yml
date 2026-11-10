@@ -1,0 +1,45 @@
+name: SDK Swift
+on:
+  push:
+    paths:
+      - "Package.swift"
+      - "sdk/swift/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-swift.yml"
+  pull_request:
+    paths:
+      - "Package.swift"
+      - "sdk/swift/**"
+      - "src/**"
+      - "include/**"
+      - "VERSION"
+      - ".github/workflows/sdk-swift.yml"
+  workflow_dispatch:
+  workflow_call:   # the release workflow builds release packages with this file
+permissions:
+  contents: read
+jobs:
+  swift:
+    name: swift build and test (macOS)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      # Maintainers: pin actions to full commit SHAs (as ci.yml does).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Build
+        run: swift build -v
+      - name: Test
+        run: swift test
+      - name: Build release
+        run: swift build -c release
+      - name: Build for iOS (simulator)
+        run: |
+          xcodebuild build -scheme CKey-Package \
+            -destination "generic/platform=iOS Simulator" \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO

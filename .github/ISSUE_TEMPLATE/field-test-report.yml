@@ -1,0 +1,98 @@
+# Generated from field-tests/suite.json by tools/field_tests.py. Edit the JSON, not this file.
+name: Field-test report
+description: Report the result of a CKey field test. Results are imported to openckey.org/tests.
+title: "[FT-] "
+labels: ["field-test"]
+body:
+  - type: markdown
+    attributes:
+      value: "Run a test from https://openckey.org/tests (each test page has its set-up, steps, sheet and rubric), then report it here. This report is public and is copied to https://openckey.org/tests with a link back to this issue."
+  - type: dropdown
+    id: test
+    attributes:
+      label: "Test"
+      options:
+        - "FT-01 Smallest printed size"
+        - "FT-02 Reading distance"
+        - "FT-03 Viewing angle"
+        - "FT-04 Lighting"
+        - "FT-05 On a screen"
+        - "FT-06 Damage"
+        - "FT-07 Styles in the real world"
+        - "FT-08 Density"
+        - "FT-09 Small labels: print layout"
+        - "FT-10 Time to read"
+        - "FT-11 Payload safety"
+        - "Community test (give its ID below)"
+    validations:
+      required: true
+  - type: input
+    id: community_test
+    attributes:
+      label: "Community test ID"
+      description: "Only for a community test, for example C-7Q2K9P."
+    validations:
+      required: false
+  - type: input
+    id: device
+    attributes:
+      label: "Phone, tablet or camera"
+      description: "Model, for example iPhone 15 or Pixel 8a."
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: "Operating system and version"
+    validations:
+      required: true
+  - type: input
+    id: reader_version
+    attributes:
+      label: "Reader version"
+      description: "Shown in the app's Settings, or the SDK version."
+    validations:
+      required: false
+  - type: input
+    id: medium
+    attributes:
+      label: "Printer, paper or screen"
+      description: "For example: laser printer on plain paper, or a laptop screen."
+    validations:
+      required: false
+  - type: dropdown
+    id: reader
+    attributes:
+      label: "Reader"
+      options:
+        - "Open CKey Scanner (iOS)"
+        - "openckey.org scanner (web)"
+        - "An app built with a CKey SDK"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: "Measurements"
+      description: "One line per trial, as the test page lists them, for example `A: read, 1.2 s` or `60 cm: no`."
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: "Outcome"
+      description: "Grade it with the test's rubric."
+      options:
+        - "pass"
+        - "partial"
+        - "fail"
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: "Notes and photos"
+      description: "Anything else worth knowing. You can attach photos; do not include faces or personal information."
+    validations:
+      required: false
