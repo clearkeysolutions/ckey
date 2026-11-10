@@ -14,10 +14,20 @@ Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`
 
 The repair pass for the CKTEST-RH-001 hardening campaign. It implements `Pretest-observations-for-repair.md` (now deleted; what remains open is listed in `CONTEXT.md`). The source tree is back on `scratch`, restored from `Stable-Release` at `ede38f5`.
 
-**Measured.** key-test harness (`clearkeysolutions/key-test` at `9ff83e3`), structured cases in plan order (the plan was regenerated locally and its shard hashes match the campaign's evidence), build 85 against this build on identical frames:
+**Measured.** key-test harness (`clearkeysolutions/key-test` at `9ff83e3`), the first 300 structured cases of each of the 20 strata (6,000 cases; the plan was regenerated locally and its shard hashes match the campaign's evidence), build 85 against this build on identical frames:
 
-* Development subset (first 100 cases per stratum, 2,000 cases; 1,802 valid symbols, 1,077 physically recoverable), measured during the build: decoded 58.1% of valid symbols (build 85: 51.4%) and 76.4% of recoverable ones (build 85: 66.8%). By stratum, recoverable: contrast S09 25% → 54%, colour S15 55% → 84%, perspective S04 46% → 66%, print dot gain S12 61% → 75%.
-* The 6,000-case comparison of the final code was still running when this entry was written; its table is added in the next commit.
+| | Build 85 | Build 86 |
+|---|---|---|
+| Valid symbols decoded (5,401) | 50.0% | **59.1%** |
+| Physically recoverable symbols decoded (3,267) | 64.4% | **76.0%** |
+| Recoverable, standard layout (Format 0.27) | 60.8% | 70.5% |
+| Recoverable, print layout (Format 0.28) | 68.2% | 81.5% |
+| Wrong payloads (6,000 cases, 599 of them hard negatives) | 0 | 0 |
+| Reader time per frame, median / 95th percentile | 41 / 187 ms | 88 / 536 ms |
+| Reader time, frames that decoded, median / 95th percentile | 32 / 62 ms | 49 / 120 ms |
+| Reader time, frames that did not decode, median | 77 ms | 261 ms |
+
+Recoverable symbols decoded, by stratum (build 85 → build 86): S01 clean 99.5 → 99.5; S02 96.3 → 97.9; S03 resolution 69.7 → 77.8; S04 perspective and bends 40.6 → 69.4; S05 rotation 92.8 → 97.0; S06 defocus 31.7 → 42.2; S07 motion 33.8 → 41.0; S08 low light 88.5 → 94.2; S09 contrast and shadows 27.4 → 60.0; S10 glare 39.0 → 63.4; S11 occlusion 72.4 → 62.1 (29 cases); S12 print 58.0 → 68.2; S13 screens 61.5 → 73.7; S14 compression 80.7 → 87.4; S15 colour 54.4 → 86.0; S16 clutter and crops 87.6 → 93.8; S17 75.6 → 77.7; S18 46.9 → 60.3; S19 lens and finder loss 72.0 → 79.3; S20 88.6 → 94.4. 562 cases were gained and 71 that build 85 read are now missed (net +491). Times are host times on a 4-core container with four workers running, so they compare the two builds but are not device figures.
 
 No wrong payload in either run. This is a simulated, host-side comparison on a subset, not the campaign's full regression or holdout, and it does not qualify the reader. The gap to 100% and its causes are in `CONTEXT.md`.
 
@@ -44,7 +54,8 @@ No wrong payload in either run. This is a simulated, host-side comparison on a s
 
 **Known costs and gaps**
 
-* The reader is slower than build 85: the time per frame is being measured in the same 6,000-case run and is added in the next commit; on the development subset the median reader time rose from 37 ms to roughly 60 to 170 ms depending on machine load, and frames that fail cost several times that. Region-of-interest scanning in the SDK reduces the per-frame cost on a phone, but the latency gate has not been measured on a device.
+* The reader is slower than build 85: about 1.5 times on frames that decode and more than 3 times on frames that do not (table above). A strong first-pass candidate skips the extra search passes, and non-symbol rectangles are dropped before refinement, but several reading strategies and both placements are still tried on a frame that fails. Region-of-interest scanning in the SDK reduces the per-frame cost on a phone; the latency gate has not been measured on a device.
+* 71 of 6,000 cases that build 85 read are now missed, and the occlusion stratum is lower on its 29 recoverable cases. These were not investigated.
 * The standard layout's ring dots (0.2 module wide, 0.3 module apart) still fail first under blur; see `CONTEXT.md`.
 
 ## 0.1.0-build.85 — 2026-11-07

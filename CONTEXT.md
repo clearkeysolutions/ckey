@@ -107,7 +107,7 @@ Build 86 implements `Pretest-observations-for-repair.md` (the repair notes from 
 * The SDK scanner takes control of the camera by default; the snapping brackets are an optional part of the SDK.
 * The iOS app (`clearkeysolutions/ckey-web`, `apps/ios`) is re-pinned to this build and its scanning code replaced by the SDK camera layer.
 
-**Result, honestly.** On the 2,000-case development subset (100 per stratum, same frames for both builds) the reader decoded 76.4% of physically recoverable frames, against 66.8% for build 85 (58.1% against 51.4% of all valid symbols). The 6,000-case table is in `CHANGELOG.md`.
+**Result, honestly.** On 6,000 structured campaign cases (the first 300 of each stratum, same frames for both builds) the reader decoded **76.0%** of physically recoverable symbols, against 64.4% for build 85, and 59.1% against 50.0% of all valid symbols. Standard layout 70.5% (was 60.8%); print layout 81.5% (was 68.2%). 71 cases that build 85 read are now missed; they were not investigated. The full table is in `CHANGELOG.md`.
 
 No wrong payload. The reader is still far from the 98–100% of recoverable frames the owner expects. Why, from the per-stage measurements made during this build:
 
@@ -116,7 +116,7 @@ No wrong payload. The reader is still far from the 98–100% of recoverable fram
 3. **Heavy blur** (0.4 module and more) fails for both layouts.
 4. **Corner fit.** Much improved (direct frame-edge fit, lens term), but frames remain where the true corners decode and the reader's do not.
 
-**Reader speed regressed.** Median reader time on the development subset rose from 37 ms to roughly 60 to 170 ms depending on machine load; see `CHANGELOG.md` for the measured figures. The campaign's host P95 was already above the 200 ms gate. Failing frames cost most (several strategies and both placements are tried per candidate). Not yet measured on a device.
+**Reader speed regressed.** On the same run the median reader time per frame rose from 41 ms to 88 ms and the 95th percentile from 187 ms to 536 ms (frames that decode: 32 → 49 ms median; frames that do not: 77 → 261 ms). The campaign's host P95 was already above the 200 ms gate. Failing frames cost most (several strategies and both placements are tried per candidate). Not yet measured on a device.
 
 **Repair-note items not done, or only partly done:**
 * 1.1/1.6 moiré pre-filter keyed on a detected periodic pattern: not done (area-averaged search and local levels are in).
