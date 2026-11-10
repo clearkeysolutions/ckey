@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   core:
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +45,7 @@ jobs:
 
   benchmarks:
     name: optical benchmarks (synthetic, with QR/Data Matrix via zxing-cpp)
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install zxing-cpp
