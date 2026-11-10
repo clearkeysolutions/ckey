@@ -348,6 +348,83 @@ int main() {
         CKEY_CHECK(result.payload_length == url.size() && std::equal(url.begin(), url.end(), out.begin()));
     }
 
+    // ---- A symbol on a bent surface (a label on a bottle, a curled page) ----
+    {
+        // The raster wrapped on a cylinder and photographed at a tilt by a
+        // pinhole camera. Built from the 3D geometry, independently of the
+        // reader's own surface model. Lengths are in raster pixels.
+        const int W = 1080, H = 1920; const double focal = 1250, cx = W / 2.0, cy = H / 2.0;
+        const auto render_bent = [&](const Raster &raster, double radius_sides, double axis_degrees, double tilt_degrees, std::vector<uint8_t> &image, double quad[8]) {
+            const double side = raster.side, radius = radius_sides * side, distance = 2.6 * side;
+            const double phi = kTau * axis_degrees / 360.0, tilt = kTau * tilt_degrees / 360.0;
+            // Raster point (u, v) -> image pixel.
+            const auto project = [&](double u, double v, double &px, double &py) {
+                const double x0 = u - side / 2, y0 = v - side / 2;
+                const double across = x0 * std::cos(phi) + y0 * std::sin(phi), along = -x0 * std::sin(phi) + y0 * std::cos(phi);
+                const double bent = radius * std::sin(across / radius), lift = radius * (1 - std::cos(across / radius));
+                const double X = bent * std::cos(phi) - along * std::sin(phi), Y = bent * std::sin(phi) + along * std::cos(phi), Z = -lift;
+                // Tilt about the x axis, then stand the camera `distance` away.
+                const double Yc = Y * std::cos(tilt) - Z * std::sin(tilt), Zc = Y * std::sin(tilt) + Z * std::cos(tilt) + distance;
+                px = cx + focal * X / Zc; py = cy + focal * Yc / Zc;
+            };
+            image.assign(static_cast<size_t>(W) * H, 120);
+            // Image pixel -> raster point by Newton's method, warm-started along each row.
+            for (int y = 0; y < H; ++y) {
+                double u = side / 2, v = side / 2; bool warm = false;
+                for (int x = 0; x < W; ++x) {
+                    if (!warm) { u = side / 2 + (x - cx) * distance / focal; v = side / 2 + (y - cy) * distance / focal; }
+                    bool ok = false;
+                    for (int it = 0; it < 12; ++it) {
+                        double px, py, pxu, pyu, pxv, pyv; project(u, v, px, py); project(u + 0.5, v, pxu, pyu); project(u, v + 0.5, pxv, pyv);
+                        const double a = (pxu - px) * 2, b = (pxv - px) * 2, c = (pyu - py) * 2, e = (pyv - py) * 2, det = a * e - b * c;
+                        if (std::abs(det) < 1e-9) break;
+                        const double rx = x - px, ry = y - py; u += (rx * e - b * ry) / det; v += (a * ry - rx * c) / det;
+                        if (std::abs(rx) + std::abs(ry) < 0.01) { ok = true; break; }
+                    }
+                    warm = ok && std::abs(u - side / 2) < side && std::abs(v - side / 2) < side;
+                    if (!ok || u < 0 || v < 0 || u > side - 2 || v > side - 2) continue;
+                    const int iu = static_cast<int>(u), iv = static_cast<int>(v); const double au = u - iu, av = v - iv;
+                    const auto at = [&](int xx, int yy) { return static_cast<double>(raster.px[static_cast<size_t>(yy) * raster.side + xx]); };
+                    image[static_cast<size_t>(y) * W + x] = static_cast<uint8_t>((at(iu, iv) * (1 - au) + at(iu + 1, iv) * au) * (1 - av) + (at(iu, iv + 1) * (1 - au) + at(iu + 1, iv + 1) * au) * av + 0.5);
+                }
+            }
+            for (int i = 0; i < 4; ++i) project(raster.quad[2 * i], raster.quad[2 * i + 1], quad[2 * i], quad[2 * i + 1]);
+        };
+        // A longer payload gives a mid-size symbol (more modules, finer pitch).
+        const std::vector<uint8_t> longer = pseudo(180, 31); ckey_scalable_symbol mid{};
+        CKEY_CHECK(ckey_encode_scalable(longer.data(), longer.size(), 0, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &mid, &d) == CKEY_OK && mid.version >= 6);
+        const Raster medium = rasterise(mid, 5.0);
+        struct Bend { const Raster *raster; const ckey_scalable_symbol *symbol; const uint8_t *payload; size_t length; double radius_sides, axis, tilt; };
+        const uint8_t *const url_bytes = reinterpret_cast<const uint8_t *>(url.data());
+        for (const Bend &bend : {Bend{&small, &s, url_bytes, url.size(), 1.2, 80.0, 35.0}, Bend{&small, &s, url_bytes, url.size(), -1.6, 20.0, -40.0},
+                                 Bend{&medium, &mid, longer.data(), longer.size(), 1.1, 150.0, 30.0}, Bend{&medium, &mid, longer.data(), longer.size(), -2.0, 60.0, 40.0}}) {
+            std::vector<uint8_t> image; double quad[8];
+            render_bent(*bend.raster, bend.radius_sides, bend.axis, bend.tilt, image, quad);
+            std::printf("bent surface: v%u, radius %.1f sides, axis %.0f deg, tilt %.0f deg\n", bend.symbol->version, bend.radius_sides, bend.axis, bend.tilt);
+            // The flat map cannot read it: the bend moves the middle of the symbol by more than a module.
+            {
+                const SurfaceModel flat{}; const SurfaceScope scope(flat); const LensScope no_lens(LensModel{});
+                constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29}; double h[8]; CKEY_CHECK(solve_homography(canonical, quad, h));
+                CKEY_CHECK(scalable_version_fit(scalable_layout(static_cast<int>(bend.symbol->version), 0), image.data(), W, H, W, h).evidence < 0.85);
+            }
+            // Given the true corners.
+            len = 0; uint32_t version = 0;
+            CKEY_CHECK(ckey_decode_scalable_gray8(image.data(), W, H, W, quad, out.data(), out.size(), &len, &version, nullptr, &d) == CKEY_OK);
+            CKEY_CHECK(len == bend.length && std::equal(bend.payload, bend.payload + bend.length, out.begin()) && version == bend.symbol->version);
+            // And found from the frame alone.
+            ckey_scan_options options; ckey_scan_options_init(&options); ckey_scan_result result{};
+            CKEY_CHECK(ckey_scan_frame_gray8(image.data(), W, H, W, &options, out.data(), out.size(), &result) == CKEY_OK);
+            CKEY_CHECK(result.payload_length == bend.length && std::equal(bend.payload, bend.payload + bend.length, out.begin()));
+        }
+        // A flat symbol is not taken for a bent one.
+        {
+            const Frame f = place(small, W, H, 380, 700);
+            const LensScope no_lens(LensModel{});
+            CKEY_CHECK(surface_from_marks(scalable_layout(static_cast<int>(s.version), 0), f.px.data(), f.w, f.h, f.w, f.quad).kappa == 0);
+            int versions[2]; CKEY_CHECK(versions_from_lattice(f.px.data(), f.w, f.h, f.w, f.quad, versions, 2) >= 1 && versions[0] == static_cast<int>(s.version));
+        }
+    }
+
     // ---- Work budget: noise cannot keep a call running ----
     {
         Rng rng{99}; std::vector<uint8_t> noise(static_cast<size_t>(1080) * 1920);

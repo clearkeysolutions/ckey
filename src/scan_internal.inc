@@ -1103,11 +1103,13 @@ namespace {
 // of each side, a brightness profile is taken across the expected edge and
 // the edge is placed at its steepest step (sub-pixel, by a parabola through
 // the gradient peak).
-struct FrameEdgePoint { double x, y, strength; };
+struct FrameEdgePoint { double x, y, strength, t = 0, d = 0; };  // image position, step strength; canonical position along the side and offset outward from the straight edge
 constexpr double kFrameOuter = 0.175;  // stroke outer edge inset, canonical units
 
+// `bow` (optional) gives, per side, where to expect the edge when the side is
+// curved: outward offset c0 + c1 u + c2 u^2 in canonical units at u = t - 14.5.
 bool frame_edge_points(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double reach,
-                       std::array<std::vector<FrameEdgePoint>, 4> &found) {
+                       std::array<std::vector<FrameEdgePoint>, 4> &found, const double (*bow)[3] = nullptr) {
     constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
     double h[8]; if (!solve_homography(canonical, quad, h)) return false;
     const double unit_px = quad_mean_side(quad) / 29.0;
@@ -1122,6 +1124,7 @@ bool frame_edge_points(const uint8_t *gray, size_t width, size_t height, size_t 
     const int stroke = std::max(1, static_cast<int>(std::lround(0.65 / step)));
     const int inner = steps + stroke + 2, outer = steps + 2, length = inner + outer + 1;  // index `inner` is the expected edge
     constexpr int kPoints = 28;
+    const auto expected = [&](int side, int i) { if (!bow) return 0.0; const double u = 5.0 + 19.0 * i / (kPoints - 1) - 14.5; return bow[side][0] + bow[side][1] * u + bow[side][2] * u * u; };
     const auto base_point = [](int side, int i, double &x, double &y, double &nx, double &ny) {
         const double t = 5.0 + 19.0 * i / (kPoints - 1);
         if (side == 0) { x = t; y = kFrameOuter; nx = 0; ny = -1; }
@@ -1132,6 +1135,7 @@ bool frame_edge_points(const uint8_t *gray, size_t width, size_t height, size_t 
     std::array<std::vector<std::vector<double>>, 4> profiles; double signed_sum = 0;
     for (int side = 0; side < 4; ++side) for (int i = 0; i < kPoints; ++i) {
         double x, y, nx, ny; base_point(side, i, x, y, nx, ny);
+        const double e = expected(side, i); x += nx * e; y += ny * e;
         std::vector<double> profile(static_cast<size_t>(length));
         bool ok = true;
         for (int k = 0; k < length && ok; ++k) {
@@ -1161,9 +1165,9 @@ bool frame_edge_points(const uint8_t *gray, size_t width, size_t height, size_t 
             const double a = grad(best - 1), b = grad(best), c = grad(best + 1), denom = a - 2 * b + c;
             const double sub = std::abs(denom) > 1e-9 ? std::clamp(0.5 * (a - c) / denom, -0.5, 0.5) : 0.0;
             double x, y, nx, ny; base_point(side, i, x, y, nx, ny);
-            const double d = (best + sub - inner) * step;
+            const double d = (best + sub - inner) * step + expected(side, i);
             ImagePoint p{}; if (!map_point(h, x + nx * d, y + ny * d, p)) continue;
-            found[static_cast<size_t>(side)].push_back({p.x, p.y, best_g});
+            found[static_cast<size_t>(side)].push_back({p.x, p.y, best_g, 5.0 + 19.0 * i / (kPoints - 1), d});
         }
         // Weak steps are usually not the frame: keep those at least 40% of the median strength.
         auto &points = found[static_cast<size_t>(side)];
@@ -1261,6 +1265,100 @@ bool fit_frame_edges(const uint8_t *gray, size_t width, size_t height, size_t st
     return true;
 }
 
+// Field corners of a symbol whose frame sides are curved (a bent surface).
+// Each side's edge points are fitted with a parabola instead of a line, and
+// the corners are where neighbouring parabolas cross. On a flat symbol this
+// agrees with the line fit but is noisier, so it is used only by the bent-
+// surface pass. `quad` is the starting estimate and receives the result.
+bool fit_frame_curves(const uint8_t *gray, size_t width, size_t height, size_t stride, double quad[8], double reach,
+                      std::array<std::vector<FrameEdgePoint>, 4> *edge_points = nullptr) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    std::array<std::vector<FrameEdgePoint>, 4> sides;
+    if (!frame_edge_points(gray, width, height, stride, quad, reach, sides)) return false;
+    // A wide search also catches rows of modules that look like a stroke. On
+    // each side take the parabola (through three of the points) that the
+    // most points agree with, then search again close to it.
+    double bow[4][3];
+    for (int side = 0; side < 4; ++side) {
+        const auto &points = sides[static_cast<size_t>(side)]; const size_t n = points.size(), third = n / 3;
+        size_t best_count = 0; double best[3] = {0, 0, 0};
+        for (size_t i = 0; i < third; ++i) for (size_t j = third; j < 2 * third; ++j) for (size_t k = 2 * third; k < n; ++k) {
+            const double u1 = points[i].t - 14.5, u2 = points[j].t - 14.5, u3 = points[k].t - 14.5, d1 = points[i].d, d2 = points[j].d, d3 = points[k].d;
+            const double c2 = ((d3 - d1) / (u3 - u1) - (d2 - d1) / (u2 - u1)) / (u3 - u2), c1 = (d2 - d1) / (u2 - u1) - c2 * (u1 + u2), c0 = d1 - c1 * u1 - c2 * u1 * u1;
+            size_t count = 0; for (const auto &e : points) { const double u = e.t - 14.5; count += std::abs(e.d - (c0 + c1 * u + c2 * u * u)) < 0.12; }
+            if (count > best_count) { best_count = count; best[0] = c0; best[1] = c1; best[2] = c2; }
+        }
+        if (best_count < 12) return false;
+        std::copy(best, best + 3, bow[side]);
+    }
+    if (!frame_edge_points(gray, width, height, stride, quad, 0.3, sides, bow)) return false;
+    if (edge_points) *edge_points = sides;
+    // A side as: mean point m, unit tangent (tx, ty), unit normal (nx, ny), and
+    // offset along the normal = c0 + c1 t + c2 t^2 at distance t along the tangent.
+    struct Curve { double mx, my, tx, ty, nx, ny, c[3]; };
+    std::array<Curve, 4> curves{};
+    for (int side = 0; side < 4; ++side) {
+        const auto &points = sides[static_cast<size_t>(side)];
+        Curve &k = curves[static_cast<size_t>(side)];
+        double sxx = 0, syy = 0, sxy = 0; k.mx = k.my = 0;
+        for (const auto &e : points) { k.mx += e.x; k.my += e.y; } k.mx /= points.size(); k.my /= points.size();
+        for (const auto &e : points) { sxx += (e.x - k.mx) * (e.x - k.mx); syy += (e.y - k.my) * (e.y - k.my); sxy += (e.x - k.mx) * (e.y - k.my); }
+        const double theta = 0.5 * std::atan2(2 * sxy, sxx - syy);
+        k.tx = std::cos(theta); k.ty = std::sin(theta); k.nx = -k.ty; k.ny = k.tx;
+        std::vector<std::pair<double, double>> tr;
+        for (const auto &e : points) tr.push_back({(e.x - k.mx) * k.tx + (e.y - k.my) * k.ty, (e.x - k.mx) * k.nx + (e.y - k.my) * k.ny});
+        for (int pass = 0; pass < 3; ++pass) {
+            if (tr.size() < 8) return false;
+            // Normal equations for a quadratic, with t scaled to keep them well conditioned.
+            double scale = 1e-9; for (const auto &[t, r] : tr) scale = std::max(scale, std::abs(t));
+            double m[3][4] = {};
+            for (const auto &[t, r] : tr) { const double u = t / scale, b[3] = {1, u, u * u}; for (int i = 0; i < 3; ++i) { for (int j = 0; j < 3; ++j) m[i][j] += b[i] * b[j]; m[i][3] += b[i] * r; } }
+            for (int col = 0; col < 3; ++col) {
+                int pivot = col; for (int row = col + 1; row < 3; ++row) if (std::abs(m[row][col]) > std::abs(m[pivot][col])) pivot = row;
+                if (std::abs(m[pivot][col]) < 1e-12) return false;
+                if (pivot != col) for (int j = 0; j < 4; ++j) std::swap(m[pivot][j], m[col][j]);
+                for (int row = 0; row < 3; ++row) if (row != col) { const double f = m[row][col] / m[col][col]; for (int j = col; j < 4; ++j) m[row][j] -= f * m[col][j]; }
+            }
+            k.c[0] = m[0][3] / m[0][0]; k.c[1] = m[1][3] / m[1][1] / scale; k.c[2] = m[2][3] / m[2][2] / (scale * scale);
+            std::vector<double> residual; for (const auto &[t, r] : tr) residual.push_back(std::abs(r - (k.c[0] + k.c[1] * t + k.c[2] * t * t)));
+            std::vector<double> sorted = residual; std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(sorted.size() / 2), sorted.end());
+            const double limit = std::max(0.6, 2.5 * sorted[sorted.size() / 2]);
+            std::vector<std::pair<double, double>> kept; for (size_t i = 0; i < tr.size(); ++i) if (residual[i] <= limit) kept.push_back(tr[i]);
+            if (kept.size() == tr.size()) break;
+            tr.swap(kept);
+        }
+    }
+    const auto miss = [](const Curve &k, double x, double y) {
+        const double t = (x - k.mx) * k.tx + (y - k.my) * k.ty;
+        return (x - k.mx) * k.nx + (y - k.my) * k.ny - (k.c[0] + k.c[1] * t + k.c[2] * t * t);
+    };
+    double outer[8];
+    for (int c = 0; c < 4; ++c) {  // corner c joins side c - 1 and side c
+        const Curve &a = curves[static_cast<size_t>((c + 3) % 4)], &b = curves[static_cast<size_t>(c)];
+        // Start where the two chords cross, then Newton's method on the curves.
+        const double det0 = a.nx * b.ny - a.ny * b.nx; if (std::abs(det0) < 1e-9) return false;
+        const double da = a.mx * a.nx + a.my * a.ny, db = b.mx * b.nx + b.my * b.ny;
+        double x = (da * b.ny - a.ny * db) / det0, y = (a.nx * db - da * b.nx) / det0;
+        for (int iteration = 0; iteration < 12; ++iteration) {
+            const double fa = miss(a, x, y), fb = miss(b, x, y), e = 0.25;
+            const double ax = (miss(a, x + e, y) - fa) / e, ay = (miss(a, x, y + e) - fa) / e, bx = (miss(b, x + e, y) - fb) / e, by = (miss(b, x, y + e) - fb) / e;
+            const double det = ax * by - ay * bx; if (std::abs(det) < 1e-9) return false;
+            x -= (fa * by - ay * fb) / det; y -= (ax * fb - fa * bx) / det;
+        }
+        if (!std::isfinite(x) || !std::isfinite(y)) return false;
+        outer[2 * c] = x; outer[2 * c + 1] = y;
+    }
+    // From the stroke's outer-edge square to the full field: a short step, for which a flat map is close enough.
+    const double src[8] = {kFrameOuter, kFrameOuter, 29 - kFrameOuter, kFrameOuter, 29 - kFrameOuter, 29 - kFrameOuter, kFrameOuter, 29 - kFrameOuter};
+    double g[8]; if (!solve_homography_raw(src, outer, g)) return false;
+    double out[8];
+    for (int c = 0; c < 4; ++c) { ImagePoint p{}; if (!map_point_raw(g, canonical[2 * c], canonical[2 * c + 1], p)) return false; out[2 * c] = p.x; out[2 * c + 1] = p.y; }
+    const double unit_px = quad_mean_side(quad) / 29.0;
+    if (!valid_quad(out) || quad_corner_distance(out, quad) > 2.5 * reach * unit_px + 2.0) return false;
+    std::copy(out, out + 8, quad);
+    return true;
+}
+
 // Lens from the rings. A corner-anchored perspective fit is exact at the
 // corners, but radial lens distortion moves the middle of the symbol
 // relative to them: by 2 to 3 pixels on a large symbol for a k1 of only
@@ -1311,6 +1409,351 @@ LensModel lens_from_rings(const ScalableLayout &L, const uint8_t *gray, size_t w
     // An optimum at the end of the range is not a lens.
     if (best > 1.01 * none && best_k > -0.195 && best_k < 0.075) lens.k1 = best_k;
     return lens;
+}
+
+// Camera position for a surface hypothesis. Given the field corners in the
+// image, a cylinder (axis and curvature set in `m`) and a focal length, finds
+// the vector g that completes the surface model (see SurfaceModel). The four
+// corners' positions on the bent surface are known in three dimensions, so
+// the camera's rotation R and position t follow from where they appear
+// (least squares on the reprojection, started from the flat symbol's pose).
+// The plane's perspective map is then H = K [r1 r2 t] and g = H^-1 K r3.
+bool surface_pose(SurfaceModel &m, const double quad[8], size_t width, size_t height, double focal) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29}; constexpr double c = 14.5;
+    const double cx = 0.5 * static_cast<double>(width), cy = 0.5 * static_cast<double>(height);
+    // Corners on the surface, relative to the field centre.
+    double P[4][3];
+    for (int i = 0; i < 4; ++i) {
+        const double u = canonical[2 * i] - c, v = canonical[2 * i + 1] - c, across = -u * m.sa + v * m.ca, along = u * m.ca + v * m.sa;
+        const double bent = m.kappa != 0 ? std::sin(m.kappa * across) / m.kappa : across, out = m.kappa != 0 ? (1 - std::cos(m.kappa * across)) / m.kappa : 0.0;
+        P[i][0] = along * m.ca - bent * m.sa; P[i][1] = along * m.sa + bent * m.ca; P[i][2] = out;
+    }
+    // Start: the pose of a flat symbol with these corners.
+    double R[3][3], t[3];
+    {
+        double h[8]; if (!solve_homography_raw(canonical, quad, h)) return false;
+        const double H[3][3] = {{h[0], h[1], h[2]}, {h[3], h[4], h[5]}, {h[6], h[7], 1.0}};
+        double M[3][3];
+        for (int k = 0; k < 3; ++k) { M[0][k] = (H[0][k] - cx * H[2][k]) / focal; M[1][k] = (H[1][k] - cy * H[2][k]) / focal; M[2][k] = H[2][k]; }
+        const double n1 = std::sqrt(M[0][0] * M[0][0] + M[1][0] * M[1][0] + M[2][0] * M[2][0]), n2 = std::sqrt(M[0][1] * M[0][1] + M[1][1] * M[1][1] + M[2][1] * M[2][1]);
+        if (n1 < 1e-12 || n2 < 1e-12) return false;
+        const double scale = (n1 + n2) / 2;
+        double r1[3] = {M[0][0] / n1, M[1][0] / n1, M[2][0] / n1}, r2[3] = {M[0][1] / n2, M[1][1] / n2, M[2][1] / n2};
+        const double dot = r1[0] * r2[0] + r1[1] * r2[1] + r1[2] * r2[2];
+        for (int k = 0; k < 3; ++k) r2[k] -= dot * r1[k];
+        const double n = std::sqrt(r2[0] * r2[0] + r2[1] * r2[1] + r2[2] * r2[2]); if (n < 1e-9) return false;
+        for (int k = 0; k < 3; ++k) r2[k] /= n;
+        const double r3[3] = {r1[1] * r2[2] - r1[2] * r2[1], r1[2] * r2[0] - r1[0] * r2[2], r1[0] * r2[1] - r1[1] * r2[0]};
+        for (int k = 0; k < 3; ++k) { R[k][0] = r1[k]; R[k][1] = r2[k]; R[k][2] = r3[k]; }
+        // H maps canonical (x, y); the centre is at t.
+        for (int k = 0; k < 3; ++k) t[k] = (M[k][0] * c + M[k][1] * c + M[k][2]) / scale;
+        if (t[2] < 0) { for (int k = 0; k < 3; ++k) { t[k] = -t[k]; R[k][0] = -R[k][0]; R[k][1] = -R[k][1]; } }
+    }
+    const auto residuals = [&](const double Rm[3][3], const double tv[3], double r[8]) {
+        for (int i = 0; i < 4; ++i) {
+            double pc[3]; for (int k = 0; k < 3; ++k) pc[k] = Rm[k][0] * P[i][0] + Rm[k][1] * P[i][1] + Rm[k][2] * P[i][2] + tv[k];
+            if (pc[2] < 1e-6) return false;
+            r[2 * i] = cx + focal * pc[0] / pc[2] - quad[2 * i]; r[2 * i + 1] = cy + focal * pc[1] / pc[2] - quad[2 * i + 1];
+        }
+        return true;
+    };
+    // A small rotation (wx, wy, wz) applied on the left of R, re-orthonormalised.
+    const auto rotated = [](const double Rm[3][3], const double w[3], double out[3][3]) {
+        const double W[3][3] = {{1, -w[2], w[1]}, {w[2], 1, -w[0]}, {-w[1], w[0], 1}};
+        for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) out[i][j] = W[i][0] * Rm[0][j] + W[i][1] * Rm[1][j] + W[i][2] * Rm[2][j];
+        double a[3] = {out[0][0], out[1][0], out[2][0]}, b[3] = {out[0][1], out[1][1], out[2][1]};
+        const double na = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); for (double &x : a) x /= na;
+        const double d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; for (int k = 0; k < 3; ++k) b[k] -= d * a[k];
+        const double nb = std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]); for (double &x : b) x /= nb;
+        const double n[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+        for (int k = 0; k < 3; ++k) { out[k][0] = a[k]; out[k][1] = b[k]; out[k][2] = n[k]; }
+    };
+    double r[8]; if (!residuals(R, t, r)) return false;
+    double error = 0; for (double x : r) error += x * x;
+    double lambda = 1e-3;
+    // A pose costs about as much as a few hundred image samples; charge it, so a search over surfaces stays within the caller's work budget.
+    { WorkBudget &budget = work_budget(); budget.left -= std::min<size_t>(budget.left, 300); }
+    for (int iteration = 0; iteration < 12 && error > 1e-6; ++iteration) {
+        // Numeric Jacobian over (rotation, translation).
+        double J[8][6];
+        for (int k = 0; k < 6; ++k) {
+            double Rk[3][3], tk[3] = {t[0], t[1], t[2]}, w[3] = {0, 0, 0}, rk[8];
+            const double e = k < 3 ? 1e-6 : 1e-5 * std::max(1.0, std::abs(t[2]));
+            if (k < 3) { w[k] = e; rotated(R, w, Rk); } else { std::copy(&R[0][0], &R[0][0] + 9, &Rk[0][0]); tk[k - 3] += e; }
+            if (!residuals(Rk, tk, rk)) return false;
+            for (int i = 0; i < 8; ++i) J[i][k] = (rk[i] - r[i]) / e;
+        }
+        double A[6][7] = {};
+        for (int a = 0; a < 6; ++a) { for (int b = 0; b < 6; ++b) for (int i = 0; i < 8; ++i) A[a][b] += J[i][a] * J[i][b]; for (int i = 0; i < 8; ++i) A[a][6] -= J[i][a] * r[i]; }
+        for (int a = 0; a < 6; ++a) A[a][a] *= 1 + lambda;
+        bool singular = false;
+        for (int col = 0; col < 6 && !singular; ++col) {
+            int pivot = col; for (int row = col + 1; row < 6; ++row) if (std::abs(A[row][col]) > std::abs(A[pivot][col])) pivot = row;
+            if (std::abs(A[pivot][col]) < 1e-18) { singular = true; break; }
+            if (pivot != col) for (int k = 0; k < 7; ++k) std::swap(A[pivot][k], A[col][k]);
+            for (int row = 0; row < 6; ++row) if (row != col) { const double f = A[row][col] / A[col][col]; for (int k = col; k < 7; ++k) A[row][k] -= f * A[col][k]; }
+        }
+        if (singular) { lambda *= 10; if (lambda > 1e6) break; continue; }
+        double step[6]; for (int a = 0; a < 6; ++a) step[a] = A[a][6] / A[a][a];
+        double Rn[3][3], tn[3] = {t[0] + step[3], t[1] + step[4], t[2] + step[5]}, rn[8];
+        rotated(R, step, Rn);
+        double next = 1e300; if (residuals(Rn, tn, rn)) { next = 0; for (double x : rn) next += x * x; }
+        if (next < error) {
+            const bool settled = error - next < 1e-4 * error;  // with a wrong focal length the corners cannot all be met: stop when it stops improving
+            std::copy(&Rn[0][0], &Rn[0][0] + 9, &R[0][0]); std::copy(tn, tn + 3, t); std::copy(rn, rn + 8, r); error = next; lambda = std::max(1e-9, lambda / 3);
+            if (settled) break;
+        }
+        else { lambda *= 10; if (lambda > 1e6) break; }
+    }
+    // g solves [r1 r2 t'] g = r3, with t' the image of the canonical origin:
+    // r3 is perpendicular to r1 and r2, so g2 = 1 / (t' . r3) and the rest follow.
+    double corner[3]; for (int k = 0; k < 3; ++k) corner[k] = t[k] - c * R[k][0] - c * R[k][1];
+    double along1 = 0, along2 = 0, along3 = 0;
+    for (int k = 0; k < 3; ++k) { along1 += corner[k] * R[k][0]; along2 += corner[k] * R[k][1]; along3 += corner[k] * R[k][2]; }
+    if (std::abs(along3) < 1e-9) return false;
+    m.g[2] = 1.0 / along3; m.g[0] = -m.g[2] * along1; m.g[1] = -m.g[2] * along2; m.focal = focal;
+    return std::isfinite(m.g[0]) && std::isfinite(m.g[1]) && std::isfinite(m.g[2]);
+}
+
+// Surface from the marks: which cylinder (axis direction, signed curvature),
+// seen by which camera (focal length), makes the module, ray and ring
+// samples spread widest. A grid search, so it is not trapped by the lattice
+// looking sharp again one whole module out, followed by refinement. Returns
+// a flat surface unless bending clearly helps. `quad` holds the field
+// corners in the image in the attempt's orientation. With `seed`, only the
+// neighbourhood of that surface is searched (after the corners have moved).
+SurfaceModel surface_from_marks(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8],
+                                const SurfaceModel *seed = nullptr) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    // Module centres, and the points where four modules meet. A centre is ink
+    // or background; a meeting point is always background (modules are 0.68
+    // pitch wide). Under the right surface the centres spread wide and the
+    // meeting points all read alike. Under a wrong one both land anywhere and
+    // spread alike. That holds on a sharp image too, where "the centres
+    // spread wide" alone is true of any hypothesis.
+    const int G = L.grid; const double p = L.pitch;
+    std::vector<uint8_t> is_site(static_cast<size_t>(G) * G, 0);
+    for (const auto &n : L.nodes) if (n.kind == 0) is_site[static_cast<size_t>((n.id >> 12) & 0xfffu) * G + (n.id & 0xfffu)] = 1;
+    std::vector<std::pair<double, double>> centres, gaps;
+    {
+        std::vector<std::pair<int, int>> cells;
+        for (int r = 0; r + 1 < G; ++r) for (int c = 0; c + 1 < G; ++c)
+            if (is_site[static_cast<size_t>(r) * G + c] && is_site[static_cast<size_t>(r) * G + c + 1] && is_site[static_cast<size_t>(r + 1) * G + c] && is_site[static_cast<size_t>(r + 1) * G + c + 1]) cells.push_back({r, c});
+        const size_t skip = std::max<size_t>(1, cells.size() / 600);
+        for (size_t i = 0; i < cells.size(); i += skip) {
+            const auto [r, c] = cells[i];
+            centres.push_back({(c + .5) * p, (r + .5) * p}); gaps.push_back({(c + 1) * p, (r + 1) * p});
+        }
+    }
+    if (centres.size() < 48) return {};
+    // `stride_points` > 1 scores a subset of the points (the search grid).
+    const auto score = [&](const SurfaceModel &m, size_t stride_points) {
+        const SurfaceScope scope(m);
+        double h[8]; if (!solve_homography(canonical, quad, h)) return 0.0;
+        double variance[2] = {0, 0};
+        for (int which = 0; which < 2; ++which) {
+            const auto &points = which ? gaps : centres;
+            double sum = 0, sq = 0; int n = 0, tried = 0;
+            for (size_t i = 0; i < points.size(); i += stride_points) { ++tried; const double v = gray_sample(gray, width, height, stride, h, points[i].first, points[i].second, stride_points > 1 ? 0.0 : 0.05 * p); if (v < 0) continue; sum += v; sq += v * v; ++n; }
+            if (n < tried * 2 / 3) return 0.0;
+            const double mean = sum / n; variance[which] = sq / n - mean * mean;
+        }
+        return variance[0] / (variance[1] + 0.04 * variance[0] + 1.0);
+    };
+    const double flat = score(SurfaceModel{}, 1);
+    // A flat symbol read through the right map scores about 20; nothing to find.
+    if (flat > 8.0) return {};
+    const double longer = static_cast<double>(std::max(width, height));
+    const double focal0 = 0.63 * longer;  // a phone's main camera, about a 65 degree field of view
+    const auto trial = [&](double angle, double kappa, double f, size_t stride_points, SurfaceModel &m) {
+        m = SurfaceModel{}; m.ca = std::cos(angle); m.sa = std::sin(angle); m.kappa = kappa;
+        return surface_pose(m, quad, width, height, f) ? score(m, stride_points) : 0.0;
+    };
+    // The right surface has to put every sample within about a quarter of a
+    // module, and a bend of half-angle s moves the middle of the symbol by
+    // up to about s * G / 4 modules, so the grid's relative step in both
+    // curvature and axis direction is 1 / (G s), kept between 8% and 30%:
+    // fine for dense symbols and strong bends, coarse otherwise. It is scored
+    // on about 150 of the points; the best few are then refined on all.
+    struct Start { double score, angle, kappa; };
+    std::vector<Start> starts;
+    const size_t coarse = std::max<size_t>(1, centres.size() / 150);
+    bool certain = false;
+    if (seed && seed->kappa != 0) { starts.push_back({1e9, std::atan2(seed->sa, seed->ca), seed->kappa}); certain = true; }
+    for (double half_span = 0.05; half_span < 0.7 && !certain; ) {
+        const double relative = std::clamp(1.0 / (G * half_span), 0.08, 0.30);
+        const int angles = std::clamp(static_cast<int>(std::ceil(0.5 * kTau / relative)), 8, 32);
+        for (int a = 0; a < angles && !certain; ++a) for (const double sign : {1.0, -1.0}) {
+            SurfaceModel m; const double angle = kTau * a / (2.0 * angles), g = trial(angle, sign * half_span / 14.5, focal0, coarse, m);
+            if (g > 0) starts.push_back({g, angle, m.kappa});
+            if (work_exhausted()) return {};
+        }
+        half_span *= 1.0 + relative;
+    }
+    std::sort(starts.begin(), starts.end(), [](const Start &a, const Start &b) { return a.score > b.score; });
+    SurfaceModel best{}; double best_score = flat;
+    size_t refined = 0;
+    for (const Start &start : starts) {
+        // A start that the grid scored like a wrong surface is not worth refining.
+        if (refined >= 4 || best_score > 16.0 || start.score < 3.0) break;
+        // Skip a start next to one already refined.
+        bool near = false;
+        for (size_t k = 0; k < static_cast<size_t>(&start - starts.data()) && !near; ++k) near = std::abs(starts[k].angle - start.angle) < kTau / 40.0 && std::abs(starts[k].kappa - start.kappa) < 0.1 * std::abs(start.kappa);
+        if (near) continue;
+        ++refined;
+        SurfaceModel local; double angle = start.angle, focal = seed && seed->focal > 0 ? seed->focal : focal0, local_score = trial(angle, start.kappa, focal, 1, local);
+        double step_k = 0.04 * std::abs(start.kappa), step_a = kTau / 128.0;
+        for (int round = 0; round < 4; ++round) {
+            for (int pass = 0; pass < 3; ++pass) {
+                bool improved = false;
+                for (int move = 0; move < 6; ++move) {
+                    double a2 = angle, kappa = local.kappa, f = focal;
+                    if (move == 0) kappa += step_k; else if (move == 1) kappa -= step_k;
+                    else if (move == 2) a2 += step_a; else if (move == 3) a2 -= step_a;
+                    else if (move == 4) f *= 1.0 + 0.15 / (round + 1); else f /= 1.0 + 0.15 / (round + 1);
+                    if (std::abs(kappa) < 0.02 / 14.5 || std::abs(kappa) > 1.0 / 14.5 || f < 0.4 * longer || f > 2.5 * longer) continue;
+                    SurfaceModel m; const double g = trial(a2, kappa, f, 1, m);
+                    if (g > local_score) { local_score = g; local = m; angle = a2; focal = f; improved = true; }
+                }
+                if (!improved || work_exhausted()) break;
+            }
+            step_k /= 2; step_a /= 2;
+        }
+        if (local_score > best_score) { best_score = local_score; best = local; }
+    }
+    // Wrong surfaces score 1 to 5 and the right one about 20, so the test is
+    // not delicate.
+    return best_score > 7.0 && best_score > 3.0 * flat ? best : SurfaceModel{};
+}
+
+// The same surface seen from another of the eight orientations of the field
+// corners: `quad` holds the corners in that orientation, and (dx, dy) is where
+// the first orientation's x axis points in it (a unit vector along a side of
+// the square, with (ex, ey) the same for its y axis).
+bool surface_reoriented(const SurfaceModel &m, const double quad[8], size_t width, size_t height, double dx, double dy, double ex, double ey, SurfaceModel &out) {
+    out = SurfaceModel{};
+    if (m.kappa == 0) return true;
+    out.kappa = m.kappa; out.ca = m.ca * dx + m.sa * ex; out.sa = m.ca * dy + m.sa * ey;
+    return surface_pose(out, quad, width, height, m.focal);
+}
+
+// Field corners from the frame as seen through a bent surface. `edges` holds
+// measured points on the frame stroke's outer edge (fit_frame_curves); the
+// corners are moved until the edge the surface model predicts runs through
+// them. The model's curve is the true shape of a bent side, where the
+// parabolas of fit_frame_curves are an approximation that has to be
+// extrapolated to the corners. Only the surface's curvature, axis and focal
+// length are used; the camera is placed again for every trial.
+void corners_from_bent_frame(const std::array<std::vector<FrameEdgePoint>, 4> &edges, const SurfaceModel &surface, size_t width, size_t height, double quad[8]) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29}; constexpr int kSamples = 33;
+    const auto cost = [&](const double q[8]) {
+        SurfaceModel m = surface; if (!surface_pose(m, q, width, height, surface.focal)) return 1e300;
+        const SurfaceScope scope(m);
+        double h[8]; if (!solve_homography(canonical, q, h)) return 1e300;
+        double total = 0;
+        for (int side = 0; side < 4; ++side) {
+            ImagePoint line[kSamples];
+            for (int i = 0; i < kSamples; ++i) {
+                const double t = 2.5 + 24.0 * i / (kSamples - 1);
+                const double x = side == 0 ? t : side == 1 ? 29 - kFrameOuter : side == 2 ? 29 - t : kFrameOuter, y = side == 0 ? kFrameOuter : side == 1 ? t : side == 2 ? 29 - kFrameOuter : 29 - t;
+                if (!map_point(h, x, y, line[i])) return 1e300;
+            }
+            for (const auto &e : edges[static_cast<size_t>(side)]) {
+                double nearest = 1e300;
+                for (int i = 0; i + 1 < kSamples; ++i) {
+                    const double ax = line[i].x, ay = line[i].y, bx = line[i + 1].x - ax, by = line[i + 1].y - ay, len2 = bx * bx + by * by;
+                    const double u = len2 > 0 ? std::clamp(((e.x - ax) * bx + (e.y - ay) * by) / len2, 0.0, 1.0) : 0.0;
+                    const double dx = e.x - (ax + u * bx), dy = e.y - (ay + u * by); nearest = std::min(nearest, dx * dx + dy * dy);
+                }
+                total += std::min(nearest, 9.0);  // a stray point counts for at most 3 pixels
+            }
+        }
+        return total;
+    };
+    double best = cost(quad); if (best >= 1e300) return;
+    for (double step = 2.0; step >= 0.05; step /= 2) for (int pass = 0; pass < 6; ++pass) {
+        bool improved = false;
+        for (int k = 0; k < 8; ++k) for (const double direction : {1.0, -1.0}) {
+            double q[8]; std::copy(quad, quad + 8, q); q[k] += direction * step;
+            const double c = cost(q);
+            if (c < best) { best = c; std::copy(q, q + 8, quad); improved = true; }
+        }
+        if (!improved) break;
+    }
+}
+
+// Version from the module lattice alone, without the keys. On a bent symbol
+// the flat map puts the keys in the wrong place, but the lattice keeps its
+// period: bending shifts modules by whole pitches while stretching them by
+// only a few percent. The gaps between modules give every scan line across
+// the module field a strong component at exactly one cycle per pitch, so the
+// grid size shows as the frequency where that component is strongest. Scan
+// lines run along the four bands between the frame and the dial, which hold
+// only modules in every version. Fills `versions` with up to `capacity`
+// candidates, best first, and returns how many.
+size_t versions_from_lattice(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], int *versions, size_t capacity) {
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad, h)) return 0;
+    const double unit_px = quad_mean_side(quad) / 29.0;
+    const double step = std::max(0.02, 0.5 / std::max(unit_px, 1.0));  // half a pixel, or a sixth of the finest pitch
+    constexpr double kFrom = 6.6, kTo = 22.4, kNear = 1.7, kFar = 4.2; constexpr int kLines = 6;
+    const size_t count = static_cast<size_t>((kTo - kFrom) / step);
+    if (count < 32) return 0;
+    std::vector<std::vector<double>> lines;
+    for (int side = 0; side < 4; ++side) for (int k = 0; k < kLines; ++k) {
+        const double d = kNear + (kFar - kNear) * (k + 0.37) / kLines;
+        std::vector<double> line(count); bool ok = true;
+        for (size_t i = 0; i < count && ok; ++i) {
+            const double t = kFrom + step * static_cast<double>(i);
+            const double x = side == 0 ? t : side == 1 ? 29 - d : side == 2 ? 29 - t : d, y = side == 0 ? d : side == 1 ? t : side == 2 ? 29 - d : 29 - t;
+            line[i] = gray_sample(gray, width, height, stride, h, x, y, 0.0); ok = line[i] >= 0;
+        }
+        if (ok) lines.push_back(std::move(line));
+    }
+    if (lines.size() < 6) return 0;
+    std::array<std::pair<double, int>, kScalableVersions> ranked;
+    for (int v = 1; v <= kScalableVersions; ++v) {
+        const double pitch = 29.0 / kScalableGrid[static_cast<size_t>(v - 1)];
+        // Windows of 16 pitches (the whole line if it is shorter), half overlapped.
+        const size_t window = std::min(count, static_cast<size_t>(16.0 * pitch / step));
+        // Power at the lattice frequency against the power 12% to either
+        // side: data modules spread their energy smoothly over frequency,
+        // the lattice puts a line on top of it.
+        double power[3] = {0, 0, 0};
+        if (pitch / step >= 2.5 && window >= 16) {
+            for (int which = 0; which < 3; ++which) {
+                const double omega = kTau * step / pitch * (which == 0 ? 1.0 : which == 1 ? 0.88 : 1.12);
+                for (const auto &line : lines) for (size_t start = 0; start + window <= count; start += std::max<size_t>(1, window / 2)) {
+                    double mean = 0; for (size_t i = 0; i < window; ++i) mean += line[start + i]; mean /= static_cast<double>(window);
+                    double re = 0, im = 0;
+                    for (size_t i = 0; i < window; ++i) {
+                        const double w = 0.5 - 0.5 * std::cos(kTau * (static_cast<double>(i) + 0.5) / static_cast<double>(window)), value = w * (line[start + i] - mean);
+                        re += value * std::cos(omega * static_cast<double>(i)); im += value * std::sin(omega * static_cast<double>(i));
+                    }
+                    power[which] += re * re + im * im;
+                }
+            }
+        }
+        ranked[static_cast<size_t>(v - 1)] = {power[0] > 0 ? power[0] / (0.5 * (power[1] + power[2]) + 1e-9) : 0.0, v};
+    }
+    const auto by_version = ranked;
+    std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    size_t n = 0;
+    const auto add = [&](int v) { for (size_t k = 0; k < n; ++k) if (versions[k] == v) return; if (n < capacity) versions[n++] = v; };
+    for (const auto &[power, v] : ranked) {
+        // A second candidate must be nearly as clear as the first.
+        if (n >= capacity || power < 2.5 || power < 0.6 * ranked[0].first) break;
+        // A lattice also has a line at twice its frequency. If the version
+        // with half this grid shows a clear line of its own, it is the
+        // fundamental and goes first.
+        const int grid = kScalableGrid[static_cast<size_t>(v - 1)];
+        for (int u = 1; u < v; ++u) {
+            const int half = kScalableGrid[static_cast<size_t>(u - 1)];
+            if (std::abs(2 * half - grid) <= std::max(1, grid / 40) && by_version[static_cast<size_t>(u - 1)].first >= std::max(2.5, 0.3 * power)) add(u);
+        }
+        add(v);
+    }
+    return n;
 }
 
 // Blur from a known edge. The frame stroke's outer edge is a sharp step in

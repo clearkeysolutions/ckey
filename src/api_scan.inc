@@ -402,22 +402,103 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         bool seen = false; for (const auto &l : lenses) seen = seen || std::abs(l.k1 - candidate_lens.k1) < 0.004;
         if (!seen) lenses.push_back(candidate_lens);
     }
-    for (const LensModel &lens_choice : lenses) {
-    const LensScope lens_scope(lens_choice);
-    const double edge_blur = measure_edge_blur(gray, width, height, stride, quad_xy);
+    // Geometry hypotheses, tried in turn: the lens candidates on a flat
+    // surface, then (only if none of them decodes) a bent surface. On a bent
+    // symbol the flat map misplaces the keys, so the version comes from the
+    // module lattice's period and the bend from the modules themselves (see
+    // versions_from_lattice and surface_from_marks).
+    struct Geometry { LensModel lens; SurfaceModel surface; int version; std::array<double, 8> quad; };
+    const double *const given_quad = quad_xy;
+    std::vector<Geometry> geometries;
+    for (const LensModel &l : lenses) geometries.push_back({l, SurfaceModel{}, 0, {}});
+    bool surfaces_tried = false; std::array<double, 8> bent_quad{};
+    for (size_t geometry_index = 0; ; ++geometry_index) {
+    if (geometry_index == geometries.size()) {
+        if (surfaces_tried || work_exhausted()) break;
+        surfaces_tried = true;
+        // The search for a surface gets a bounded share of the decode's work.
+        const uint64_t surface_work_start = work_budget().left;
+        const auto surface_work_spent = [&] { return surface_work_start - work_budget().left > kSurfaceWorkBudget; };
+        const LensScope none(LensModel{});
+        // A bend also curves the frame's sides, which puts the straight-line
+        // corner fit off; refit the corners from curved sides first.
+        // If no surface fits those corners, the given ones are tried.
+        std::copy(quad_xy, quad_xy + 8, bent_quad.begin());
+        // (A strong bend seen at a tilt bows a side by more than a unit, hence the wide search.)
+        std::array<std::vector<FrameEdgePoint>, 4> frame_points;
+        const bool refitted = fit_frame_curves(gray, width, height, stride, bent_quad.data(), 1.8, &frame_points);
+        // No frame stroke on all four sides: not a symbol's own border (the
+        // candidates include outlines inside a symbol), so nothing to bend.
+        for (int given = 0; refitted && given < 2 && geometry_index == geometries.size(); ++given) {
+            if (given) std::copy(given_quad, given_quad + 8, bent_quad.begin());
+            int candidates[kScalableVersions]; size_t found = versions_from_lattice(gray, width, height, stride, bent_quad.data(), candidates, 2);
+            // The low versions have few modules, in clumps beside the finders,
+            // and no scan line crosses enough of them to show a period. Their
+            // surface search is cheap (large modules need only a coarse one),
+            // so each is tried; a wrong version seldom fits any surface, and the
+            // keys, Reed-Solomon and the CRC reject it when it does.
+            if (found == 0 && given == 0) for (int v = 1; v <= kScalableVersions && scalable_layout(v, 0).pitch >= 0.45; ++v) candidates[found++] = v;
+            for (size_t i = 0; i < found && !surface_work_spent(); ++i) {
+                const ScalableLayout &layout = scalable_layout(candidates[i], 0);
+                SurfaceModel surface = surface_from_marks(layout, gray, width, height, stride, bent_quad.data());
+                if (surface.kappa == 0) continue;
+                // The surface says what shape the frame's sides have: fit the
+                // corners to the measured frame through it, then the surface
+                // again from those corners, twice.
+                std::array<double, 8> fitted = bent_quad;
+                for (int round = 0; round < 2; ++round) {
+                    corners_from_bent_frame(frame_points, surface, width, height, fitted.data());
+                    const SurfaceModel again = surface_from_marks(layout, gray, width, height, stride, fitted.data(), &surface);
+                    if (again.kappa == 0) break;
+                    surface = again;
+                }
+                // Last, settle the corners on the module lattice as seen
+                // through the bend, and place the camera for the result.
+                Geometry bent{LensModel{}, surface, candidates[i], fitted};
+                { SurfaceModel placed = surface; if (surface_pose(placed, fitted.data(), width, height, surface.focal)) surface = placed; }
+                { const SurfaceScope scope(surface); refine_on_lattice(layout, gray, width, height, stride, bent.quad.data(), 0.4); }
+                SurfaceModel settled = surface;
+                if (surface_pose(settled, bent.quad.data(), width, height, surface.focal)) bent.surface = settled;
+                geometries.push_back(bent);  // a wrong version can fit some surface too: keep looking
+                if (work_exhausted()) break;
+            }
+        }
+        if (geometry_index == geometries.size()) break;
+    }
+    const Geometry geometry = geometries[geometry_index];
+    quad_xy = geometry.surface.kappa != 0 ? geometry.quad.data() : given_quad;
+    const LensScope lens_scope(geometry.lens);
+    double edge_blur = 0; { const SurfaceScope bent(geometry.surface); edge_blur = measure_edge_blur(gray, width, height, stride, quad_xy); }
     // 1. The skeleton gates orientation. 2. Each version's keys are tested at
     //    that orientation; only agreeing versions are fully sampled, best
     //    first. 3. RS, the frame's version byte, and CRC-32C decide.
-    struct Attempt { double score; int version, family; double h[8]; };
+    struct Attempt { double score; int version, family; double h[8]; SurfaceModel surface; };
     std::vector<Attempt> attempts;
     for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
+        // The surface is described in the given corner order; turn it to
+        // this orientation's.
+        SurfaceModel surface{};
+        if (geometry.surface.kappa != 0) {
+            constexpr double corner[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+            double oriented[8]; int q[4];
+            for (int i = 0; i < 4; ++i) { q[i] = (start + (reverse ? -i : i) + 8) % 4; oriented[2 * i] = quad_xy[2 * q[i]]; oriented[2 * i + 1] = quad_xy[2 * q[i] + 1]; }
+            // Canonical corner i of this orientation is corner q[i] of the
+            // given order. The given order's x axis runs from its corner 0 to
+            // its corner 1; find those two among q.
+            int at[4]; for (int i = 0; i < 4; ++i) at[q[i]] = i;
+            const double dx = corner[at[1]][0] - corner[at[0]][0], dy = corner[at[1]][1] - corner[at[0]][1];
+            const double ex = corner[at[3]][0] - corner[at[0]][0], ey = corner[at[3]][1] - corner[at[0]][1];
+            if (!surface_reoriented(geometry.surface, oriented, width, height, dx, dy, ex, ey, surface)) continue;
+        }
+        const SurfaceScope surface_scope(surface);
         double h[8]; bool ok; orientation_homography(quad_xy, reverse, start, h, ok); if (!ok) continue;
         const KeyFit skeleton = scalable_skeleton_fit(gray, width, height, stride, h);
         if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < kMinKeyContrast) continue;
         for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
+            if (geometry.version != 0 && v != geometry.version) continue;
             const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
             if (!keys.valid || keys.evidence < 0.85) continue;
-            Attempt a{keys.contrast * keys.evidence * keys.evidence, v, f, {}}; std::copy(h, h + 8, a.h);
+            Attempt a{keys.contrast * keys.evidence * keys.evidence, v, f, {}, surface}; std::copy(h, h + 8, a.h);
             attempts.push_back(a);
         }
     }
@@ -428,6 +509,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
     for (const auto &attempt : attempts) {
         if (work_exhausted()) break;
         const ScalableLayout &L = scalable_layout(attempt.version, attempt.family);
+        const SurfaceScope surface_scope(attempt.surface);
         if (!scalable_sample_sites(L, gray, width, height, stride, attempt.h, samples)) continue;
         samples.edge_blur = edge_blur;
       bool hopeless = false;

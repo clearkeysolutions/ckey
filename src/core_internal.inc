@@ -804,15 +804,54 @@ bool map_point_raw(const double h[8], double x, double y, ImagePoint &p) {
     return std::isfinite(p.x) && std::isfinite(p.y);
 }
 
+// Surface model for the current thread: a symbol on a curved surface (a
+// bottle, a bent label, a page that does not lie flat). The surface is a
+// cylinder: straight along one direction (at angle `axis` in the field) and
+// curved across it with curvature `kappa` (radians per canonical unit;
+// its sign says convex or concave). A point at distance a across the axis
+// from the field centre sits at sin(kappa a) / kappa across and
+// Z = (1 - cos(kappa a)) / kappa out of the plane.
+//
+// A pinhole camera maps a point (X, Y, Z) to H * (X, Y, 1) + p3 * Z in
+// homogeneous pixels, where H is the perspective map of the plane Z = 0 and
+// p3 depends on where the camera is. Writing p3 = H * g, the image of the
+// bent point is H * (X + g0 Z, Y + g1 Z, 1 + g2 Z): the plane's map applied
+// to a shifted point. That form is exact, and g follows from H and the
+// focal length (surface_pose in the scan library). The perspective map is
+// fitted to the bent positions of the corners, so corners stay where they
+// were measured. With kappa = 0 (the default) nothing changes. `focal` records
+// the focal length (pixels) g was derived with.
+struct SurfaceModel { double kappa = 0, ca = 1, sa = 0, g[3] = {0, 0, 0}, focal = 0; };
+inline SurfaceModel &active_surface() { static thread_local SurfaceModel surface; return surface; }
+struct SurfaceScope {
+    SurfaceModel saved;
+    explicit SurfaceScope(const SurfaceModel &surface) : saved(active_surface()) { active_surface() = surface; }
+    ~SurfaceScope() { active_surface() = saved; }
+    SurfaceScope(const SurfaceScope &) = delete; SurfaceScope &operator=(const SurfaceScope &) = delete;
+};
+inline void surface_bend(const SurfaceModel &m, double &x, double &y) {
+    if (m.kappa == 0) return;
+    constexpr double c = 14.5;
+    const double u = x - c, v = y - c, across = -u * m.sa + v * m.ca, along = u * m.ca + v * m.sa;
+    const double bent = std::sin(m.kappa * across) / m.kappa, out = (1 - std::cos(m.kappa * across)) / m.kappa;
+    const double X = c + along * m.ca - bent * m.sa, Y = c + along * m.sa + bent * m.ca, w = 1 + m.g[2] * out;
+    if (std::abs(w) < 1e-9) return;
+    x = (X + m.g[0] * out) / w; y = (Y + m.g[1] * out) / w;
+}
+
 bool solve_homography(const double src[8], const double dst[8], double h[8]) {
-    const LensModel &lens = active_lens();
-    if (lens.k1 == 0) return solve_homography_raw(src, dst, h);
-    double flat[8];
-    for (int i = 0; i < 4; ++i) { flat[2 * i] = dst[2 * i]; flat[2 * i + 1] = dst[2 * i + 1]; lens_undistort(lens, flat[2 * i], flat[2 * i + 1]); }
-    return solve_homography_raw(src, flat, h);
+    const LensModel &lens = active_lens(); const SurfaceModel &surface = active_surface();
+    if (lens.k1 == 0 && surface.kappa == 0) return solve_homography_raw(src, dst, h);
+    double flat[8], bent[8];
+    for (int i = 0; i < 4; ++i) {
+        flat[2 * i] = dst[2 * i]; flat[2 * i + 1] = dst[2 * i + 1]; lens_undistort(lens, flat[2 * i], flat[2 * i + 1]);
+        bent[2 * i] = src[2 * i]; bent[2 * i + 1] = src[2 * i + 1]; surface_bend(surface, bent[2 * i], bent[2 * i + 1]);
+    }
+    return solve_homography_raw(bent, flat, h);
 }
 
 bool map_point(const double h[8], double x, double y, ImagePoint &p) {
+    surface_bend(active_surface(), x, y);
     if (!map_point_raw(h, x, y, p)) return false;
     lens_distort(active_lens(), p.x, p.y);
     return std::isfinite(p.x) && std::isfinite(p.y);
@@ -859,10 +898,21 @@ inline bool work_exhausted() { return work_budget().left == 0; }
 constexpr uint64_t kFindWorkBudget = 400000;      // samples per ckey_find_borders_gray8
 constexpr uint64_t kRefineWorkBudget = 8000000;   // per ckey_refine_quad_gray8
 constexpr uint64_t kDecodeWorkBudget = 16000000;   // per ckey_decode_*_gray8
+constexpr uint64_t kSurfaceWorkBudget = 2500000;  // of which, at most this much on finding a bent surface
 
 double gray_sample(const uint8_t *gray, size_t width, size_t height, size_t stride,
                    const double h[8], double x, double y, double spread = kLocatorSampleSpread) {
     { WorkBudget &b = work_budget(); if (b.left == 0) return -1; --b.left; }
+    if (spread == 0) {  // a single point: one bilinear lookup, not nine identical ones
+        ImagePoint p{}; if (!map_point(h,x,y,p)) return -1;
+        if (p.x<0 || p.y<0 || p.x>static_cast<double>(width-1) || p.y>static_cast<double>(height-1)) return -1;
+        const size_t x0=static_cast<size_t>(p.x), y0=static_cast<size_t>(p.y);
+        const size_t x1=std::min(x0+1,width-1), y1=std::min(y0+1,height-1);
+        const double fx=p.x-x0, fy=p.y-y0;
+        const double top=gray[y0*stride+x0]*(1-fx)+gray[y0*stride+x1]*fx;
+        const double bottom=gray[y1*stride+x0]*(1-fx)+gray[y1*stride+x1]*fx;
+        return top*(1-fy)+bottom*fy;
+    }
     // A small center-weighted 3x3 sample tolerates rasterization and mild blur.
     const double offsets[3]={-spread,0.0,spread};
     constexpr double weights[3]={1.0,2.0,1.0};
