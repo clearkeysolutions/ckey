@@ -1,6 +1,6 @@
 # Reading through blur and low resolution: what other systems do, and what CKey uses
 
-**Status:** working research note, 2026-11-10 (build 86). It records a literature survey made for the reader repair pass, what was taken from it, what was measured, and what is still untried. Items marked *abstract only* were not read in full; treat their details as unverified.
+**Status:** working research note, 2026-11-10 (build 86). It records a literature survey made for the reader repair pass, what was taken from it, what was measured, what was tried and dropped, and what is still untried. Items marked *abstract only* were not read in full; treat their details as unverified.
 
 ## The problem in CKey's terms
 
@@ -76,11 +76,27 @@ All measurements are simulated frames from the key-test harness; see `CHANGELOG.
 
 An isolated feature of radius a keeps 1 − exp(−a² / (2σ²)) of its contrast at its centre under a Gaussian blur of width σ. The hardest ring event is a single unprinted slot between two printed dots on the inner ring: a gap about 0.2 p wide, which keeps roughly 37%, 25% and 19% of full contrast at σ = 0.2, 0.3 and 0.4 p. Sequence detection uses the whole footprint and not only the centre, so it reads further than these figures suggest, but its reach falls as 1/σ and linearly with pixels per module. At 2 to 3 pixels per module a slot is under one pixel wide, and no detector recovers what the sampling did not record.
 
+## Tried and dropped: more samples per ring slot
+
+The survey's first suggestion was to detect in the pixel domain: several samples per slot and across the stroke, for an estimated gain in distance of about 28% for an isolated dot at 4 pixels per pitch. Two forms were built and measured on the 141 standard-layout frames of the hard set, with the true corners, the lens from the rings and the frame-edge blur:
+
+| Reading | Mean ring bit error | Rings under 1% / 3% / 10% error | Frames within Reed–Solomon capacity |
+|---|---|---|---|
+| One sample per slot (as shipped) | 18.1% | 27 / 35 / 55 | 36 |
+| Plus a sample half a slot along, in the detector and the kernel fit | 18.4% | 22 / 31 / 56 | 35 |
+| The same, weighted 0.3 | 18.3% | 26 / 33 / 56 | 38 |
+| The same, used only after a ring has learned its kernels | 18.6% | 23 / 33 / 55 | 34 |
+| Used late and weighted 0.3 | 18.4% | 27 / 34 / 56 | 38 |
+| Three samples across the stroke (±0.10 p), averaged | 18.2% | 29 / 34 / 55 | 36 |
+| Three samples across the stroke (±0.18 p), averaged | 18.5% | 26 / 32 / 55 | 36 |
+
+Nothing moved by more than two frames, in either direction. At 3 to 7 pixels per module a ring slot is 1 to 2 pixels, so a sample half a slot away is mostly the same pixels again, and it adds its own model error. This agrees with measurement 4 above: the rings that fail do so because the fit does not converge or the registration is off, not for want of signal. The code was removed.
+
 ## Not yet tried
 
 In rough order of expected value:
 
-1. **Detect in the pixel domain.** The reader still takes one sample per slot. A matched filter over each mark's blurred footprint, with several samples per slot and across the stroke, uses several times more signal (survey estimate: about 23 grey levels of distance for an isolated dot at 0.2 p and 4 pixels per pitch, against 18 from the centre alone, and without uncancelled leakage).
+1. **A true two-dimensional fit of each ring neighbourhood** in pixels (dots as blurred discs at their known positions, fitted jointly with the neighbouring rings), which differs from the dropped experiment in modelling the pixels and not adding samples to a one-dimensional model.
 2. **Use decoded blocks as known data.** Once some Reed–Solomon blocks decode, their bits are known; refit the channel from them and re-detect the rest. This needs byte-grouped placement to be useful, because in the scattered formats every block has bits on every ring.
 3. **Soft outputs and a list of candidates.** The detector reports one sequence. Emitting the second-best path per ring, or per-bit likelihood ratios from a forward-backward pass, would give Reed–Solomon better erasures and the CRC more to choose from.
 4. **Joint detection across rings and between rings and rays.** Neighbouring rings are 0.86 p apart and are treated as independent.
