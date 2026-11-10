@@ -730,6 +730,8 @@ Four cautions apply.
 
 The integrity bound of Section 5.1 does not carry over. Zero wrong payloads in 6,000 cases gives a 95% upper bound of only $1 - 0.05^{1/6000} = 499$ per million for build 86.
 
+**A later change, measured on the same 6,000 cases.** After this comparison the reader gained a physical model of the rings, a lens estimate taken from the rings, and per-ring learning of the blur kernel (reader commit `35f9c1b`). The same local run then decoded 76.5% of recoverable symbols (standard layout 71.5%, print layout 81.6%), with no wrong payload, 74 regressed cases and a median reader time of 105 ms. In single frames the ring detector reduces ring bit errors from above 20% to almost none; the aggregate gain is 0.5 points because most remaining failures have other causes.
+
 ### 8.3 What remains open
 
 From the reader repository's record, in its own order of importance:

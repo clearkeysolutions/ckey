@@ -107,7 +107,7 @@ Build 86 implements `Pretest-observations-for-repair.md` (the repair notes from 
 * The SDK scanner takes control of the camera by default; the snapping brackets are an optional part of the SDK.
 * The iOS app (`clearkeysolutions/ckey-web`, `apps/ios`) is re-pinned to this build and its scanning code replaced by the SDK camera layer.
 
-**Result, honestly.** On 6,000 structured campaign cases (the first 300 of each stratum, same frames for both builds) the reader decoded **76.0%** of physically recoverable symbols, against 64.4% for build 85, and 59.1% against 50.0% of all valid symbols. Standard layout 70.5% (was 60.8%); print layout 81.5% (was 68.2%). 71 cases that build 85 read are now missed; they were not investigated. The full table is in `CHANGELOG.md`.
+**Result, honestly.** On 6,000 structured campaign cases (the first 300 of each stratum, same frames for both builds) the reader decoded **76.0%** of physically recoverable symbols, against 64.4% for build 85, and 59.1% against 50.0% of all valid symbols. Standard layout 70.5% (was 60.8%); print layout 81.5% (was 68.2%). 71 cases that build 85 read are now missed; they were not investigated. The full table is in `CHANGELOG.md`. With the later ring work (physical ring model, lens from the rings, per-ring kernel learning; see `docs/research/reading-through-blur.md`) the same 6,000 cases give 76.5% of recoverable symbols (standard layout 71.5%, print 81.6%) at a median of 105 ms per frame.
 
 No wrong payload. The reader is still far from the 98–100% of recoverable frames the owner expects. Why, from the per-stage measurements made during this build:
 
