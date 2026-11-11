@@ -400,10 +400,21 @@ ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, 
     capture = EvidenceCapture{};
     if (!acc || !result || st == CKEY_INVALID_ARGUMENT) return st;
     if (st == CKEY_OK || st == CKEY_INSUFFICIENT_BUFFER) { ckey_accumulator_reset(acc); return st; }
-    // Region scans and undistorted scans report geometry in their own image.
-    const bool whole_frame = !options || ((options->roi_width <= 0 || options->roi_height <= 0) && options->k1 == 0.0);
-    if (!got.have || !whole_frame) return st;
-    double cx = 0, cy = 0; for (int k = 0; k < 4; ++k) { cx += got.quad[2 * k] / 4; cy += got.quad[2 * k + 1] / 4; }
+    // The capture's geometry is in the image the scan searched: the region of
+    // interest (same clamping as ckey_scan_frame_gray8), or the whole frame.
+    // Undistorted scans search a resampled copy, so they are not accumulated.
+    if (!got.have || (options && options->k1 != 0.0)) return st;
+    size_t rx = 0, ry = 0, rw = width, rh = height;
+    if (options && options->roi_width > 0 && options->roi_height > 0) {
+        rx = static_cast<size_t>(std::clamp(std::floor(options->roi_x), 0.0, static_cast<double>(width - 16)));
+        ry = static_cast<size_t>(std::clamp(std::floor(options->roi_y), 0.0, static_cast<double>(height - 16)));
+        rw = static_cast<size_t>(std::clamp(std::ceil(options->roi_width), 16.0, static_cast<double>(width - rx)));
+        rh = static_cast<size_t>(std::clamp(std::ceil(options->roi_height), 16.0, static_cast<double>(height - ry)));
+    }
+    const uint8_t *region = gray + ry * stride + rx;
+    // Continuity in full-frame coordinates, so region and whole frames agree.
+    double cx = static_cast<double>(rx), cy = static_cast<double>(ry);
+    for (int k = 0; k < 4; ++k) { cx += got.quad[2 * k] / 4; cy += got.quad[2 * k + 1] / 4; }
     const double size = quad_mean_side(got.quad);
     if (!(size > 8)) return st;
     const bool here = acc->frames && std::hypot(cx - acc->cx, cy - acc->cy) < 0.5 * acc->size && std::abs(size - acc->size) < 0.25 * acc->size;
@@ -414,7 +425,7 @@ ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, 
         acc->sum.assign(static_cast<size_t>(acc->side) * acc->side, 0.0f); acc->n.assign(acc->sum.size(), 0);
     }
     std::vector<float> z; std::vector<uint8_t> known;
-    if (!rectify_frame(gray, width, height, stride, got.h, acc->side, z, known)) return st;
+    if (!rectify_frame(region, rw, rh, stride, got.h, acc->side, z, known)) return st;
     // Orientation: the frame's reading may have the field turned by a quarter
     // turn relative to the average; take the rotation that agrees best.
     int turn = 0;
@@ -457,7 +468,8 @@ ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, 
     if (ds != CKEY_OK) return st;
     result->profile = CKEY_FIELD_SCALABLE; result->version = version; result->layout = layout;
     result->corrected_symbols = d.corrected_symbols; result->erasures_used = d.erasures_used; result->payload_length = length;
-    result->flags |= CKEY_SCAN_FLAG_ACCUMULATED; result->located = 1; std::copy(got.quad, got.quad + 8, result->quad);
+    result->flags |= CKEY_SCAN_FLAG_ACCUMULATED; result->located = 1;
+    for (int k = 0; k < 4; ++k) { result->quad[2 * k] = got.quad[2 * k] + static_cast<double>(rx); result->quad[2 * k + 1] = got.quad[2 * k + 1] + static_cast<double>(ry); }
     std::snprintf(result->message, sizeof(result->message), "decoded from %u accumulated frames", acc->frames);
     const uint32_t frames = acc->frames; (void)frames;
     ckey_accumulator_reset(acc);

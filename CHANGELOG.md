@@ -10,6 +10,23 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.91 — 2026-11-11
+
+**The Swift SDK now has everything the iPhone app's scanner had**, so the app can be a thin client of it (Open CKey Scanner on openckey.org `main` now is). Reading other barcode symbologies stays in the app by design.
+
+**Swift SDK** (`CKeyScanKit`; **not compiled here**, there is no Swift toolchain in this environment)
+
+* **Multi-frame reading on by default:** `CKeyCameraScanner.multiFrame` / `CKeyFrameProcessor.multiFrame` (default `true`) scan through `ckey_scan_frame_accumulate_gray8` with one accumulator per processor, reset by `scanAgain()` and `reset()`. `CKeyScanOutcome.accumulated` marks a read from the average. Measured in the key-test harness (1,080 six-frame sequences with shake, motion and focus and exposure drift): 63.5% of codes read on some single frame, 66.3% with the accumulator; 67.4% with the built-in site model as well; 0 wrong payloads.
+* **Rotation-aware preview:** `CKeyCameraPreview(session:geometry:interestRect:onRegionOfInterest:)` and `CKeyPreviewView.attach(_:)` keep the image upright in every orientation and posture with `AVCaptureDevice.RotationCoordinator` (iOS 17 and later), and report the reticle in sensor coordinates for `scanRegion`. The existing initialiser still works.
+* **Camera access:** `CKeyCameraScanner.cameraAuthorization` and `requestCameraAccess()`.
+* **Torch:** `isTorchAvailable`, `setTorch(_:)`.
+* **Photos and screenshots:** `CKeyDecoder.decode(imageData:)`, with the orientation applied, at 4,096 then 2,048 px.
+
+**Core**
+
+* The frame accumulator now works on region-of-interest scans too: the SDK's default, two of every three frames. The captured geometry is taken in the region and continuity is checked in full-frame coordinates; corners are reported in full-frame pixels. New test case in `ckey_ml_locator`.
+* `ckey.h`: the accumulator's description now matches what it does (averaging rectified fields).
+
 ## 0.1.0-build.90 — 2026-11-11
 
 Three more ML assists and a way to turn ML off. No new built-in model; the corner refiner and the two-channel site model are being trained (key-test `ml/run_next.sh`).

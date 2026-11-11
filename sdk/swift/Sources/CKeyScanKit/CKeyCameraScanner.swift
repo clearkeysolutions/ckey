@@ -115,6 +115,71 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
     }
 
+    /// Multi-frame reading (default on): frames that do not decode are
+    /// averaged per symbol and the average is decoded, so frames that are
+    /// each too noisy, glared or partly hidden can read together. See
+    /// `CKeyFrameProcessor.multiFrame`.
+    public var multiFrame: Bool {
+        get { processor.multiFrame }
+        set { processor.multiFrame = newValue }
+    }
+
+    // MARK: Camera access and torch
+
+    /// Whether the app may use the camera, for the UI to explain or ask.
+    public enum CameraAuthorization: Equatable, Sendable {
+        /// The person has not been asked yet.
+        case notDetermined
+        case authorized
+        /// The person said no; they can change it in Settings.
+        case denied
+        /// Camera use is blocked by Screen Time or device management.
+        case restricted
+        /// There is no suitable camera (for example the Simulator).
+        case unavailable
+    }
+
+    /// The current camera authorization, or `.unavailable` without a camera.
+    public var cameraAuthorization: CameraAuthorization {
+        guard cameraControl != nil else { return .unavailable }
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: return .authorized
+        case .notDetermined: return .notDetermined
+        case .denied: return .denied
+        case .restricted: return .restricted
+        @unknown default: return .denied
+        }
+    }
+
+    /// Asks for camera access if it has not been decided yet; returns the
+    /// resulting authorization. It does not start the camera.
+    public func requestCameraAccess() async -> CameraAuthorization {
+        if cameraAuthorization == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
+        }
+        return cameraAuthorization
+    }
+
+    /// True when the scanner's camera has a torch.
+    public var isTorchAvailable: Bool { captureDevice?.hasTorch ?? false }
+
+    /// Turns the torch on or off while the camera runs; returns whether it is
+    /// now on. Stopping the camera turns it off.
+    @discardableResult
+    public func setTorch(_ on: Bool) -> Bool {
+        guard let device = captureDevice, device.hasTorch, isStarted else { return false }
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            let mode: AVCaptureDevice.TorchMode = on ? .on : .off
+            guard device.isTorchModeSupported(mode) else { return device.torchMode == .on }
+            device.torchMode = mode
+            return on
+        } catch {
+            return false
+        }
+    }
+
     // MARK: Tracking and guidance
 
     /// Per-frame tracking (default on): the code's four corners on every
@@ -466,38 +531,126 @@ extension CKeyCameraPreview {
 }
 
 #if os(iOS)
-/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session. Its static
-/// functions convert between sensor and view coordinates for custom overlays.
+/// A SwiftUI camera preview for a `CKeyCameraScanner`'s session. It keeps the
+/// image upright in every orientation and posture (portrait, landscape, a
+/// foldable opened either way) with `AVCaptureDevice.RotationCoordinator` on
+/// iOS 17 and later; decoding does not depend on it, since CKey symbols read
+/// at any rotation. Its static functions convert between sensor and view
+/// coordinates for custom overlays.
 public struct CKeyCameraPreview: UIViewRepresentable {
     public let session: AVCaptureSession
     /// Receives the preview layer, for `CKeyBracketOverlayView` or a custom overlay.
     public let geometry: CKeyPreviewGeometry?
+    /// The reticle in this view's coordinates; `onRegionOfInterest` receives
+    /// it in sensor coordinates (the value for `CKeyCameraScanner.scanRegion`)
+    /// whenever layout or rotation changes it.
+    public let interestRect: CGRect
+    public let onRegionOfInterest: ((CGRect) -> Void)?
 
-    public init(session: AVCaptureSession, geometry: CKeyPreviewGeometry? = nil) {
+    public init(session: AVCaptureSession, geometry: CKeyPreviewGeometry? = nil,
+                interestRect: CGRect = .null, onRegionOfInterest: ((CGRect) -> Void)? = nil) {
         self.session = session
         self.geometry = geometry
+        self.interestRect = interestRect
+        self.onRegionOfInterest = onRegionOfInterest
     }
 
     public func makeUIView(context: Context) -> CKeyPreviewView {
         let view = CKeyPreviewView()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
+        view.attach(session)
+        view.setInterest(interestRect, report: onRegionOfInterest)
         geometry?.layer = view.previewLayer
         return view
     }
 
     public func updateUIView(_ view: CKeyPreviewView, context: Context) {
-        if view.previewLayer.session !== session { view.previewLayer.session = session }
+        view.attach(session)
+        view.setInterest(interestRect, report: onRegionOfInterest)
         geometry?.layer = view.previewLayer
     }
 }
 
-/// A UIView backed by an `AVCaptureVideoPreviewLayer`.
+/// A UIView backed by an `AVCaptureVideoPreviewLayer`, kept upright with
+/// `AVCaptureDevice.RotationCoordinator` (iOS 17 and later) once `attach(_:)`
+/// connects it to a session.
 public final class CKeyPreviewView: UIView {
     public override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     public var previewLayer: AVCaptureVideoPreviewLayer {
         // layerClass guarantees the type.
         layer as! AVCaptureVideoPreviewLayer // swiftlint:disable:this force_cast
+    }
+
+    private var coordinator: AnyObject?   // AVCaptureDevice.RotationCoordinator on iOS 17+
+    private var observation: NSKeyValueObservation?
+    private var startObserver: NSObjectProtocol?
+    private var interestRect: CGRect = .null
+    private var reportInterest: ((CGRect) -> Void)?
+
+    deinit {
+        if let startObserver { NotificationCenter.default.removeObserver(startObserver) }
+    }
+
+    /// Shows `session` (aspect fill) and keeps it upright. The camera input is
+    /// usually added when scanning starts, so rotation tracking begins then.
+    public func attach(_ session: AVCaptureSession) {
+        if previewLayer.session !== session {
+            previewLayer.session = session
+            coordinator = nil
+            observation = nil
+            if let startObserver { NotificationCenter.default.removeObserver(startObserver) }
+            startObserver = NotificationCenter.default.addObserver(
+                forName: AVCaptureSession.didStartRunningNotification, object: session, queue: .main
+            ) { [weak self] _ in self?.makeCoordinator() }
+        }
+        previewLayer.videoGravity = .resizeAspectFill
+        previewLayer.masksToBounds = true
+        makeCoordinator()
+    }
+
+    /// The reticle in this view's coordinates, reported in sensor coordinates
+    /// to `report` now and whenever layout or rotation changes it.
+    public func setInterest(_ rect: CGRect, report: ((CGRect) -> Void)?) {
+        interestRect = rect
+        reportInterest = report
+        publishInterest()
+    }
+
+    private func publishInterest() {
+        guard let reportInterest, !interestRect.isNull, !interestRect.isEmpty, bounds.width > 0, bounds.height > 0,
+              let converted = sensorRect(fromViewRect: interestRect) else { return }
+        reportInterest(converted)
+    }
+
+    private func makeCoordinator() {
+        guard #available(iOS 17.0, *) else { publishInterest(); return }
+        guard coordinator == nil, let session = previewLayer.session,
+              let device = session.inputs.compactMap({ ($0 as? AVCaptureDeviceInput)?.device })
+                .first(where: { $0.hasMediaType(.video) }) else {
+            applyCurrentAngle()
+            return
+        }
+        let rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+        coordinator = rotation
+        observation = rotation.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.applyCurrentAngle() }
+        }
+        applyCurrentAngle()
+    }
+
+    private func applyCurrentAngle() {
+        if #available(iOS 17.0, *), let rotation = coordinator as? AVCaptureDevice.RotationCoordinator,
+           let connection = previewLayer.connection {
+            let angle = rotation.videoRotationAngleForHorizonLevelPreview
+            if connection.isVideoRotationAngleSupported(angle), connection.videoRotationAngle != angle {
+                connection.videoRotationAngle = angle
+            }
+        }
+        publishInterest()
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        if coordinator == nil { makeCoordinator() } else { applyCurrentAngle() }
     }
 
     /// Normalized sensor points (`CKeyTrack.corners`) in this view's

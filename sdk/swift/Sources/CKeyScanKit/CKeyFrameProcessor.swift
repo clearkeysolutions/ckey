@@ -18,7 +18,8 @@ import QuartzCore
 ///
 /// What it does with each frame:
 ///
-/// - **Decoding** (`ckey_scan_frame_gray8`), at most `maxFramesPerSecond`.
+/// - **Decoding** (`ckey_scan_frame_accumulate_gray8`, or
+///   `ckey_scan_frame_gray8` with `multiFrame` off), at most `maxFramesPerSecond`.
 ///   With `regionOfInterest` on, two of every three analysed frames search
 ///   only `scanRegion` plus an 18% margin, at full resolution and in place;
 ///   every third is searched whole, so codes outside the region still read.
@@ -65,6 +66,17 @@ public final class CKeyFrameProcessor {
     public var regionOfInterest: Bool {
         get { sync { settings.regionOfInterest } }
         set { sync { settings.regionOfInterest = newValue } }
+    }
+
+    /// Multi-frame reading (default on): a frame that does not decode is
+    /// averaged with the previous frames of the same symbol (in its own
+    /// coordinates, so the code may move), and the average is decoded. Frames
+    /// that are each too noisy, glared or partly hidden can read together.
+    /// Reed-Solomon and CRC-32C still decide; `CKeyScanOutcome.accumulated`
+    /// marks such a read.
+    public var multiFrame: Bool {
+        get { sync { settings.multiFrame } }
+        set { sync { settings.multiFrame = newValue; pendingAccumulatorReset = true } }
     }
 
     /// Per-frame tracking (default on). Off stops the tracker and reports the
@@ -131,6 +143,7 @@ public final class CKeyFrameProcessor {
     private struct Settings {
         var scanRegion: CGRect? = CKeyFrameProcessor.defaultScanRegion
         var regionOfInterest = true
+        var multiFrame = true
         var tracking = true
         var maxFramesPerSecond: Double = 20
         var onResult: ((CKeyResult) -> Void)?
@@ -178,6 +191,10 @@ public final class CKeyFrameProcessor {
     // Analysis queue only.
     private var policy = ckey_camera_policy()
     private var payload = [UInt8](repeating: 0, count: CKeyDecoder.payloadCapacity)
+    // Analysis-queue state: the multi-frame accumulator (core-owned).
+    private let accumulator: OpaquePointer? = ckey_accumulator_create()
+    // Guarded by lock: restart the accumulator before the next analysis.
+    private var pendingAccumulatorReset = false
     private var stabilizer = CKeyGuidanceStabilizer()
     private var lastWholeFrameCut = false
 
@@ -197,6 +214,10 @@ public final class CKeyFrameProcessor {
         self.observer = observer
         ckey_camera_policy_init(&policy)
         ckey_track_init(&track)
+    }
+
+    deinit {
+        ckey_accumulator_destroy(accumulator)
     }
 
     @discardableResult
@@ -281,6 +302,7 @@ public final class CKeyFrameProcessor {
         sync {
             didDecode = false
             pendingPolicyReset = true
+            pendingAccumulatorReset = true
             pendingSeed = nil
         }
         dropTrack()
@@ -291,6 +313,7 @@ public final class CKeyFrameProcessor {
     public func reset() {
         sync {
             pendingPolicyReset = true
+            pendingAccumulatorReset = true
             pendingSeed = nil
         }
         dropTrack()
@@ -450,12 +473,14 @@ public final class CKeyFrameProcessor {
 
     private func analyse(_ gray: UnsafePointer<UInt8>, _ width: Int, _ height: Int, _ stride: Int,
                          index: Int) -> Analysis {
-        let (region, useRegion, held, resetPolicy) = sync { () -> (CGRect?, Bool, Seed?, Bool) in
-            let reset = pendingPolicyReset
+        let (region, useRegion, held, resetPolicy, multiFrame, resetAccumulator) = sync { () -> (CGRect?, Bool, Seed?, Bool, Bool, Bool) in
+            let reset = pendingPolicyReset, resetAcc = pendingAccumulatorReset
             pendingPolicyReset = false
-            return (settings.scanRegion, settings.regionOfInterest, trackedQuad, reset)
+            pendingAccumulatorReset = false
+            return (settings.scanRegion, settings.regionOfInterest, trackedQuad, reset, settings.multiFrame, resetAcc)
         }
         if resetPolicy { ckey_camera_policy_init(&policy) }
+        if resetAccumulator { ckey_accumulator_reset(accumulator) }
         // Two of every three analysed frames read only the region, at full
         // resolution and in place; every third is read whole.
         var pixelRegion: CGRect?
@@ -463,7 +488,8 @@ public final class CKeyFrameProcessor {
             pixelRegion = CKeyDecoder.pixelRegion(normalized: region, width: width, height: height)
         }
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
-                                       region: pixelRegion, payload: &payload)
+                                       region: pixelRegion, payload: &payload,
+                                       accumulator: multiFrame ? accumulator : nil)
 
         // Advice on the scan's candidate, or on the tracked symbol between scans.
         var quad: [Double]?

@@ -116,6 +116,7 @@ Headless, from any thread:
 ```swift
 let result: CKeyResult? = CKeyDecoder.decode(cgImage: image)
 let fromCamera = CKeyDecoder.decode(pixelBuffer: pixelBuffer)   // 420v/420f luma, gray8, BGRA/RGBA/ARGB
+let fromPhoto = CKeyDecoder.decode(imageData: data)              // JPEG/HEIC/PNG: orientation applied, 4,096 then 2,048 px
 if let result {
     result.bytes        // Data, verified by Reed-Solomon and CRC-32C
     result.text         // String? — UTF-8 without control characters (tab/LF/CR allowed)
@@ -171,6 +172,7 @@ Call `start()`, `stop()` and `scanAgain()` from the main thread. No still captur
 | `exposureControl` | `true` | Exposure is metered on the code. The exposure bias goes negative when the code clips, and cycles 0 / −1 / −2 EV while nothing decodes (a screen too bright to detect comes into range on one of them). |
 | `realDetailZoom` | `true` | Zooms on a small code only up to the active format's `videoZoomFactorUpscaleThreshold`, where the sensor is cropped at full resolution, or to a telephoto lens at its switch-over factor. Zoom that only enlarges pixels is not used. |
 | `regionOfInterest` | `true` | Two of every three analysed frames decode only `scanRegion` plus an 18% margin; every third frame is decoded whole. |
+| `multiFrame` | `true` | A frame that does not decode is averaged with the previous frames of the same symbol (in the symbol's own coordinates, so it may move), and the average is decoded. Frames that are each too noisy, glared or partly hidden can read together; `CKeyScanOutcome.accumulated` marks such a read. |
 | `tracking` | `true` | Tracks the code's four corners on every frame and publishes them through `onTrack`. |
 | `keepsScreenAwake` | `true` | Sets `UIApplication.isIdleTimerDisabled` while the camera runs, so the device does not auto-lock mid-scan. iOS apps only; it does nothing in app extensions. |
 
@@ -189,6 +191,9 @@ Other things the scanner does:
 - **Scan region.** Set `scanner.scanRegion` to your reticle in capture-device coordinates (`CKeyPreviewView.sensorRect(fromViewRect:)` or `CKeyPreviewGeometry.sensorRect(fromViewRect:)`). Decoding reads it first, and focus and exposure rest on its centre. The default is the middle of the frame.
 - **Frame rate.** Frames are analysed off the main thread at up to `maxFramesPerSecond` (default 20). Tracking is not capped.
 - **Capture resolution.** `.uhd4K` (default) or `.hd1080`, in the initialiser.
+- **Camera access.** `scanner.cameraAuthorization` (`.notDetermined`, `.authorized`, `.denied`, `.restricted`, `.unavailable`) for the UI, and `await scanner.requestCameraAccess()` to ask without starting.
+- **Torch.** `scanner.isTorchAvailable` and `scanner.setTorch(_:)` (returns whether it is on); stopping the camera turns it off.
+- **Preview.** `CKeyCameraPreview(session:geometry:interestRect:onRegionOfInterest:)` keeps the image upright in every orientation and posture with `AVCaptureDevice.RotationCoordinator` (iOS 17 and later), and reports the reticle (`interestRect`, in the preview's coordinates) in sensor coordinates for `scanRegion` whenever layout or rotation changes it.
 
 ### Tracking and your own overlay
 

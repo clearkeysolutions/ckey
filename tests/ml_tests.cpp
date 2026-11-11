@@ -209,6 +209,26 @@ int main() {
         }
         CKEY_CHECK(single == 0);            // no frame decodes alone ...
         CKEY_CHECK(decoded_at >= 1);        // ... but together they do
+        // Region-of-interest frames accumulate too (the SDK's default).
+        {
+            ckey_frame_accumulator *ra = ckey_accumulator_create();
+            ckey_scan_options ro; ckey_scan_options_init(&ro);
+            ro.roi_x = fx - 30; ro.roi_y = fy - 30; ro.roi_width = 380; ro.roi_height = 380;
+            int at = -1, alone = 0;
+            for (int f = 0; f < 8 && at < 0; ++f) {
+                const auto fr = noisy(0);
+                ckey_scan_result r{};
+                alone += ckey_scan_frame_gray8(fr.data(), FW, FH, FW, &ro, out.data(), out.size(), &r) == CKEY_OK;
+                if (ckey_scan_frame_accumulate_gray8(fr.data(), FW, FH, FW, &ro, ra, out.data(), out.size(), &r) == CKEY_OK) {
+                    CKEY_CHECK(r.payload_length == std::strlen(texts[0]) && std::memcmp(out.data(), texts[0], r.payload_length) == 0);
+                    // Corners are reported in full-frame pixels, inside the region.
+                    for (int k = 0; k < 4; ++k) CKEY_CHECK(r.quad[2 * k] >= ro.roi_x - 2 && r.quad[2 * k] <= ro.roi_x + ro.roi_width + 2);
+                    at = f;
+                }
+            }
+            CKEY_CHECK(alone == 0 && at >= 1);
+            ckey_accumulator_destroy(ra);
+        }
         // Two different symbols alternating in the same place: only a true payload, never a mix.
         ckey_accumulator_reset(acc);
         for (int f = 0; f < 16; ++f) {

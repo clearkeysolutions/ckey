@@ -2,6 +2,9 @@ import CKeyCodec
 import CoreGraphics
 import CoreVideo
 import Foundation
+#if canImport(ImageIO)
+import ImageIO
+#endif
 
 /// What one scan of a frame found: the decoded symbol, if any, and where a
 /// symbol-like candidate sits even when it did not decode. Camera layers use
@@ -32,6 +35,10 @@ public struct CKeyScanOutcome: Equatable, Sendable {
     public let candidates: Int
     /// The frame's size in pixels.
     public let frameSize: CGSize
+    /// True when the payload came from several frames averaged together
+    /// (multi-frame reading, `CKeyFrameProcessor.multiFrame`), none of which
+    /// decoded alone.
+    public internal(set) var accumulated = false
 
     /// `quad` as fractions of the frame (0...1): for a camera frame in the
     /// sensor's native orientation these are AVFoundation's capture-device
@@ -108,6 +115,29 @@ public enum CKeyDecoder {
         return scan(gray: gray, width: width, height: height, stride: stride, region: region, payload: &payload)
     }
 
+    #if canImport(ImageIO)
+    /// Decodes a photo or screenshot file (JPEG, HEIC, PNG...). The image is
+    /// read with its orientation applied and at most 4,096 pixels on its long
+    /// side, then, if that finds nothing, at 2,048 (a smaller image can read
+    /// better when the code is large and soft). Returns `nil` when no symbol
+    /// decodes or the data is not an image.
+    public static func decode(imageData data: Data) -> CKeyResult? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        for maxSide in [4096, 2048] {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxSide,
+            ]
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { continue }
+            if let result = decode(cgImage: image) { return result }
+            if max(image.width, image.height) < maxSide { break }  // already at full size
+        }
+        return nil
+    }
+    #endif
+
     /// Scans an image drawn over white (see `decode(cgImage:)`). Returns
     /// `nil` when the image cannot be drawn.
     public static func scan(cgImage image: CGImage) -> CKeyScanOutcome? {
@@ -155,8 +185,11 @@ public enum CKeyDecoder {
     static let payloadCapacity = 65535
 
     /// The scan with a caller-owned payload buffer (camera paths reuse one).
+    /// With an `accumulator` (`ckey_accumulator_create`), a frame that does not
+    /// decode is averaged with the previous ones of the same symbol and the
+    /// average is decoded (`ckey_scan_frame_accumulate_gray8`).
     static func scan(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int, region: CGRect?,
-                     payload: inout [UInt8]) -> CKeyScanOutcome {
+                     payload: inout [UInt8], accumulator: OpaquePointer? = nil) -> CKeyScanOutcome {
         guard width >= 16, height >= 16, stride >= width, !payload.isEmpty else {
             return .nothing(width: width, height: height)
         }
@@ -172,8 +205,12 @@ public enum CKeyDecoder {
         }
         var found = ckey_scan_result()
         let capacity = payload.count
-        let status = payload.withUnsafeMutableBufferPointer { output in
-            ckey_scan_frame_gray8(gray, width, height, stride, &options, output.baseAddress, capacity, &found)
+        let status = payload.withUnsafeMutableBufferPointer { output -> ckey_status in
+            if let accumulator {
+                return ckey_scan_frame_accumulate_gray8(gray, width, height, stride, &options, accumulator,
+                                                        output.baseAddress, capacity, &found)
+            }
+            return ckey_scan_frame_gray8(gray, width, height, stride, &options, output.baseAddress, capacity, &found)
         }
         var result: CKeyResult?
         let length = Int(found.payload_length)
@@ -190,13 +227,15 @@ public enum CKeyDecoder {
         let q = found.quad
         let quad = located ? [CGPoint(x: q.0, y: q.1), CGPoint(x: q.2, y: q.3),
                               CGPoint(x: q.4, y: q.5), CGPoint(x: q.6, y: q.7)] : []
-        return CKeyScanOutcome(result: result, located: located, quad: quad, score: found.score,
+        var outcome = CKeyScanOutcome(result: result, located: located, quad: quad, score: found.score,
                                symbolCut: found.flags & CKEY_SCAN_FLAG_SYMBOL_CUT != 0,
                                budgetExhausted: found.flags & CKEY_SCAN_FLAG_BUDGET != 0,
                                correctedSymbols: Int(found.corrected_symbols),
                                erasuresUsed: Int(found.erasures_used),
                                candidates: Int(found.candidates),
                                frameSize: CGSize(width: width, height: height))
+        outcome.accumulated = found.flags & CKEY_SCAN_FLAG_ACCUMULATED != 0
+        return outcome
     }
 }
 

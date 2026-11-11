@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.90"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.91"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -319,17 +319,20 @@ CKEY_API uint64_t ckey_ml_refiner_model_id(void);
 #define CKEY_ML_HAS_CLEAR 1
 CKEY_API void ckey_ml_clear_models(void);
 /*
- * Multi-frame reading. An accumulator collects, frame by frame, the per-site
- * evidence of a Profile 0 symbol that did not decode (each site's decision
- * signed by its confidence; ML logits when a site model is loaded), and tries
- * the soft decoder on the sum, so frames that are each too blurred, noisy or
- * glared to decode alone can decode together. The sum is kept only while the
- * same symbol stays in view: same version and family, centre within half its
- * size, size within 25%. A frame that does not match is skipped; three in a
- * row restart the sum. A decode (alone or summed)
- * resets it. Acceptance is unchanged: Reed-Solomon and CRC-32C on the summed
- * reading, exactly as on a single frame. CKEY_SCAN_FLAG_ACCUMULATED marks a
- * read from the sum. One accumulator per camera stream; not thread-safe.
+ * Multi-frame reading. When a frame does not decode, the field of its most
+ * plausible Profile 0 reading is rectified into the symbol's own coordinates,
+ * standardised, matched to the running average in each of the four
+ * quarter-turn orientations and added; the average is then decoded like a
+ * clean frame by the normal decoder (which identifies the version itself, and
+ * uses the ML site model when one is loaded). Frames that are each too noisy,
+ * glared or partly hidden to decode alone can decode together. The average is
+ * kept only while the same symbol stays in view: centre within half its size,
+ * size within 25%, and the frame must correlate with the average. A frame
+ * that does not match is skipped; three in a row restart it. A decode (alone
+ * or from the average) resets it. Region-of-interest scans accumulate too
+ * (lens-undistorted scans do not). Acceptance is unchanged: Reed-Solomon and
+ * CRC-32C, exactly as on a single frame. CKEY_SCAN_FLAG_ACCUMULATED marks a
+ * read from the average. One accumulator per camera stream; not thread-safe.
  */
 #define CKEY_SCAN_FLAG_ACCUMULATED 8u
 typedef struct ckey_frame_accumulator ckey_frame_accumulator;
