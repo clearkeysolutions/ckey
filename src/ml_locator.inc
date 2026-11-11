@@ -257,19 +257,26 @@ std::shared_ptr<const MlModel> g_ml_model;   // loaded locator, or null
 std::shared_ptr<const MlModel> g_ml_sites;   // loaded site model, or null
 bool g_ml_builtin_tried = false;
 
-#if defined(CKEY_ML_BUILTIN)
-#include "ml_locator_model.inc"   // kMlLocatorModel[], kMlLocatorModelSize; optionally kMlSiteModel[], kMlSiteModelSize
+// Built-in models (tools/embed_ml_model.py). Define CKEY_ML_NO_BUILTIN to build
+// without them; ckey_ml_load_model can still load models at run time.
+#if !defined(CKEY_ML_NO_BUILTIN) && __has_include("ml_builtin_locator.inc")
+#include "ml_builtin_locator.inc"
+#define CKEY_ML_HAVE_BUILTIN_LOCATOR 1
+#endif
+#if !defined(CKEY_ML_NO_BUILTIN) && __has_include("ml_builtin_sites.inc")
+#include "ml_builtin_sites.inc"
+#define CKEY_ML_HAVE_BUILTIN_SITES 1
 #endif
 
 void ml_load_builtin_locked() {
     if (g_ml_builtin_tried) return;
     g_ml_builtin_tried = true;
-#if defined(CKEY_ML_BUILTIN)
     std::string err;
-    if (!g_ml_model) g_ml_model = ml_parse(kMlLocatorModel, kMlLocatorModelSize, err);
-#if defined(CKEY_ML_BUILTIN_SITES)
-    if (!g_ml_sites) g_ml_sites = ml_parse(kMlSiteModel, kMlSiteModelSize, err);
+#if defined(CKEY_ML_HAVE_BUILTIN_LOCATOR)
+    if (!g_ml_model) g_ml_model = ml_parse(kMlBuiltinLocator, kMlBuiltinLocatorSize, err);
 #endif
+#if defined(CKEY_ML_HAVE_BUILTIN_SITES)
+    if (!g_ml_sites) g_ml_sites = ml_parse(kMlBuiltinSites, kMlBuiltinSitesSize, err);
 #endif
 }
 

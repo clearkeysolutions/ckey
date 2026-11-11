@@ -10,6 +10,25 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.89 — 2026-11-11
+
+**The first built-in ML model:** the site model, read only on frames the plain reading fails.
+
+* **Model:** `sites-v1` from `clearkeysolutions/key-test` (`ml/locator-models/sites-v1.*`, commit `1d93dc4`): width 2.5, 90k weights, 100,616 bytes, sha256 `4576bcd5…`. It was trained on the owner's Mac with 40,000 fresh-seed cases, oversampling the fields the classical reader fails, against ckey `b0299d1`. Embedded as `src/ml_builtin_sites.inc` by the new `tools/embed_ml_model.py`; the new `ckey_ml_builtin_models` test checks the embedded bytes against the recorded SHA-256. Define `CKEY_ML_NO_BUILTIN` to build without it; `ckey_ml_load_model` replaces it at run time.
+* **Measured** (key-test harness, fresh seeds never used in training, classical reading against the site model on identical frames):
+
+| | Classical | With site model |
+|---|---|---|
+| 2,000 cases (owner's Mac): decoded from the true corners | 65.2% | **66.8%** (+29, lost 0) |
+| 2,000 cases: full scan | 56.9% | **58.1%** (+20, lost 0) |
+| 1,200 other cases (4-core container): from the true corners | 66.1% | **67.6%** (+16, lost 0) |
+| 1,200 cases: full scan | 56.4% | **57.3%** (+10, lost 0) |
+| Wrong payloads, both sets | 0 | 0 |
+
+  The gains are in resolution, print spread, screens and moiré, motion, rotation and dense symbols (v25–31: 225 → 232 of 408). Uneven light and finder loss are unchanged; there the symbol is lost before reading, which is the locator's job.
+* **Cost:** only frames whose plain reading fails run the model. Median scan time is unchanged. On those frames the 95th-percentile full-scan time rose from 321 to 466 ms on the owner's Mac, and from 807 to 1,146 ms on a busy 4-core container. Device timing on the CPU path is not measured yet; the planned Core ML path runs the same weights on the iPhone Neural Engine.
+* Built-in locator: none yet (training).
+
 ## 0.1.0-build.88 — 2026-11-11
 
 The ML site model runtime and multi-frame reading. As with build 87, **no trained model is built in yet**: with no model loaded, single-frame scanning is unchanged. The accumulator is new behaviour behind its own call.

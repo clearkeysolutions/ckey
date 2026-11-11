@@ -100,11 +100,16 @@ int main() {
     };
     auto is_text = [&](const ckey_scan_result &r) { return r.payload_length == std::strlen(text) && std::memcmp(out.data(), text, r.payload_length) == 0; };
 
-    // ---- No model: the ML option changes nothing ----
+#if defined(CKEY_ML_HAVE_BUILTIN_SITES)
+    // ---- The built-in site model loads, and the symbol still reads with it ----
+    CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+    CKEY_CHECK(ckey_ml_site_model_id() != 0);
+#endif
+    // ---- No locator: the ML option changes nothing ----
     CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
     ckey_scan_result classical{}, with_ml{};
     CKEY_CHECK(scan(0, classical) == CKEY_OK && is_text(classical));
-#if !defined(CKEY_ML_BUILTIN)
+#if !defined(CKEY_ML_HAVE_BUILTIN_LOCATOR)
     CKEY_CHECK(ckey_ml_model_id() == 0);
     CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) == CKEY_OK && is_text(with_ml));
     CKEY_CHECK(!(with_ml.flags & CKEY_SCAN_FLAG_ML));
