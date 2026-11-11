@@ -1,0 +1,145 @@
+// ML locator runtime tests (0.1.0-build.87). White-box: includes the core
+// translation unit.
+//   - the CKML parser accepts a valid model and rejects every truncation,
+//     header corruption and random file (a model can arrive as a data asset);
+//   - ML proposals never let a wrong payload through: a model that proposes
+//     garbage everywhere still yields only the true payload or no read;
+//   - with no model, the ML option changes nothing;
+//   - the gate skips the border search only when a model is loaded and sees
+//     nothing, and ML-only (no gate) still falls back to the border search.
+#include "../src/ckey.cpp"
+#include "check.h"
+#include "svg_raster.h"
+
+#include <cstdio>
+
+namespace {
+
+struct Blob {
+    std::vector<uint8_t> b;
+    void u32(uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i))); }
+    void f32(float f) { uint32_t v; std::memcpy(&v, &f, 4); u32(v); }
+};
+
+// A tiny valid model with the 24-channel detection head: 64x64 input, stride 4.
+//   b1 = conv3x3 s2 (1->8, relu)           32x32
+//   b2 = depthwise3x3 s2 (8, relu)          16x16
+//   b3 = up2add(b2, b1)                     32x32
+//   b4 = add(b3, b1)                        32x32
+//   b5 = conv1x1 s2 (8->24)                 16x16  (bias sets the heatmaps)
+std::vector<uint8_t> tiny_model(float centre_bias) {
+    Blob m; m.b = {'C', 'K', 'M', 'L'};
+    m.u32(2); m.u32(6); m.u32(5); m.u32(64); m.u32(4); m.u32(24);
+    auto conv = [&](uint32_t src, uint32_t dst, uint32_t cin, uint32_t cout, uint32_t k, uint32_t s, uint32_t g, uint32_t relu, float w, std::vector<float> bias) {
+        m.u32(1); for (uint32_t v : {src, dst, cin, cout, k, s, g, relu}) m.u32(v);
+        const size_t n = static_cast<size_t>(cout) * (cin / g) * k * k;
+        for (size_t i = 0; i < n; ++i) m.b.push_back(static_cast<uint8_t>(static_cast<int8_t>((i * 37) % 255 - 127)));
+        for (uint32_t o = 0; o < cout; ++o) m.f32(w);
+        for (uint32_t o = 0; o < cout; ++o) m.f32(o < bias.size() ? bias[o] : 0.0f);
+    };
+    conv(0, 1, 1, 8, 3, 2, 1, 1, 0.01f, {});
+    conv(1, 2, 8, 8, 3, 2, 8, 1, 0.01f, {});
+    m.u32(3); m.u32(2); m.u32(1); m.u32(3);
+    m.u32(2); m.u32(3); m.u32(1); m.u32(4);
+    std::vector<float> bias(24, 0.0f); bias[0] = centre_bias; for (int k = 1; k < 5; ++k) bias[k] = centre_bias;
+    conv(4, 5, 8, 24, 1, 2, 1, 0, 0.0001f, bias);
+    return m.b;
+}
+
+std::string render(const ckey_scalable_symbol &s) {
+    size_t n = 0; CKEY_CHECK(ckey_render_scalable_svg(&s, 8, nullptr, 0, &n) == CKEY_INSUFFICIENT_BUFFER);
+    std::string svg(n, '\0'); CKEY_CHECK(ckey_render_scalable_svg(&s, 8, svg.data(), n, &n) == CKEY_OK);
+    svg.resize(n - 1); return svg;
+}
+
+}  // namespace
+
+int main() {
+    // ---- Parser: valid model, truncations, corruptions, random files ----
+    const std::vector<uint8_t> good = tiny_model(-8.0f);
+    std::string err;
+    CKEY_CHECK(ml_parse(good.data(), good.size(), err) != nullptr);
+    for (size_t n = 0; n < good.size(); ++n) CKEY_CHECK(ml_parse(good.data(), n, err) == nullptr);
+    {
+        std::vector<uint8_t> longer = good; longer.push_back(0);
+        CKEY_CHECK(ml_parse(longer.data(), longer.size(), err) == nullptr);
+    }
+    // Every single-byte change in the header and op descriptors either is
+    // rejected or still describes a consistent graph; parsing never crashes.
+    for (size_t i = 0; i < 64 && i < good.size(); ++i) for (int bit = 0; bit < 8; ++bit) {
+        std::vector<uint8_t> c = good; c[i] ^= static_cast<uint8_t>(1u << bit);
+        auto m = ml_parse(c.data(), c.size(), err);
+        if (m) { std::vector<float> in(static_cast<size_t>(m->side) * m->side, 0.0f); (void)ml_forward(*m, in); }
+    }
+    {
+        uint32_t s = 12345;
+        for (int it = 0; it < 2000; ++it) {
+            std::vector<uint8_t> r(32 + it % 400);
+            for (auto &x : r) { s = s * 1664525u + 1013904223u; x = static_cast<uint8_t>(s >> 24); }
+            if (it % 2) std::memcpy(r.data(), "CKML", 4);
+            CKEY_CHECK(ml_parse(r.data(), r.size(), err) == nullptr);
+        }
+    }
+    CKEY_CHECK(ckey_ml_load_model(good.data(), good.size() - 1) == CKEY_INVALID_ARGUMENT);
+
+    // ---- A symbol in a frame ----
+    const char *text = "https://openckey.org/ml";
+    ckey_scalable_symbol s{}; ckey_diagnostics d{};
+    CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(text), std::strlen(text), 4, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &s, &d) == CKEY_OK);
+    const int side = 300, W = 480, H = 400, ox = 90, oy = 50;
+    const std::vector<uint8_t> sym = svgtest::rasterize(svgtest::parse(render(s)), side, side, 3);
+    std::vector<uint8_t> frame(static_cast<size_t>(W) * H, 120);
+    for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) frame[static_cast<size_t>(y + oy) * W + x + ox] = sym[static_cast<size_t>(y) * side + x];
+    std::vector<uint8_t> out(4096);
+    auto scan = [&](uint32_t flags, ckey_scan_result &r) {
+        ckey_scan_options o; ckey_scan_options_init(&o); o.flags = flags; r = ckey_scan_result{};
+        return ckey_scan_frame_gray8(frame.data(), W, H, W, &o, out.data(), out.size(), &r);
+    };
+    auto is_text = [&](const ckey_scan_result &r) { return r.payload_length == std::strlen(text) && std::memcmp(out.data(), text, r.payload_length) == 0; };
+
+    // ---- No model: the ML option changes nothing ----
+    CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+    ckey_scan_result classical{}, with_ml{};
+    CKEY_CHECK(scan(0, classical) == CKEY_OK && is_text(classical));
+#if !defined(CKEY_ML_BUILTIN)
+    CKEY_CHECK(ckey_ml_model_id() == 0);
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) == CKEY_OK && is_text(with_ml));
+    CKEY_CHECK(!(with_ml.flags & CKEY_SCAN_FLAG_ML));
+    ckey_ml_detection none[4];
+    CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W, 0.1, none, 4) == 0);
+#endif
+
+    // ---- A model that proposes garbage everywhere: no wrong payload, and the
+    //      border search still reads the symbol ----
+    const std::vector<uint8_t> noisy = tiny_model(8.0f);
+    CKEY_CHECK(ckey_ml_load_model(noisy.data(), noisy.size()) == CKEY_OK);
+    CKEY_CHECK(ckey_ml_model_id() != 0);
+    ckey_ml_detection det[8];
+    const size_t n = ckey_ml_locate_gray8(frame.data(), W, H, W, 0.3, det, 8);
+    CKEY_CHECK(n >= 1 && n <= 8);
+    for (size_t i = 0; i < n; ++i) for (double v : det[i].quad) CKEY_CHECK(std::isfinite(v));
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML, with_ml) == CKEY_OK && is_text(with_ml));
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) == CKEY_OK && is_text(with_ml));
+    // Blank frames with the noisy model: proposals, but never a payload.
+    {
+        std::vector<uint8_t> blank(static_cast<size_t>(W) * H);
+        uint32_t r = 99; for (auto &x : blank) { r = r * 1664525u + 1013904223u; x = static_cast<uint8_t>(100 + (r >> 26)); }
+        ckey_scan_options o; ckey_scan_options_init(&o); o.flags = CKEY_SCAN_OPTION_ML; ckey_scan_result res{};
+        CKEY_CHECK(ckey_scan_frame_gray8(blank.data(), W, H, W, &o, out.data(), out.size(), &res) != CKEY_OK);
+    }
+
+    // ---- A model that sees nothing: the gate skips the search, ML alone falls back ----
+    CKEY_CHECK(ckey_ml_load_model(good.data(), good.size()) == CKEY_OK);
+    CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W, 0.1, det, 8) == 0);
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML, with_ml) == CKEY_OK && is_text(with_ml));
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) != CKEY_OK);
+    CKEY_CHECK(std::strstr(with_ml.message, "ML locator") != nullptr);
+
+    // ---- Invalid arguments ----
+    CKEY_CHECK(ckey_ml_locate_gray8(nullptr, W, H, W, 0.3, det, 8) == 0);
+    CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W - 1, 0.3, det, 8) == 0);
+    CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W, std::nan(""), det, 8) == 0);
+    CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+    std::puts("ml tests passed");
+    return 0;
+}

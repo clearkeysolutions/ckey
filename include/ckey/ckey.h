@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.86"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.87"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -226,11 +226,15 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
 /* Result flags. */
 #define CKEY_SCAN_FLAG_SYMBOL_CUT 1u   /* a symbol-like border runs off the frame or region: back off */
 #define CKEY_SCAN_FLAG_BUDGET 2u       /* the scan stopped at its work budget */
+#define CKEY_SCAN_FLAG_ML 4u           /* the decoded candidate came from the ML locator */
+/* Options flags (ckey_scan_options.flags). */
+#define CKEY_SCAN_OPTION_ML 1u         /* try ML locator proposals before the border search */
+#define CKEY_SCAN_OPTION_ML_GATE 2u    /* with ML: skip the border search when the locator sees no symbol */
 typedef struct ckey_scan_options {
     uint32_t abi_version;      /* CKEY_ABI_VERSION */
     uint32_t profiles;         /* CKEY_SCAN_PROFILE_* mask; 0 = all */
     uint32_t max_candidates;   /* border candidates to try; 0 = 6 */
-    uint32_t reserved;
+    uint32_t flags;            /* CKEY_SCAN_OPTION_* (was reserved; 0 = classical only) */
     double roi_x, roi_y, roi_width, roi_height;  /* pixels; zero width or height = whole frame */
     double k1;                 /* radial distortion; 0 = none */
     double focal_px;           /* focal length in pixels for k1; 0 = the longer frame side */
@@ -253,6 +257,32 @@ typedef struct ckey_scan_result {
     char message[96];
 } ckey_scan_result;
 CKEY_API void ckey_scan_options_init(ckey_scan_options *options);
+/*
+ * ML locator (optional). A small convolutional network proposes symbols in a
+ * whole frame: four field corners in symbol corner order, a presence score, a
+ * readability estimate (the probability the decoder reads the symbol from its
+ * true corners), the version and the layout. Proposals are only proposals:
+ * ckey_scan_frame_gray8 refines each one and decodes it, and a payload is
+ * accepted only after Reed-Solomon and CRC-32C, exactly as for a classical
+ * candidate. No model is active until one is built in (CKEY_ML_BUILTIN) or
+ * loaded; without one, ckey_ml_locate_gray8 returns 0 and scanning is
+ * unchanged.
+ * ckey_ml_load_model parses and validates a CKML model (it may come as a data
+ * asset, so it is checked completely before use) and makes it the process's
+ * model; NULL restores the built-in one. ckey_ml_model_id returns a 64-bit
+ * identifier of the active model (0 when none).
+ */
+typedef struct ckey_ml_detection {
+    double quad[8];      /* field corners, full-frame pixels, symbol corner order */
+    double score;        /* presence, 0..1 */
+    double quality;      /* estimated probability of a read from these corners, 0..1 */
+    double version;      /* estimated Profile 0 version (continuous) */
+    double print_layout; /* probability of the print layout, 0..1 */
+} ckey_ml_detection;
+CKEY_API size_t ckey_ml_locate_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                     double min_score, ckey_ml_detection *out, size_t max_out);
+CKEY_API ckey_status ckey_ml_load_model(const uint8_t *data, size_t length);
+CKEY_API uint64_t ckey_ml_model_id(void);
 CKEY_API ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                                             const ckey_scan_options *options,
                                             uint8_t *out_payload, size_t out_capacity,

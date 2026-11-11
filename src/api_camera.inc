@@ -1,6 +1,8 @@
 // Public C ABI: one-call frame scan, tracking and camera advice. Included
 // after api_scan.inc (scan library and the amalgamation).
 
+#include "ml_locator.inc"
+
 namespace {
 
 // Corner order of `quad` (cyclic, either winding) closest to `previous`.
@@ -51,22 +53,26 @@ struct FrameScan {
 
 // The reference reader loop on one image: border candidates, then for each
 // one Profile 0, 1, 2, 3, each refined against its own keys.
+// ML proposals are thresholds on the locator's presence score: proposals at or
+// above kMlPropose are tried first; with the gate option a frame whose best
+// presence is below kMlGate skips the border search.
+constexpr double kMlPropose = 0.30, kMlGate = 0.15;
+constexpr size_t kMlMaxProposals = 3;
+
 void scan_image(const uint8_t *gray, size_t width, size_t height, size_t stride, uint32_t profiles, size_t max_candidates,
-                uint8_t *payload, size_t capacity, FrameScan &r) {
+                uint8_t *payload, size_t capacity, FrameScan &r, uint32_t option_flags = 0) {
     if (width < 16 || height < 16) return;
-    std::vector<double> borders(8 * max_candidates);
-    bool cut = false;
-    const size_t count = find_borders(gray, width, height, stride, borders.data(), max_candidates, &cut);
-    r.candidates = static_cast<uint32_t>(count);
-    if (cut) r.flags |= CKEY_SCAN_FLAG_SYMBOL_CUT;
     std::vector<uint8_t> out(65535);
-    for (size_t i = 0; i < count; ++i) {
-        const double *border = borders.data() + 8 * i;
+    // One candidate border (or proposal) through refine + decode for each requested profile.
+    const auto try_border = [&](const double *border, uint32_t only_profiles, bool from_ml) -> bool {
         for (int field = 0; field < 4; ++field) {
-            if (!(profiles & (1u << field))) continue;
+            if (!(profiles & only_profiles & (1u << field))) continue;
             double quad[8];
-            const double score = ckey_refine_quad_gray8(gray, width, height, stride, border, static_cast<ckey_field>(field), quad);
-            if (score < 0) continue;
+            double score = ckey_refine_quad_gray8(gray, width, height, stride, border, static_cast<ckey_field>(field), quad);
+            if (score < 0) {
+                if (!from_ml) continue;
+                std::copy(border, border + 8, quad); score = 0;   // decode from the proposal itself
+            }
             if (field == CKEY_FIELD_SCALABLE && score > r.score) { r.located = true; r.score = score; std::copy(quad, quad + 8, r.quad); }
             size_t length = 0; uint32_t version = 0, layout = 0; ckey_diagnostics d{}; ckey_status st;
             if (field == CKEY_FIELD_SCALABLE) st = ckey_decode_scalable_gray8(gray, width, height, stride, quad, out.data(), out.size(), &length, &version, &layout, &d);
@@ -76,14 +82,38 @@ void scan_image(const uint8_t *gray, size_t width, size_t height, size_t stride,
             if (st != CKEY_OK) continue;
             r.profile = field; r.version = version; r.layout = layout; r.corrected = d.corrected_symbols; r.erasures = d.erasures_used;
             r.located = true; r.score = score; std::copy(quad, quad + 8, r.quad); r.length = length;
+            if (from_ml) r.flags |= CKEY_SCAN_FLAG_ML;
             std::snprintf(r.message, sizeof(r.message), "%s", d.message);
             if (field == CKEY_FIELD_SCALABLE) canonical_scalable_order(gray, width, height, stride, r.quad);
-            if (length > capacity) { r.status = CKEY_INSUFFICIENT_BUFFER; return; }
+            if (length > capacity) { r.status = CKEY_INSUFFICIENT_BUFFER; return true; }
             if (length) std::memcpy(payload, out.data(), length);
             r.status = CKEY_OK;
+            return true;
+        }
+        return false;
+    };
+    if (option_flags & CKEY_SCAN_OPTION_ML) {
+        MlDetection det[kMlMaxProposals];
+        const size_t n = ml_locate(gray, width, height, stride, std::min(kMlPropose, kMlGate), det, kMlMaxProposals);
+        double best = 0;
+        for (size_t i = 0; i < n; ++i) {
+            best = std::max(best, det[i].score);
+            if (det[i].score < kMlPropose) continue;
+            // The locator knows Profile 0 only; other profiles keep the border search.
+            if (try_border(det[i].quad, CKEY_SCAN_PROFILE_SCALABLE, true)) return;
+        }
+        const bool model = ml_current() != nullptr;
+        if (model && (option_flags & CKEY_SCAN_OPTION_ML_GATE) && best < kMlGate) {
+            std::snprintf(r.message, sizeof(r.message), "%s", "ML locator: no symbol");
             return;
         }
     }
+    std::vector<double> borders(8 * max_candidates);
+    bool cut = false;
+    const size_t count = find_borders(gray, width, height, stride, borders.data(), max_candidates, &cut);
+    r.candidates = static_cast<uint32_t>(count);
+    if (cut) r.flags |= CKEY_SCAN_FLAG_SYMBOL_CUT;
+    for (size_t i = 0; i < count; ++i) if (try_border(borders.data() + 8 * i, CKEY_SCAN_PROFILE_ALL, false)) return;
 }
 
 // Brown radial model on focal-normalised coordinates: distorted = undistorted
@@ -194,11 +224,11 @@ ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t heig
         const bool centred = o.center_x == 0 && o.center_y == 0;
         const Undistorted u = undistort_region(gray, width, height, stride, rx, ry, rw, rh, o.k1, f,
                                                centred ? 0.5 * static_cast<double>(width) : o.center_x, centred ? 0.5 * static_cast<double>(height) : o.center_y);
-        scan_image(u.px.data(), u.w, u.h, u.w, profiles, tries, out_payload, out_capacity, scan);
+        scan_image(u.px.data(), u.w, u.h, u.w, profiles, tries, out_payload, out_capacity, scan, o.flags);
         for (int i = 0; i < 4; ++i) { double fx, fy; u.to_frame(scan.quad[2 * i], scan.quad[2 * i + 1], fx, fy); scan.quad[2 * i] = fx; scan.quad[2 * i + 1] = fy; }
     } else {
         const size_t x0 = static_cast<size_t>(rx), y0 = static_cast<size_t>(ry);
-        scan_image(gray + y0 * stride + x0, static_cast<size_t>(rw), static_cast<size_t>(rh), stride, profiles, tries, out_payload, out_capacity, scan);
+        scan_image(gray + y0 * stride + x0, static_cast<size_t>(rw), static_cast<size_t>(rh), stride, profiles, tries, out_payload, out_capacity, scan, o.flags);
         for (int i = 0; i < 4; ++i) { scan.quad[2 * i] += rx; scan.quad[2 * i + 1] += ry; }
     }
     result->status = scan.status; result->profile = static_cast<uint32_t>(scan.profile); result->version = scan.version; result->layout = scan.layout;
@@ -206,8 +236,34 @@ ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t heig
     result->located = scan.located ? 1u : 0u; result->payload_length = scan.status == CKEY_OK || scan.status == CKEY_INSUFFICIENT_BUFFER ? scan.length : 0;
     if (scan.located) std::copy(scan.quad, scan.quad + 8, result->quad);
     result->score = scan.score;
-    std::snprintf(result->message, sizeof(result->message), "%s", scan.status == CKEY_OK ? scan.message : scan.candidates ? "no candidate decoded" : "no symbol border found");
+    std::snprintf(result->message, sizeof(result->message), "%s", scan.status == CKEY_OK ? scan.message : scan.message[0] ? scan.message : scan.candidates ? "no candidate decoded" : "no symbol border found");
     return scan.status;
+}
+
+size_t ckey_ml_locate_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, double min_score, ckey_ml_detection *out, size_t max_out) {
+    if (!gray || !out || !max_out || width < 16 || height < 16 || stride < width || height > std::numeric_limits<size_t>::max() / stride || !std::isfinite(min_score)) return 0;
+    std::vector<MlDetection> det(std::min<size_t>(max_out, 16));
+    const size_t n = ml_locate(gray, width, height, stride, std::clamp(min_score, 0.0, 1.0), det.data(), det.size());
+    for (size_t i = 0; i < n; ++i) {
+        std::copy(det[i].quad, det[i].quad + 8, out[i].quad);
+        out[i].score = det[i].score; out[i].quality = det[i].quality; out[i].version = det[i].version; out[i].print_layout = det[i].print;
+    }
+    return n;
+}
+
+ckey_status ckey_ml_load_model(const uint8_t *data, size_t length) {
+    if (!data) { std::lock_guard<std::mutex> lock(g_ml_mutex); g_ml_model.reset(); g_ml_builtin_tried = false; return CKEY_OK; }
+    std::string err;
+    auto m = ml_parse(data, length, err);
+    if (!m) return CKEY_INVALID_ARGUMENT;
+    std::lock_guard<std::mutex> lock(g_ml_mutex);
+    g_ml_model = std::move(m); g_ml_builtin_tried = true;
+    return CKEY_OK;
+}
+
+uint64_t ckey_ml_model_id(void) {
+    const auto m = ml_current();
+    return m ? m->id : 0;
 }
 
 void ckey_match_corner_order(const double previous_xy[8], double quad_xy[8]) {

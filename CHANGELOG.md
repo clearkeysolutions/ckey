@@ -10,6 +10,18 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.87 — 2026-11-11
+
+The ML locator runtime: the first part of on-device ML assistance for scanning. It proposes where symbols are; the deterministic reader still decides what they say. **No trained model is built in yet**, so with this build alone scanning is unchanged. The model is trained with the key-test pipeline (`ml/run_locator.sh` in `clearkeysolutions/key-test`) and will be embedded once its evaluation on identical frames shows it helps.
+
+**Reader (core)**
+
+* **ML locator** (`src/ml_locator.inc`): a portable, dependency-free inference engine for small convolutional networks (convolution, depthwise convolution, ReLU, add, nearest upsample-add), with a detection decoder. From a whole frame shrunk to 256 × 256 it proposes each symbol's four field corners in symbol corner order, a presence score, the probability that the symbol reads from those corners, the version and the layout. Its output matches PyTorch to within 1e-6 on the same input. One frame takes about 35 ms on a busy 4-core x86 container (0.41M weights, about 195M multiply-adds); on iPhone the same weights are meant to run through Core ML.
+* **Model files** (CKML version 2): int8 weights with a per-channel scale, and a graph description, so a larger network needs no new runtime code. A model can arrive as a data asset, so `ckey_ml_load_model` validates it completely before use: every size, buffer index, channel count and shape, the output head, and no trailing bytes. Every truncation of a valid model, header bit flips and 2,000 random files are tested, under AddressSanitizer and UBSan too.
+* **Scan integration:** `ckey_scan_options.flags` (formerly `reserved`, same size) takes `CKEY_SCAN_OPTION_ML`, which tries the locator's Profile 0 proposals (refined, then decoded) before the border search, and `CKEY_SCAN_OPTION_ML_GATE`, which skips the border search when a loaded model sees no symbol. That is the expensive part on frames that do not decode. `CKEY_SCAN_FLAG_ML` marks a read that came from an ML proposal. Proposals are only candidates: a payload is accepted only after Reed–Solomon and CRC-32C, exactly as before.
+* **New calls:** `ckey_ml_locate_gray8`, `ckey_ml_load_model`, `ckey_ml_model_id`, struct `ckey_ml_detection`. Additive: the C ABI stays 4.
+* New test suite `ckey_ml_locator`: parser rejection; a model that proposes garbage everywhere never yields a wrong payload and the border search still reads; with no model the ML option changes nothing; the gate.
+
 ## 0.1.0-build.86 — 2026-11-10
 
 The repair pass for the CKTEST-RH-001 hardening campaign. It implements `Pretest-observations-for-repair.md` (now deleted; what remains open is listed in `CONTEXT.md`). The source tree is back on `scratch`, restored from `Stable-Release` at `ede38f5`.
