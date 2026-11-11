@@ -3,6 +3,7 @@
 
   python3 tools/embed_ml_model.py sites   MODEL.ckml CARD.json   -> src/ml_builtin_sites.inc
   python3 tools/embed_ml_model.py locator MODEL.ckml CARD.json   -> src/ml_builtin_locator.inc
+  python3 tools/embed_ml_model.py refiner MODEL.ckml CARD.json   -> src/ml_builtin_refiner.inc
   python3 tools/embed_ml_model.py --check                        (CI: each file's bytes match its recorded SHA-256)
 
 Models are trained and evaluated in clearkeysolutions/key-test (ml/run_sites.sh,
@@ -13,7 +14,8 @@ import hashlib, json, re, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = {"sites": ("ml_builtin_sites.inc", "kMlBuiltinSites"), "locator": ("ml_builtin_locator.inc", "kMlBuiltinLocator")}
+NAMES = {"sites": ("ml_builtin_sites.inc", "kMlBuiltinSites"), "locator": ("ml_builtin_locator.inc", "kMlBuiltinLocator"),
+         "refiner": ("ml_builtin_refiner.inc", "kMlBuiltinRefiner")}
 
 
 def write(kind, model, card):

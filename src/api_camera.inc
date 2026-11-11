@@ -98,6 +98,10 @@ void scan_image(const uint8_t *gray, size_t width, size_t height, size_t stride,
             best = std::max(best, det[i].score);
             if (det[i].score < kMlPropose) continue;
             // The locator knows Profile 0 only; other profiles keep the border search.
+            // Its density estimate is the version hint unless the caller gave one.
+            // (a density estimate: a wider window than a caller's exact hint).
+            const bool caller = version_hint().version != 0;
+            const VersionHintScope hint(caller ? version_hint().version : static_cast<int>(std::lround(det[i].version)), caller ? version_hint().window : 2);
             if (try_border(det[i].quad, CKEY_SCAN_PROFILE_SCALABLE, true)) return;
         }
         const bool model = ml_current() != nullptr;
@@ -268,6 +272,7 @@ ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t heig
         rw = std::clamp(std::ceil(o.roi_width), 16.0, static_cast<double>(width) - rx); rh = std::clamp(std::ceil(o.roi_height), 16.0, static_cast<double>(height) - ry);
     }
     FrameScan scan;
+    const VersionHintScope caller_hint(static_cast<int>(CKEY_SCAN_VERSION_HINT_OF(o.flags)));
     if (o.k1 != 0.0 && std::abs(o.k1) <= 1.0) {
         const double f = o.focal_px > 0 ? o.focal_px : static_cast<double>(std::max(width, height));
         const bool centred = o.center_x == 0 && o.center_y == 0;
@@ -301,14 +306,19 @@ size_t ckey_ml_locate_gray8(const uint8_t *gray, size_t width, size_t height, si
 }
 
 ckey_status ckey_ml_load_model(const uint8_t *data, size_t length) {
-    if (!data) { std::lock_guard<std::mutex> lock(g_ml_mutex); g_ml_model.reset(); g_ml_sites.reset(); g_ml_builtin_tried = false; return CKEY_OK; }
+    if (!data) { std::lock_guard<std::mutex> lock(g_ml_mutex); g_ml_model.reset(); g_ml_sites.reset(); g_ml_refiner.reset(); g_ml_builtin_tried = false; return CKEY_OK; }
     std::string err;
     auto m = ml_parse(data, length, err);
     if (!m) return CKEY_INVALID_ARGUMENT;
     std::lock_guard<std::mutex> lock(g_ml_mutex);
     ml_load_builtin_locked();   // a loaded model replaces only the built-in of its own kind
-    if (m->kind == kMlSites) g_ml_sites = std::move(m); else g_ml_model = std::move(m);
+    if (m->kind == kMlSites) g_ml_sites = std::move(m); else if (m->kind == kMlRefiner) g_ml_refiner = std::move(m); else g_ml_model = std::move(m);
     return CKEY_OK;
+}
+
+void ckey_ml_clear_models(void) {
+    std::lock_guard<std::mutex> lock(g_ml_mutex);
+    g_ml_model.reset(); g_ml_sites.reset(); g_ml_refiner.reset(); g_ml_builtin_tried = true;
 }
 
 uint64_t ckey_ml_model_id(void) {
@@ -316,9 +326,29 @@ uint64_t ckey_ml_model_id(void) {
     return m ? m->id : 0;
 }
 
+uint64_t ckey_ml_refiner_model_id(void) {
+    const auto m = ml_refiner_current();
+    return m ? m->id : 0;
+}
+
 uint64_t ckey_ml_site_model_id(void) {
     const auto m = ml_sites_current();
     return m ? m->id : 0;
+}
+
+ckey_status ckey_ml_rectify_region_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
+                                         double x0, double y0, double extent, uint32_t side, uint8_t *out, size_t out_capacity) {
+    if (!gray || !quad_xy || width < 16 || height < 16 || stride < width || height > std::numeric_limits<size_t>::max() / stride ||
+        side < 16 || side > 1024 || !std::isfinite(x0) || !std::isfinite(y0) || !(extent > 0 && extent < 200)) return CKEY_INVALID_ARGUMENT;
+    for (int i = 0; i < 8; ++i) if (!std::isfinite(quad_xy[i])) return CKEY_INVALID_ARGUMENT;
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad_xy, h)) return CKEY_INVALID_ARGUMENT;
+    if (!out || out_capacity < static_cast<size_t>(side) * side) return CKEY_INSUFFICIENT_BUFFER;
+    const WorkScope work(kFindWorkBudget);
+    std::vector<uint8_t> px;
+    if (!ml_rectify_region(gray, width, height, stride, h, x0, y0, extent, side, px)) return CKEY_UNCORRECTABLE;
+    std::memcpy(out, px.data(), px.size());
+    return CKEY_OK;
 }
 
 ckey_status ckey_ml_rectify_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8], uint32_t version,

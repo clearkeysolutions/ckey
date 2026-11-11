@@ -95,34 +95,48 @@ bool ml_known_at(const MlRectified &r, double x, double y) {
     return r.known[static_cast<size_t>(j) * r.side + static_cast<size_t>(i)] != 0;
 }
 
-// Site logits for layout L through homography h: positive = printed.
+// Site logits for layout L through homography h: positive = printed. With a
+// two-channel model, `doubt` receives the logit that the reading of the site
+// is wrong (trained on the model's own mistakes: occluders, glare, damage).
 // Unknown sites (outside the image) get NaN. Empty when no site model is
 // loaded or the field cannot be rectified.
-std::vector<float> ml_site_logits(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
+std::vector<float> ml_site_logits(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8],
+                                  std::vector<float> *doubt = nullptr) {
     const auto model = ml_sites_current();
     if (!model || model->kind != kMlSites) return {};
     MlRectified r;
     if (!ml_rectify(gray, width, height, stride, h, L.pitch, kMlSitesPerModule, model->align, r)) return {};
     const std::vector<float> map = ml_forward(*model, ml_sites_input(r), r.side, r.side);
     const uint32_t out_side = r.side / model->stride;
-    if (map.size() != static_cast<size_t>(out_side) * out_side) return {};
+    const size_t plane = static_cast<size_t>(out_side) * out_side;
+    if (map.size() != plane * model->channels) return {};
     const double out_spacing = r.spacing * model->stride;
+    const std::vector<float> ink(map.begin(), map.begin() + static_cast<std::ptrdiff_t>(plane));
+    std::vector<float> err;
+    if (model->channels == 2) err.assign(map.begin() + static_cast<std::ptrdiff_t>(plane), map.end());
     std::vector<float> logits(L.nodes.size());
+    if (doubt) doubt->assign(L.nodes.size(), -20.0f);
     for (size_t i = 0; i < L.nodes.size(); ++i) {
         double x, y; ml_site_xy(L, i, x, y);
-        logits[i] = ml_known_at(r, x, y) ? ml_map_at(map, out_side, out_spacing, x, y) : std::numeric_limits<float>::quiet_NaN();
+        const bool known = ml_known_at(r, x, y);
+        logits[i] = known ? ml_map_at(ink, out_side, out_spacing, x, y) : std::numeric_limits<float>::quiet_NaN();
+        if (doubt && known && !err.empty()) (*doubt)[i] = ml_map_at(err, out_side, out_spacing, x, y);
     }
     return logits;
 }
 
 // SiteRead from logits (the reader's confidence is in noise deviations; a
-// logit's magnitude plays that role here).
-void ml_site_read(const std::vector<float> &logits, SiteRead &out) {
+// logit's magnitude plays that role here). A doubt logit scales the
+// confidence by the probability that the reading is right, so the soft
+// decoder erases the bytes the model itself distrusts first.
+void ml_site_read(const std::vector<float> &logits, SiteRead &out, const std::vector<float> *doubt = nullptr) {
     out.printed.assign(logits.size(), 0); out.confidence.assign(logits.size(), 0.0f); out.unknown = 0;
     for (size_t i = 0; i < logits.size(); ++i) {
         if (!std::isfinite(logits[i])) { ++out.unknown; continue; }
         out.printed[i] = logits[i] > 0 ? 1 : 0;
-        out.confidence[i] = std::min(6.0f, std::abs(logits[i]));
+        float c = std::min(6.0f, std::abs(logits[i]));
+        if (doubt && i < doubt->size()) c *= 1.0f - ml_sigmoid((*doubt)[i]);
+        out.confidence[i] = c;
     }
 }
 
@@ -150,6 +164,84 @@ void capture_evidence(const ScalableLayout &L, const SiteRead &read, int header_
     std::copy(h, h + 8, c.h);
     constexpr double corners[8] = {0, 0, 29, 0, 29, 29, 0, 29};
     for (int k = 0; k < 4; ++k) { ImagePoint p{}; if (map_point(h, corners[2 * k], corners[2 * k + 1], p)) { c.quad[2 * k] = p.x; c.quad[2 * k + 1] = p.y; } }
+}
+
+// ---- version hint --------------------------------------------------------------------
+// A Profile 0 version hint (from the caller, or from the ML locator's density
+// estimate): versions within one of it pass their key fit at a lower gate and
+// are tried first. On noisy frames the keys can miss the true version; the
+// hint keeps it among the attempts. Only the order and the candidates change:
+// Reed-Solomon and CRC-32C still decide.
+struct VersionHint { int version = 0, window = 1; };
+inline VersionHint &version_hint() { static thread_local VersionHint h; return h; }
+struct VersionHintScope {
+    VersionHint saved;
+    explicit VersionHintScope(int version, int window = 1) : saved(version_hint()) {
+        if (version >= 1 && version <= kScalableVersions) { version_hint().version = version; version_hint().window = window; }
+    }
+    ~VersionHintScope() { version_hint() = saved; }
+    VersionHintScope(const VersionHintScope &) = delete; VersionHintScope &operator=(const VersionHintScope &) = delete;
+};
+constexpr double kHintedKeyGate = 0.6, kHintBoost = 1.5;
+
+// ---- corner refiner ----------------------------------------------------------------
+// The square canonical region [x0, x0 + extent]^2 through h, side x side,
+// bilinear, unknown pixels at the mean; then standardised (the refiner's input).
+constexpr double kRefineX0 = -3.0, kRefineExtent = 35.0;   // the field plus 3 units of margin
+bool ml_rectify_region(const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8], double x0, double y0, double extent,
+                       uint32_t side, std::vector<uint8_t> &px) {
+    px.assign(static_cast<size_t>(side) * side, 0);
+    std::vector<uint8_t> known(px.size(), 0);
+    const double step = extent / side; double sum = 0; size_t count = 0;
+    for (uint32_t j = 0; j < side; ++j) for (uint32_t i = 0; i < side; ++i) {
+        const double v = gray_sample(gray, width, height, stride, h, x0 + (i + 0.5) * step, y0 + (j + 0.5) * step, step / 3.0);
+        if (v < 0) { if (work_exhausted()) return false; continue; }
+        const size_t k = static_cast<size_t>(j) * side + i;
+        px[k] = static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L)); known[k] = 1; sum += v; ++count;
+    }
+    if (count * 4 < px.size()) return false;
+    const uint8_t mean = static_cast<uint8_t>(std::lround(sum / count));
+    for (size_t k = 0; k < px.size(); ++k) if (!known[k]) px[k] = mean;
+    return true;
+}
+
+std::vector<float> ml_standardise(const std::vector<uint8_t> &px) {
+    std::vector<float> x(px.size());
+    double mean = 0; for (uint8_t v : px) mean += v; mean /= static_cast<double>(px.size());
+    double var = 0; for (uint8_t v : px) var += (v - mean) * (v - mean); var /= static_cast<double>(px.size());
+    const double sd = std::max(4.0, std::sqrt(var));
+    for (size_t k = 0; k < x.size(); ++k) x[k] = static_cast<float>((px[k] - mean) / sd);
+    return x;
+}
+
+// Corner corrections from the refiner: the symbol rectified through the
+// quad's homography (canonical corner i at the quad's corner i), the model's
+// 8 outputs are each canonical corner's offset in canonical units. Applied
+// twice. False when no refiner is loaded or the region cannot be sampled.
+constexpr double kRefineMaxStep = 3.0;   // canonical units per round
+bool ml_refine_quad(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double out[8]) {
+    const auto model = ml_refiner_current();
+    if (!model || model->kind != kMlRefiner) return false;
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double q[8]; std::copy(quad, quad + 8, q);
+    for (int round = 0; round < 2; ++round) {
+        double h[8]; if (!solve_homography(canonical, q, h)) return false;
+        std::vector<uint8_t> px;
+        if (!ml_rectify_region(gray, width, height, stride, h, kRefineX0, kRefineX0, kRefineExtent, model->side, px)) return false;
+        const std::vector<float> d = ml_forward(*model, ml_standardise(px), model->side, model->side);
+        if (d.size() != 8) return false;
+        double next[8];
+        for (int k = 0; k < 4; ++k) {
+            const double dx = std::clamp(static_cast<double>(d[2 * k]), -kRefineMaxStep, kRefineMaxStep);
+            const double dy = std::clamp(static_cast<double>(d[2 * k + 1]), -kRefineMaxStep, kRefineMaxStep);
+            ImagePoint p{}; if (!map_point(h, canonical[2 * k] + dx, canonical[2 * k + 1] + dy, p)) return false;
+            next[2 * k] = p.x; next[2 * k + 1] = p.y;
+        }
+        if (!valid_quad(next)) return false;
+        std::copy(next, next + 8, q);
+    }
+    std::copy(q, q + 8, out);
+    return true;
 }
 
 }  // namespace

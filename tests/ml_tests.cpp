@@ -49,6 +49,25 @@ std::vector<uint8_t> tiny_model(float centre_bias) {
     return m.b;
 }
 
+
+// A tiny valid corner refiner: 32 x 32 input, five stride-2 convolutions to 1 x 1,
+// then 8 outputs whose bias is `shift` (canonical units moved per round).
+std::vector<uint8_t> tiny_refiner(float shift) {
+    Blob m; m.b = {'C', 'K', 'M', 'L'};
+    m.u32(2); m.u32(7); m.u32(6); m.u32(32); m.u32(32); m.u32(8);
+    auto conv = [&](uint32_t src, uint32_t dst, uint32_t cin, uint32_t cout, uint32_t k, uint32_t s, uint32_t g, uint32_t relu, float w, float bias) {
+        m.u32(1); for (uint32_t v : {src, dst, cin, cout, k, s, g, relu}) m.u32(v);
+        const size_t n = static_cast<size_t>(cout) * (cin / g) * k * k;
+        for (size_t i = 0; i < n; ++i) m.b.push_back(static_cast<uint8_t>(static_cast<int8_t>((i * 29) % 255 - 127)));
+        for (uint32_t o = 0; o < cout; ++o) m.f32(w);
+        for (uint32_t o = 0; o < cout; ++o) m.f32(bias);
+    };
+    conv(0, 1, 1, 4, 3, 2, 1, 1, 0.01f, 0);
+    for (uint32_t i = 1; i < 5; ++i) conv(i, i + 1, 4, 4, 3, 2, 4, 1, 0.01f, 0);
+    conv(5, 6, 4, 8, 1, 1, 1, 0, 0.0f, shift);
+    return m.b;
+}
+
 std::string render(const ckey_scalable_symbol &s) {
     size_t n = 0; CKEY_CHECK(ckey_render_scalable_svg(&s, 8, nullptr, 0, &n) == CKEY_INSUFFICIENT_BUFFER);
     std::string svg(n, '\0'); CKEY_CHECK(ckey_render_scalable_svg(&s, 8, svg.data(), n, &n) == CKEY_OK);
@@ -103,6 +122,13 @@ int main() {
 #if defined(CKEY_ML_HAVE_BUILTIN_SITES)
     // ---- The built-in site model loads, and the symbol still reads with it ----
     CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+    CKEY_CHECK(ckey_ml_site_model_id() != 0);
+#endif
+    // ---- Clearing removes every model, built-ins included; NULL restores them ----
+    ckey_ml_clear_models();
+    CKEY_CHECK(ckey_ml_model_id() == 0 && ckey_ml_site_model_id() == 0);
+    CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+#if defined(CKEY_ML_HAVE_BUILTIN_SITES)
     CKEY_CHECK(ckey_ml_site_model_id() != 0);
 #endif
     // ---- No locator: the ML option changes nothing ----
@@ -198,6 +224,42 @@ int main() {
         CKEY_CHECK(ckey_scan_frame_accumulate_gray8(nullptr, FW, FH, FW, &o, acc, out.data(), out.size(), &r) == CKEY_INVALID_ARGUMENT);
         ckey_accumulator_destroy(acc);
         ckey_accumulator_destroy(nullptr);
+    }
+
+
+    // ---- Corner refiner: recognised, used only after a failed decode, never a wrong payload ----
+    {
+        ckey_ml_clear_models();
+        const std::vector<uint8_t> still = tiny_refiner(0.0f), pushy = tiny_refiner(2.5f);
+        std::string e2;
+        auto rm = ml_parse(still.data(), still.size(), e2);
+        CKEY_CHECK(rm && rm->kind == kMlRefiner);
+        for (size_t n2 = 0; n2 < still.size(); ++n2) CKEY_CHECK(ml_parse(still.data(), n2, e2) == nullptr);
+        CKEY_CHECK(ckey_ml_load_model(pushy.data(), pushy.size()) == CKEY_OK && ckey_ml_refiner_model_id() != 0);
+        ckey_scan_result rr{};
+        CKEY_CHECK(scan(0, rr) == CKEY_OK && is_text(rr));          // a decode that works is not touched
+        double q[8]; std::copy(classical.quad, classical.quad + 8, q);
+        double moved[8]; CKEY_CHECK(ml_refine_quad(frame.data(), W, H, W, q, moved));
+        bool differs = false; for (int k = 0; k < 8; ++k) differs = differs || std::abs(moved[k] - q[k]) > 1;
+        CKEY_CHECK(differs);
+        // From far-off corners: either the true payload or nothing.
+        double off[8]; for (int k = 0; k < 8; ++k) off[k] = q[k] + ((k % 3) - 1) * 9.0;
+        size_t len2 = 0; uint32_t v2 = 0, l2 = 0; ckey_diagnostics d2{};
+        if (ckey_decode_scalable_gray8(frame.data(), W, H, W, off, out.data(), out.size(), &len2, &v2, &l2, &d2) == CKEY_OK)
+            CKEY_CHECK(len2 == std::strlen(text) && std::memcmp(out.data(), text, len2) == 0);
+        ckey_ml_clear_models();
+        CKEY_CHECK(ckey_ml_refiner_model_id() == 0);
+    }
+
+    // ---- Version hint: only the order of attempts changes ----
+    {
+        ckey_ml_clear_models();
+        for (uint32_t hint : {4u, 3u, 5u, 20u, 31u}) {
+            ckey_scan_result rh{};
+            CKEY_CHECK(scan(CKEY_SCAN_VERSION_HINT(hint), rh) == CKEY_OK && is_text(rh));
+        }
+        CKEY_CHECK(CKEY_SCAN_VERSION_HINT_OF(CKEY_SCAN_VERSION_HINT(17) | CKEY_SCAN_OPTION_ML) == 17);
+        CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
     }
 
     // ---- Invalid arguments ----

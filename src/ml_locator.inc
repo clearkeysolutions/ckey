@@ -24,7 +24,7 @@ struct MlConv {
 struct MlOp { uint32_t type = 0; uint32_t a = 0, b = 0, dst = 0; size_t conv = 0; };
 struct MlShape { uint32_t c = 0, h = 0, w = 0; };
 
-enum MlKind : uint32_t { kMlLocator = 0, kMlSites = 1 };
+enum MlKind : uint32_t { kMlLocator = 0, kMlSites = 1, kMlRefiner = 2 };
 
 struct MlModel {
     MlKind kind = kMlLocator;
@@ -40,7 +40,10 @@ struct MlModel {
 constexpr uint32_t kMlChannels = 24;  // the locator's detection head
 // Two kinds of model share the format: the locator (fixed input side, stride
 // 4, 24 channels) and the site model (any input size: a rectified symbol field
-// in, one ink logit per output cell; stride 1 or 2, 1 channel).
+// in, one ink logit per output cell and optionally a second channel: the
+// logit that the first is wrong (an erasure hint); stride 1 or 2), and the
+// corner refiner (a rectified symbol in, one cell out with 8 channels: the
+// four corners' corrections in canonical units; stride = side).
 
 uint64_t fnv1a64(const uint8_t *p, size_t n) {
     uint64_t h = 1469598103934665603ull;
@@ -68,7 +71,8 @@ std::shared_ptr<const MlModel> ml_parse(const uint8_t *data, size_t len, std::st
     m->side = r.u32(); m->stride = r.u32(); m->channels = r.u32();
     if (!r.ok || version != 2) { err = "unsupported CKML version"; return nullptr; }
     if (m->stride == 4 && m->channels == kMlChannels) m->kind = kMlLocator;
-    else if ((m->stride == 1 || m->stride == 2) && m->channels == 1) m->kind = kMlSites;
+    else if ((m->stride == 1 || m->stride == 2) && (m->channels == 1 || m->channels == 2)) m->kind = kMlSites;
+    else if (m->channels == 8 && m->stride == m->side && m->side >= 32) m->kind = kMlRefiner;
     else { err = "CKML head not recognised"; return nullptr; }
     if (m->buffers < 2 || m->buffers > 512 || nops < 1 || nops > 1024 || m->side < 32 || m->side > 1024 || m->side % 32) { err = "CKML header out of range"; return nullptr; }
     m->shapes.assign(m->buffers, MlShape{});
@@ -255,6 +259,7 @@ std::vector<float> ml_forward(const MlModel &m, std::vector<float> input, uint32
 std::mutex g_ml_mutex;
 std::shared_ptr<const MlModel> g_ml_model;   // loaded locator, or null
 std::shared_ptr<const MlModel> g_ml_sites;   // loaded site model, or null
+std::shared_ptr<const MlModel> g_ml_refiner; // loaded corner refiner, or null
 bool g_ml_builtin_tried = false;
 
 // Built-in models (tools/embed_ml_model.py). Define CKEY_ML_NO_BUILTIN to build
@@ -262,6 +267,10 @@ bool g_ml_builtin_tried = false;
 #if !defined(CKEY_ML_NO_BUILTIN) && __has_include("ml_builtin_locator.inc")
 #include "ml_builtin_locator.inc"
 #define CKEY_ML_HAVE_BUILTIN_LOCATOR 1
+#endif
+#if !defined(CKEY_ML_NO_BUILTIN) && __has_include("ml_builtin_refiner.inc")
+#include "ml_builtin_refiner.inc"
+#define CKEY_ML_HAVE_BUILTIN_REFINER 1
 #endif
 #if !defined(CKEY_ML_NO_BUILTIN) && __has_include("ml_builtin_sites.inc")
 #include "ml_builtin_sites.inc"
@@ -278,12 +287,21 @@ void ml_load_builtin_locked() {
 #if defined(CKEY_ML_HAVE_BUILTIN_SITES)
     if (!g_ml_sites) g_ml_sites = ml_parse(kMlBuiltinSites, kMlBuiltinSitesSize, err);
 #endif
+#if defined(CKEY_ML_HAVE_BUILTIN_REFINER)
+    if (!g_ml_refiner) g_ml_refiner = ml_parse(kMlBuiltinRefiner, kMlBuiltinRefinerSize, err);
+#endif
 }
 
 std::shared_ptr<const MlModel> ml_current() {
     std::lock_guard<std::mutex> lock(g_ml_mutex);
     ml_load_builtin_locked();
     return g_ml_model;
+}
+
+std::shared_ptr<const MlModel> ml_refiner_current() {
+    std::lock_guard<std::mutex> lock(g_ml_mutex);
+    ml_load_builtin_locked();
+    return g_ml_refiner;
 }
 
 std::shared_ptr<const MlModel> ml_sites_current() {

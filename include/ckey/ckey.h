@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.89"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.90"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -230,6 +230,12 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
 /* Options flags (ckey_scan_options.flags). */
 #define CKEY_SCAN_OPTION_ML 1u         /* try ML locator proposals before the border search */
 #define CKEY_SCAN_OPTION_ML_GATE 2u    /* with ML: skip the border search when the locator sees no symbol */
+/* Bits 8..15 of flags: a Profile 0 version hint (1..31; 0 = none). Versions
+ * within one of it are tried first and pass their key fit more easily, which
+ * helps on noisy frames whose keys are hard to read. With CKEY_SCAN_OPTION_ML
+ * and no hint, the locator's density estimate is used as the hint. */
+#define CKEY_SCAN_VERSION_HINT(v) ((uint32_t)((v) & 0xffu) << 8)
+#define CKEY_SCAN_VERSION_HINT_OF(flags) (((flags) >> 8) & 0xffu)
 typedef struct ckey_scan_options {
     uint32_t abi_version;      /* CKEY_ABI_VERSION */
     uint32_t profiles;         /* CKEY_SCAN_PROFILE_* mask; 0 = all */
@@ -303,6 +309,15 @@ CKEY_API uint64_t ckey_ml_model_id(void);
  *   it is printed.
  */
 CKEY_API uint64_t ckey_ml_site_model_id(void);
+/* Corner refiner (optional): with one loaded, a Profile 0 decode that fails
+ * from the given corners is retried once from corners the refiner corrected
+ * (two rounds on the rectified symbol). 0 when none. */
+CKEY_API uint64_t ckey_ml_refiner_model_id(void);
+/* Unloads every ML model, built-in ones included, until the next
+ * ckey_ml_load_model call (NULL restores the built-ins). Scanning is then
+ * exactly classical: for comparisons, and for hosts that want no ML. */
+#define CKEY_ML_HAS_CLEAR 1
+CKEY_API void ckey_ml_clear_models(void);
 /*
  * Multi-frame reading. An accumulator collects, frame by frame, the per-site
  * evidence of a Profile 0 symbol that did not decode (each site's decision
@@ -326,6 +341,12 @@ CKEY_API ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_
                                                       const ckey_scan_options *options, ckey_frame_accumulator *accumulator,
                                                       uint8_t *out_payload, size_t out_capacity, ckey_scan_result *out_result);
 
+/* Rectifies any canonical region: the square [x0, x0 + extent] x [y0, y0 +
+ * extent] (canonical 29-unit field coordinates, corners given in canonical
+ * order) into side x side bytes. Used for the corner refiner's input. */
+CKEY_API ckey_status ckey_ml_rectify_region_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                                  const double quad_xy[8], double x0, double y0, double extent,
+                                                  uint32_t side, uint8_t *out, size_t out_capacity);
 CKEY_API ckey_status ckey_ml_rectify_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                                            const double quad_xy[8], uint32_t version, uint32_t samples_per_module,
                                            uint32_t align, uint8_t *out, size_t out_capacity, uint32_t *out_side,

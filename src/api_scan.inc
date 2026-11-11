@@ -359,9 +359,36 @@ double ckey_calibration_score_scalable_gray8(const uint8_t *gray, size_t width, 
     return score;
 }
 
+}  // extern "C"
+namespace {
+ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
+                               uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, uint32_t *out_version,
+                               uint32_t *out_layout, ckey_diagnostics *diag);
+}  // namespace
+extern "C" {
+
+// With a corner refiner loaded, a failed decode is retried once from the
+// refined corners (the refiner only moves corners; the decoder decides).
 ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
                                        uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, uint32_t *out_version,
                                        uint32_t *out_layout, ckey_diagnostics *diag) {
+    const ckey_status st = decode_scalable_at(gray, width, height, stride, quad_xy, out_payload, out_capacity, out_payload_len, out_version, out_layout, diag);
+    if (st == CKEY_OK || st == CKEY_INVALID_ARGUMENT || st == CKEY_INSUFFICIENT_BUFFER) return st;
+    double refined[8];
+    {
+        const WorkScope work(kFindWorkBudget);
+        if (!ml_refine_quad(gray, width, height, stride, quad_xy, refined)) return st;
+    }
+    const ckey_status again = decode_scalable_at(gray, width, height, stride, refined, out_payload, out_capacity, out_payload_len, out_version, out_layout, diag);
+    if (again == CKEY_OK && diag) { char m[96]; std::snprintf(m, sizeof m, "%.66s (ML corners)", diag->message); set_status(diag, CKEY_OK, m); }
+    return again == CKEY_OK || again == CKEY_INSUFFICIENT_BUFFER ? again : st;
+}
+
+}  // extern "C"
+namespace {
+ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
+                               uint8_t *out_payload, size_t out_capacity, size_t *out_payload_len, uint32_t *out_version,
+                               uint32_t *out_layout, ckey_diagnostics *diag) {
     if (!out_payload || !out_payload_len || !valid_image_args(gray, width, height, stride, quad_xy)) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 image, quadrilateral, or output buffer"); return CKEY_INVALID_ARGUMENT;
     }
@@ -505,8 +532,10 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
             if (geometry.version != 0 && v != geometry.version) continue;
             const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
-            if (!keys.valid || keys.evidence < 0.85) continue;
-            Attempt a{keys.contrast * keys.evidence * keys.evidence, v, f, {}, surface}; std::copy(h, h + 8, a.h);
+            const int hint = version_hint().version;
+            const bool hinted = hint && std::abs(v - hint) <= version_hint().window;
+            if (!keys.valid || keys.evidence < (hinted ? kHintedKeyGate : 0.85)) continue;
+            Attempt a{keys.contrast * keys.evidence * keys.evidence * (hinted ? kHintBoost : 1.0), v, f, {}, surface}; std::copy(h, h + 8, a.h);
             attempts.push_back(a);
         }
     }
@@ -525,14 +554,14 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
       // With a site model loaded, its reading is tried right after the plain
       // one (it is built for the frames the plain reading loses).
       const bool ml_sites = ml_sites_current() != nullptr;
-      std::vector<float> ml_logits; bool ml_done = false;
+      std::vector<float> ml_logits, ml_doubt; bool ml_done = false;
       for (const unsigned mode : kReadModesWithMl) {
         if (work_exhausted()) break;
         if (mode == kReadMl) {
             if (!ml_sites || !leading) continue;
-            if (!ml_done) { ml_logits = ml_site_logits(L, gray, width, height, stride, attempt.h); ml_done = true; }
+            if (!ml_done) { ml_logits = ml_site_logits(L, gray, width, height, stride, attempt.h, &ml_doubt); ml_done = true; }
             if (ml_logits.size() != L.nodes.size()) continue;
-            ml_site_read(ml_logits, read);
+            ml_site_read(ml_logits, read, &ml_doubt);
         } else {
         if ((mode & kReadRingSequence) && !leading) continue;
         if (hopeless && !(mode & kReadLocalLevels)) continue;  // only a change of levels can rescue a reading this far off
@@ -577,7 +606,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
     return CKEY_UNCORRECTABLE;
 }
 
-}  // extern "C"
+}  // namespace (decode_scalable_at)
 
 namespace {
 // Border search shared by ckey_find_borders_gray8 and the frame scan. `cut`

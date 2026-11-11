@@ -10,6 +10,18 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.90 — 2026-11-11
+
+Three more ML assists and a way to turn ML off. No new built-in model; the corner refiner and the two-channel site model are being trained (key-test `ml/run_next.sh`).
+
+**Reader (core)**
+
+* **Version hint:** bits 8–15 of `ckey_scan_options.flags` (`CKEY_SCAN_VERSION_HINT(v)`) give a Profile 0 version. Versions within one of it pass their key fit at a lower gate (0.6 instead of 0.85) and are tried first. With `CKEY_SCAN_OPTION_ML` and no hint, the locator's density estimate is the hint, within two versions. Only the order and the candidates change; Reed–Solomon and CRC-32C decide. **Measured** with the true version as the hint (its ceiling), on 1,200 fresh-seed cases: full scans 56.4% → **57.6%** (+13, lost 0, wrong 0), dense symbols 113 → 117 of 244, time unchanged.
+* **Corner refiner** (model kind 3: one output cell, 8 channels): when a Profile 0 decode fails from the given corners, the symbol is rectified over canonical [−3, 32]² at the model's side through those corners, and the model's outputs correct each corner in canonical units, two rounds. The decode is then retried once from the refined corners, and the message says "(ML corners)". `ckey_ml_refiner_model_id`; `ckey_ml_rectify_region_gray8` for training data.
+* **Site model doubt channel:** a site model may have a second output channel, the logit that its own reading of a site is wrong (trained on its mistakes: occluders, glare, damage). It scales the site's confidence, so the soft decoder erases what the model distrusts first. One-channel models work as before.
+* **`ckey_ml_clear_models`:** unloads every model, built-ins included, until the next `ckey_ml_load_model` (NULL restores the built-ins). Scanning is then exactly classical. The key-test comparisons use it for their classical arms. Without it, the built-in site model of build 89 would have run in both arms.
+* Tests: `ckey_ml_locator` covers the refiner (recognised; a working decode is untouched; from far-off corners only the true payload or nothing), the version hint (any hint, right or wrong, still reads the true payload) and clearing.
+
 ## 0.1.0-build.89 — 2026-11-11
 
 **The first built-in ML model:** the site model, read only on frames the plain reading fails.
