@@ -24,8 +24,12 @@ struct MlConv {
 struct MlOp { uint32_t type = 0; uint32_t a = 0, b = 0, dst = 0; size_t conv = 0; };
 struct MlShape { uint32_t c = 0, h = 0, w = 0; };
 
+enum MlKind : uint32_t { kMlLocator = 0, kMlSites = 1 };
+
 struct MlModel {
+    MlKind kind = kMlLocator;
     uint32_t side = 0, stride = 0, channels = 0, buffers = 0;
+    uint32_t align = 1;   // input sides must be multiples of this (2^stride-2 convs)
     std::vector<MlConv> convs;
     std::vector<MlOp> ops;
     std::vector<MlShape> shapes;
@@ -33,7 +37,10 @@ struct MlModel {
     uint64_t id = 0;
 };
 
-constexpr uint32_t kMlChannels = 24;  // the detection head this decoder understands
+constexpr uint32_t kMlChannels = 24;  // the locator's detection head
+// Two kinds of model share the format: the locator (fixed input side, stride
+// 4, 24 channels) and the site model (any input size: a rectified symbol field
+// in, one ink logit per output cell; stride 1 or 2, 1 channel).
 
 uint64_t fnv1a64(const uint8_t *p, size_t n) {
     uint64_t h = 1469598103934665603ull;
@@ -60,8 +67,10 @@ std::shared_ptr<const MlModel> ml_parse(const uint8_t *data, size_t len, std::st
     m->buffers = r.u32(); const uint32_t nops = r.u32();
     m->side = r.u32(); m->stride = r.u32(); m->channels = r.u32();
     if (!r.ok || version != 2) { err = "unsupported CKML version"; return nullptr; }
-    if (m->buffers < 2 || m->buffers > 512 || nops < 1 || nops > 1024 || m->side < 64 || m->side > 1024 || m->side % 32 ||
-        (m->stride != 4) || m->channels != kMlChannels) { err = "CKML header out of range"; return nullptr; }
+    if (m->stride == 4 && m->channels == kMlChannels) m->kind = kMlLocator;
+    else if ((m->stride == 1 || m->stride == 2) && m->channels == 1) m->kind = kMlSites;
+    else { err = "CKML head not recognised"; return nullptr; }
+    if (m->buffers < 2 || m->buffers > 512 || nops < 1 || nops > 1024 || m->side < 32 || m->side > 1024 || m->side % 32) { err = "CKML header out of range"; return nullptr; }
     m->shapes.assign(m->buffers, MlShape{});
     m->shapes[0] = {1, m->side, m->side};
     std::vector<bool> defined(m->buffers, false); defined[0] = true;
@@ -91,6 +100,7 @@ std::shared_ptr<const MlModel> ml_parse(const uint8_t *data, size_t len, std::st
                 for (size_t j = 0; j < per; ++j) c.w[o * per + j] = static_cast<float>(q[o * per + j]) * scale[o];
             }
             m->shapes[c.dst] = {c.cout, (in.h + c.stride - 1) / c.stride, (in.w + c.stride - 1) / c.stride};
+            if (c.stride == 2) m->align = std::min<uint32_t>(m->align * 2, 1024);
             defined[c.dst] = true;
             m->last_use[c.src] = i;
             op.a = c.src; op.dst = c.dst; op.conv = m->convs.size();
@@ -109,6 +119,7 @@ std::shared_ptr<const MlModel> ml_parse(const uint8_t *data, size_t len, std::st
     if (r.at != len) { err = "trailing bytes in CKML"; return nullptr; }
     const MlShape out = m->shapes[m->ops.back().dst];
     if (out.c != m->channels || out.h != m->side / m->stride || out.w != m->side / m->stride) { err = "CKML output shape"; return nullptr; }
+    if (m->side % m->align) { err = "CKML side not aligned"; return nullptr; }
     m->last_use[m->ops.back().dst] = nops;
     m->id = fnv1a64(data, len);
     return m;
@@ -187,21 +198,48 @@ void ml_conv(const MlConv &c, const MlShape &in, const float *x, const MlShape &
     if (c.relu) for (size_t p = 0, n = static_cast<size_t>(c.cout) * plane; p < n; ++p) y[p] = std::max(0.0f, y[p]);
 }
 
-std::vector<float> ml_forward(const MlModel &m, std::vector<float> input) {
+// Shapes for an input of h x w (the parsed shapes are for the nominal side).
+// False when the graph does not fit (sides must be multiples of m.align).
+bool ml_shapes(const MlModel &m, uint32_t h, uint32_t w, std::vector<MlShape> &shapes) {
+    if (h == 0 || w == 0 || h % m.align || w % m.align || h > 4096 || w > 4096) return false;
+    shapes.assign(m.buffers, MlShape{});
+    shapes[0] = {1, h, w};
+    for (const MlOp &op : m.ops) {
+        if (op.type == 1) {
+            const MlConv &c = m.convs[op.conv]; const MlShape in = shapes[c.src];
+            if (in.c != c.cin || in.h < c.stride || in.w < c.stride) return false;
+            shapes[c.dst] = {c.cout, (in.h + c.stride - 1) / c.stride, (in.w + c.stride - 1) / c.stride};
+        } else {
+            const MlShape a = shapes[op.a], b = shapes[op.b];
+            const bool fits = op.type == 2 ? (a.c == b.c && a.h == b.h && a.w == b.w) : (a.c == b.c && a.h * 2 == b.h && a.w * 2 == b.w);
+            if (!fits) return false;
+            shapes[op.dst] = b;
+        }
+    }
+    return true;
+}
+
+// Runs the graph on a 1 x h x w input (h, w default to the nominal side).
+// Returns an empty vector if the input does not fit the graph.
+std::vector<float> ml_forward(const MlModel &m, std::vector<float> input, uint32_t h = 0, uint32_t w = 0) {
+    if (!h) h = m.side;
+    if (!w) w = m.side;
+    std::vector<MlShape> shapes;
+    if (input.size() != static_cast<size_t>(h) * w || !ml_shapes(m, h, w, shapes)) return {};
     std::vector<std::vector<float>> buf(m.buffers);
     buf[0] = std::move(input);
     for (size_t i = 0; i < m.ops.size(); ++i) {
         const MlOp &op = m.ops[i];
-        const MlShape &out = m.shapes[op.dst];
+        const MlShape &out = shapes[op.dst];
         std::vector<float> y(static_cast<size_t>(out.c) * out.h * out.w);
         if (op.type == 1) {
             const MlConv &c = m.convs[op.conv];
-            ml_conv(c, m.shapes[c.src], buf[c.src].data(), out, y.data());
+            ml_conv(c, shapes[c.src], buf[c.src].data(), out, y.data());
         } else if (op.type == 2) {
             const auto &a = buf[op.a], &b = buf[op.b];
             for (size_t p = 0; p < y.size(); ++p) y[p] = a[p] + b[p];
         } else {
-            const MlShape &sa = m.shapes[op.a];
+            const MlShape &sa = shapes[op.a];
             const auto &a = buf[op.a], &b = buf[op.b];
             for (size_t ch = 0; ch < out.c; ++ch) for (size_t yy = 0; yy < out.h; ++yy) for (size_t xx = 0; xx < out.w; ++xx)
                 y[(ch * out.h + yy) * out.w + xx] = a[(ch * sa.h + yy / 2) * sa.w + xx / 2] + b[(ch * out.h + yy) * out.w + xx];
@@ -215,23 +253,36 @@ std::vector<float> ml_forward(const MlModel &m, std::vector<float> input) {
 // ---- model registry ---------------------------------------------------------------
 
 std::mutex g_ml_mutex;
-std::shared_ptr<const MlModel> g_ml_model;   // loaded model, or null
+std::shared_ptr<const MlModel> g_ml_model;   // loaded locator, or null
+std::shared_ptr<const MlModel> g_ml_sites;   // loaded site model, or null
 bool g_ml_builtin_tried = false;
 
 #if defined(CKEY_ML_BUILTIN)
-#include "ml_locator_model.inc"   // kMlLocatorModel[], kMlLocatorModelSize
+#include "ml_locator_model.inc"   // kMlLocatorModel[], kMlLocatorModelSize; optionally kMlSiteModel[], kMlSiteModelSize
 #endif
+
+void ml_load_builtin_locked() {
+    if (g_ml_builtin_tried) return;
+    g_ml_builtin_tried = true;
+#if defined(CKEY_ML_BUILTIN)
+    std::string err;
+    if (!g_ml_model) g_ml_model = ml_parse(kMlLocatorModel, kMlLocatorModelSize, err);
+#if defined(CKEY_ML_BUILTIN_SITES)
+    if (!g_ml_sites) g_ml_sites = ml_parse(kMlSiteModel, kMlSiteModelSize, err);
+#endif
+#endif
+}
 
 std::shared_ptr<const MlModel> ml_current() {
     std::lock_guard<std::mutex> lock(g_ml_mutex);
-#if defined(CKEY_ML_BUILTIN)
-    if (!g_ml_model && !g_ml_builtin_tried) {
-        g_ml_builtin_tried = true;
-        std::string err;
-        g_ml_model = ml_parse(kMlLocatorModel, kMlLocatorModelSize, err);
-    }
-#endif
+    ml_load_builtin_locked();
     return g_ml_model;
+}
+
+std::shared_ptr<const MlModel> ml_sites_current() {
+    std::lock_guard<std::mutex> lock(g_ml_mutex);
+    ml_load_builtin_locked();
+    return g_ml_sites;
 }
 
 // ---- preprocessing and decoding -------------------------------------------------------
@@ -322,7 +373,7 @@ size_t ml_decode(const MlModel &m, const std::vector<float> &out, const MlLetter
 
 size_t ml_locate(const uint8_t *gray, size_t width, size_t height, size_t stride, double threshold, MlDetection *det, size_t max) {
     const auto model = ml_current();
-    if (!model || !det || !max) return 0;
+    if (!model || model->kind != kMlLocator || !det || !max) return 0;
     MlLetterbox lb;
     std::vector<float> in = ml_prepare(gray, width, height, stride, model->side, lb);
     const std::vector<float> out = ml_forward(*model, std::move(in));

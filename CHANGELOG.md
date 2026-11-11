@@ -10,6 +10,22 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.88 — 2026-11-11
+
+The ML site model runtime and multi-frame reading. As with build 87, **no trained model is built in yet**: with no model loaded, single-frame scanning is unchanged. The accumulator is new behaviour behind its own call.
+
+**Reader (core)**
+
+* **ML site reading** (`src/ml_sites.inc`): with a site model loaded, the Profile 0 decoder adds one reading strategy, right after the plain one. The candidate's field is rectified at two samples per module through the decoder's own homography, so grid modules, ring dots and dial rays are all covered. A small fully convolutional network turns it into an ink logit per module cell, and each site's logit gives its value and its confidence, which becomes the per-byte reliability of the soft decoder (build 86). Reed–Solomon and CRC-32C decide, as for every other strategy. On identical inputs the C++ logits match PyTorch to within 2e-4. The site model shipped for training is about 17k weights and 1,100 multiply-adds per rectified sample (235M for a version 31 field); the model file is about 22 KB.
+* **Model kinds:** CKML files now carry either a locator (stride 4, 24 channels) or a site model (stride 1 or 2, one channel), recognised from the header. Shapes are worked out per call, so a site model runs on any field size. `ckey_ml_load_model` replaces only the model of its own kind; `ckey_ml_site_model_id` identifies the site model.
+* **Multi-frame reading:** `ckey_scan_frame_accumulate_gray8` with a `ckey_frame_accumulator` (create, reset, destroy, frames). When a frame does not decode, the field of its most plausible reading is rectified into canonical coordinates, standardised, matched to the running average in each of the four quarter-turn orientations, and added. The average is then decoded as a clean frame by the normal decoder, which identifies the version itself. That is why the sum does not depend on any single noisy frame's version guess. Continuity: the centre must be within half the symbol's size and the size within 25%, and a frame must correlate with the average. A stray frame is skipped; three in a row restart the average. `CKEY_SCAN_FLAG_ACCUMULATED` marks a read from the average. In `ckey_ml_locator`, a symbol under noise that no single frame decodes reads after two frames, and two different symbols alternating in one place yield only their own payloads.
+* **Tooling for training data:** `ckey_ml_rectify_gray8` (the field through given corners, at a chosen sampling) and `ckey_ml_site_map` (every site's canonical position, kind and printed value for a symbol).
+* Additive: the C ABI stays 4.
+
+**Known limits**
+
+* Under extreme noise the average registers each frame through that frame's own corners, and those corners are noisy too. Pixel-aligned averaging of a code that does not move still does better there (it read at a noise level where the accumulator did not). Aligning each frame to the average directly is the next step.
+
 ## 0.1.0-build.87 — 2026-11-11
 
 The ML locator runtime: the first part of on-device ML assistance for scanning. It proposes where symbols are; the deterministic reader still decides what they say. **No trained model is built in yet**, so with this build alone scanning is unchanged. The model is trained with the key-test pipeline (`ml/run_locator.sh` in `clearkeysolutions/key-test`) and will be embedded once its evaluation on identical frames shows it helps.

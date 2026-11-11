@@ -1,8 +1,6 @@
 // Public C ABI: one-call frame scan, tracking and camera advice. Included
 // after api_scan.inc (scan library and the amalgamation).
 
-#include "ml_locator.inc"
-
 namespace {
 
 // Corner order of `quad` (cyclic, either winding) closest to `previous`.
@@ -195,7 +193,58 @@ bool best_candidate_in(const uint8_t *gray, size_t width, size_t height, size_t 
 
 }  // namespace
 
+// The field rectified into canonical coordinates (with a margin of 1.5 units
+// for the frame stroke and quiet zone), frame by frame, standardised, summed.
+struct ckey_frame_accumulator {
+    uint32_t side = 0, frames = 0, misses = 0;
+    std::vector<float> sum; std::vector<uint16_t> n;
+    double cx = 0, cy = 0, size = 0;
+};
+
+namespace {
+constexpr uint32_t kAccumulateMaxFrames = 24;     // sliding window
+constexpr double kAccumulateAgreement = 0.15;      // minimum correlation of a frame with the average
+constexpr double kAccumulateMargin = 1.5, kAccumulateExtent = 29.0 + 2 * kAccumulateMargin;
+
+// The frame's field through h, standardised (mean 0, sd 1 over known pixels).
+bool rectify_frame(const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8], uint32_t side,
+                   std::vector<float> &z, std::vector<uint8_t> &known) {
+    z.assign(static_cast<size_t>(side) * side, 0.0f); known.assign(z.size(), 0);
+    double sum = 0, sq = 0; size_t count = 0;
+    const double step = kAccumulateExtent / side;
+    for (uint32_t j = 0; j < side; ++j) for (uint32_t i = 0; i < side; ++i) {
+        ImagePoint p{};
+        if (!map_point(h, -kAccumulateMargin + (i + 0.5) * step, -kAccumulateMargin + (j + 0.5) * step, p)) continue;
+        if (p.x < 0 || p.y < 0 || p.x > static_cast<double>(width - 1) || p.y > static_cast<double>(height - 1)) continue;
+        const size_t x0 = static_cast<size_t>(p.x), y0 = static_cast<size_t>(p.y), x1 = std::min(x0 + 1, width - 1), y1 = std::min(y0 + 1, height - 1);
+        const double fx = p.x - x0, fy = p.y - y0;
+        const double v = (gray[y0 * stride + x0] * (1 - fx) + gray[y0 * stride + x1] * fx) * (1 - fy) + (gray[y1 * stride + x0] * (1 - fx) + gray[y1 * stride + x1] * fx) * fy;
+        const size_t k = static_cast<size_t>(j) * side + i;
+        z[k] = static_cast<float>(v); known[k] = 1; sum += v; sq += v * v; ++count;
+    }
+    if (count * 3 < z.size()) return false;
+    const double mean = sum / count, sd = std::sqrt(std::max(1.0, sq / count - mean * mean));
+    for (size_t k = 0; k < z.size(); ++k) z[k] = known[k] ? static_cast<float>((z[k] - mean) / sd) : 0.0f;
+    return true;
+}
+
+// Index of pixel (i, j) after rotating the square image by r quarter turns.
+inline size_t rotated(uint32_t side, uint32_t i, uint32_t j, int r) {
+    switch (r & 3) {
+        case 0: return static_cast<size_t>(j) * side + i;
+        case 1: return static_cast<size_t>(i) * side + (side - 1 - j);
+        case 2: return static_cast<size_t>(side - 1 - j) * side + (side - 1 - i);
+        default: return static_cast<size_t>(side - 1 - i) * side + j;
+    }
+}
+}  // namespace
+
 extern "C" {
+
+ckey_frame_accumulator *ckey_accumulator_create(void) { return new (std::nothrow) ckey_frame_accumulator(); }
+void ckey_accumulator_destroy(ckey_frame_accumulator *a) { delete a; }
+void ckey_accumulator_reset(ckey_frame_accumulator *a) { if (a) *a = ckey_frame_accumulator{}; }
+uint32_t ckey_accumulator_frames(const ckey_frame_accumulator *a) { return a ? a->frames : 0; }
 
 void ckey_scan_options_init(ckey_scan_options *o) {
     if (!o) return;
@@ -252,18 +301,140 @@ size_t ckey_ml_locate_gray8(const uint8_t *gray, size_t width, size_t height, si
 }
 
 ckey_status ckey_ml_load_model(const uint8_t *data, size_t length) {
-    if (!data) { std::lock_guard<std::mutex> lock(g_ml_mutex); g_ml_model.reset(); g_ml_builtin_tried = false; return CKEY_OK; }
+    if (!data) { std::lock_guard<std::mutex> lock(g_ml_mutex); g_ml_model.reset(); g_ml_sites.reset(); g_ml_builtin_tried = false; return CKEY_OK; }
     std::string err;
     auto m = ml_parse(data, length, err);
     if (!m) return CKEY_INVALID_ARGUMENT;
     std::lock_guard<std::mutex> lock(g_ml_mutex);
-    g_ml_model = std::move(m); g_ml_builtin_tried = true;
+    ml_load_builtin_locked();   // a loaded model replaces only the built-in of its own kind
+    if (m->kind == kMlSites) g_ml_sites = std::move(m); else g_ml_model = std::move(m);
     return CKEY_OK;
 }
 
 uint64_t ckey_ml_model_id(void) {
     const auto m = ml_current();
     return m ? m->id : 0;
+}
+
+uint64_t ckey_ml_site_model_id(void) {
+    const auto m = ml_sites_current();
+    return m ? m->id : 0;
+}
+
+ckey_status ckey_ml_rectify_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8], uint32_t version,
+                                  uint32_t samples_per_module, uint32_t align, uint8_t *out, size_t out_capacity, uint32_t *out_side, int *out_dark) {
+    if (!gray || !quad_xy || !out_side || width < 16 || height < 16 || stride < width || height > std::numeric_limits<size_t>::max() / stride ||
+        version < 1 || version > static_cast<uint32_t>(kScalableVersions) || samples_per_module < 1 || samples_per_module > 8 || align < 1 || align > 64) return CKEY_INVALID_ARGUMENT;
+    for (int i = 0; i < 8; ++i) if (!std::isfinite(quad_xy[i])) return CKEY_INVALID_ARGUMENT;
+    constexpr double canonical[8] = {0, 0, 29, 0, 29, 29, 0, 29};
+    double h[8]; if (!solve_homography(canonical, quad_xy, h)) return CKEY_INVALID_ARGUMENT;
+    const WorkScope work(kFindWorkBudget);
+    const ScalableLayout &L = scalable_layout(static_cast<int>(version), 0);
+    MlRectified r;
+    if (!ml_rectify(gray, width, height, stride, h, L.pitch, samples_per_module, align, r)) return CKEY_UNCORRECTABLE;
+    *out_side = r.side;
+    if (out_dark) *out_dark = r.dark ? 1 : 0;
+    if (!out || out_capacity < r.px.size()) return CKEY_INSUFFICIENT_BUFFER;
+    std::memcpy(out, r.px.data(), r.px.size());
+    return CKEY_OK;
+}
+
+ckey_status ckey_ml_site_map(const ckey_scalable_symbol *symbol, float *out_xy, uint8_t *out_kind, uint8_t *out_printed, size_t capacity, size_t *out_count) {
+    if (!symbol || !out_count || symbol->version < 1 || symbol->version > static_cast<uint32_t>(kScalableVersions) || symbol->layout > 3) return CKEY_INVALID_ARGUMENT;
+    const ScalableLayout &L = scalable_layout(static_cast<int>(symbol->version), static_cast<int>(symbol->layout));
+    if (symbol->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
+    const size_t sites = L.nodes.size();
+    *out_count = sites;
+    if (!out_xy || !out_kind || !out_printed || capacity < sites) return CKEY_INSUFFICIENT_BUFFER;
+    std::vector<uint8_t> printed(sites, 0);
+    for (size_t n = 0; n < L.codeword_bytes * 8 && n < L.white.size(); ++n) {
+        const size_t site = L.grouped ? L.base_index[n] : n;
+        if (site >= sites) return CKEY_INVALID_ARGUMENT;
+        const bool bit = (symbol->codeword[n / 8] >> (7 - n % 8)) & 1u;
+        printed[site] = bit != (L.white[n] != 0) ? 1 : 0;
+    }
+    for (size_t i = 0; i < sites; ++i) {
+        double x, y; ml_site_xy(L, i, x, y);
+        out_xy[2 * i] = static_cast<float>(x); out_xy[2 * i + 1] = static_cast<float>(y);
+        out_kind[i] = L.nodes[i].kind; out_printed[i] = printed[i];
+    }
+    return CKEY_OK;
+}
+
+ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const ckey_scan_options *options,
+                                             ckey_frame_accumulator *acc, uint8_t *out_payload, size_t out_capacity, ckey_scan_result *result) {
+    EvidenceCapture &capture = evidence_capture();
+    capture = EvidenceCapture{}; capture.active = true;
+    const ckey_status st = ckey_scan_frame_gray8(gray, width, height, stride, options, out_payload, out_capacity, result);
+    const EvidenceCapture got = capture;
+    capture = EvidenceCapture{};
+    if (!acc || !result || st == CKEY_INVALID_ARGUMENT) return st;
+    if (st == CKEY_OK || st == CKEY_INSUFFICIENT_BUFFER) { ckey_accumulator_reset(acc); return st; }
+    // Region scans and undistorted scans report geometry in their own image.
+    const bool whole_frame = !options || ((options->roi_width <= 0 || options->roi_height <= 0) && options->k1 == 0.0);
+    if (!got.have || !whole_frame) return st;
+    double cx = 0, cy = 0; for (int k = 0; k < 4; ++k) { cx += got.quad[2 * k] / 4; cy += got.quad[2 * k + 1] / 4; }
+    const double size = quad_mean_side(got.quad);
+    if (!(size > 8)) return st;
+    const bool here = acc->frames && std::hypot(cx - acc->cx, cy - acc->cy) < 0.5 * acc->size && std::abs(size - acc->size) < 0.25 * acc->size;
+    if (!here && acc->frames && ++acc->misses < 3) return st;   // a stray frame: skip it, keep the average
+    if (!here) {
+        ckey_accumulator_reset(acc);
+        acc->side = static_cast<uint32_t>(std::clamp(std::lround(size * kAccumulateExtent / 29.0), 64L, 1024L));
+        acc->sum.assign(static_cast<size_t>(acc->side) * acc->side, 0.0f); acc->n.assign(acc->sum.size(), 0);
+    }
+    std::vector<float> z; std::vector<uint8_t> known;
+    if (!rectify_frame(gray, width, height, stride, got.h, acc->side, z, known)) return st;
+    // Orientation: the frame's reading may have the field turned by a quarter
+    // turn relative to the average; take the rotation that agrees best.
+    int turn = 0;
+    if (acc->frames) {
+        double best = -2;
+        for (int r = 0; r < 4; ++r) {
+            double dot = 0, na = 0, nb = 0;
+            for (uint32_t j = 0; j < acc->side; ++j) for (uint32_t i = 0; i < acc->side; ++i) {
+                const size_t src = static_cast<size_t>(j) * acc->side + i, dst = rotated(acc->side, i, j, r);
+                if (!known[src] || !acc->n[dst]) continue;
+                const double a = z[src], b = acc->sum[dst] / acc->n[dst];
+                dot += a * b; na += a * a; nb += b * b;
+            }
+            const double corr = na > 0 && nb > 0 ? dot / std::sqrt(na * nb) : -1;
+            if (corr > best) { best = corr; turn = r; }
+        }
+        if (best < kAccumulateAgreement) { if (++acc->misses >= 3) ckey_accumulator_reset(acc); return st; }
+    }
+    acc->misses = 0;
+    if (acc->frames >= kAccumulateMaxFrames) {
+        for (size_t k = 0; k < acc->sum.size(); ++k) if (acc->n[k]) { const float mean = acc->sum[k] / acc->n[k]; acc->n[k] = static_cast<uint16_t>(acc->n[k] - 1); acc->sum[k] = mean * acc->n[k]; }
+        --acc->frames;
+    }
+    for (uint32_t j = 0; j < acc->side; ++j) for (uint32_t i = 0; i < acc->side; ++i) {
+        const size_t src = static_cast<size_t>(j) * acc->side + i;
+        if (!known[src]) continue;
+        const size_t dst = rotated(acc->side, i, j, turn);
+        acc->sum[dst] += z[src]; ++acc->n[dst];
+    }
+    ++acc->frames; acc->cx = cx; acc->cy = cy; acc->size = size;
+    if (acc->frames < 2) return st;
+    // The average as a clean frame; its field corners are known exactly.
+    std::vector<uint8_t> img(acc->sum.size());
+    for (size_t k = 0; k < img.size(); ++k) img[k] = acc->n[k] ? static_cast<uint8_t>(std::clamp(std::lround(128.0 + 48.0 * acc->sum[k] / acc->n[k]), 0L, 255L)) : 128;
+    const double px = acc->side / kAccumulateExtent, lo = kAccumulateMargin * px - 0.5, hi = (kAccumulateMargin + 29.0) * px - 0.5;
+    const double quad[8] = {lo, lo, hi, lo, hi, hi, lo, hi};
+    size_t length = 0; uint32_t version = 0, layout = 0; ckey_diagnostics d{};
+    std::vector<uint8_t> out(65535);
+    const ckey_status ds = ckey_decode_scalable_gray8(img.data(), acc->side, acc->side, acc->side, quad, out.data(), out.size(), &length, &version, &layout, &d);
+    if (ds != CKEY_OK) return st;
+    result->profile = CKEY_FIELD_SCALABLE; result->version = version; result->layout = layout;
+    result->corrected_symbols = d.corrected_symbols; result->erasures_used = d.erasures_used; result->payload_length = length;
+    result->flags |= CKEY_SCAN_FLAG_ACCUMULATED; result->located = 1; std::copy(got.quad, got.quad + 8, result->quad);
+    std::snprintf(result->message, sizeof(result->message), "decoded from %u accumulated frames", acc->frames);
+    const uint32_t frames = acc->frames; (void)frames;
+    ckey_accumulator_reset(acc);
+    if (length > out_capacity) { result->status = CKEY_INSUFFICIENT_BUFFER; return CKEY_INSUFFICIENT_BUFFER; }
+    if (length) std::memcpy(out_payload, out.data(), length);
+    result->status = CKEY_OK;
+    return CKEY_OK;
 }
 
 void ckey_match_corner_order(const double previous_xy[8], double quad_xy[8]) {

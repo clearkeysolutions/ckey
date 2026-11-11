@@ -745,6 +745,9 @@ constexpr unsigned kReadRingSequence = 2u;  // sequence detection along the ring
 // Strategies in the order tried: the plain reading first (cheapest, right for
 // clean images), then the ones built for uneven light and for blur.
 constexpr std::array<unsigned, 4> kReadModes = {0u, kReadLocalLevels | kReadRingSequence, kReadRingSequence, kReadLocalLevels};
+// The ML site reading (ml_sites.inc), used only when a site model is loaded.
+constexpr unsigned kReadMl = 0x100u;
+constexpr std::array<unsigned, 5> kReadModesWithMl = {0u, kReadMl, kReadLocalLevels | kReadRingSequence, kReadRingSequence, kReadLocalLevels};
 
 bool scalable_sample_sites(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride,
                            const double h[8], SiteSamples &S) {

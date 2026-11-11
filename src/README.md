@@ -17,6 +17,7 @@ Each library's translation unit is the shared internals plus its own public func
 - `scan_internal.inc`: scan-library internals, included by `api_scan.inc`: the border search (area-averaged working image, local thresholds, perspective outline fit), the direct frame-edge fit and lens estimate, and the Profile 0 site reader (local levels, interference cancellation, ring sequence detection, per-byte reliabilities).
 - `api_camera.inc`: the one-call frame scan (`ckey_scan_frame_gray8`), tracking (`ckey_track_*`) and camera advice (`ckey_camera_*`). Part of the scan library.
 - `ml_locator.inc`: the ML locator runtime, included by `api_camera.inc`: the CKML model parser (validates untrusted model files), a small CNN inference engine and the detection decoder (`ckey_ml_*`). Proposals only; acceptance stays with Reed–Solomon and CRC-32C.
+- `ml_sites.inc`: the ML site reading (rectified field, site model, per-site logits for the soft decoder) and the evidence capture used by the multi-frame accumulator. Both ML files are included by `api_scan.inc`.
 - `scalable_render.inc`: the Profile 0 geometry engine and its native backends. `api_render.inc` includes it.
 - `ckey.cpp`: the amalgamation, which includes all the parts once. The Xcode projects compile it as a single file, and the white-box tests include it.
 - `svg_raster.h`: the reference SVG rasterizer. It is used only by tests and tools; no library includes it.

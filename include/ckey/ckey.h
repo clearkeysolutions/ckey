@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.87"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.88"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -283,6 +283,52 @@ CKEY_API size_t ckey_ml_locate_gray8(const uint8_t *gray, size_t width, size_t h
                                      double min_score, ckey_ml_detection *out, size_t max_out);
 CKEY_API ckey_status ckey_ml_load_model(const uint8_t *data, size_t length);
 CKEY_API uint64_t ckey_ml_model_id(void);
+/*
+ * ML site model (optional). With a site model loaded (ckey_ml_load_model
+ * recognises the kind from the file), the Profile 0 decoder adds one reading
+ * strategy after the plain one: the candidate's field is rectified at two
+ * samples per module, the model turns it into an ink logit map, and each
+ * site's logit gives its value and confidence for the soft decoder. Reed-
+ * Solomon and CRC-32C still decide. ckey_ml_site_model_id is 0 when none.
+ *
+ * Tooling for training data (used by the key-test harness):
+ *   ckey_ml_rectify_gray8 samples the 29-unit field of a Profile 0 symbol
+ *   whose field corners are given in canonical order (corner i at canonical
+ *   (0,0), (29,0), (29,29), (0,29)), at samples_per_module samples per module
+ *   pitch of `version`, padded to a multiple of `align`. It writes side x side
+ *   bytes and reports whether ink is darker than paper.
+ *   ckey_ml_site_map lists every site of a symbol: its canonical position
+ *   (units 0..29), kind (0 grid module, 1 dial ray, 2 ring dot) and whether
+ *   it is printed.
+ */
+CKEY_API uint64_t ckey_ml_site_model_id(void);
+/*
+ * Multi-frame reading. An accumulator collects, frame by frame, the per-site
+ * evidence of a Profile 0 symbol that did not decode (each site's decision
+ * signed by its confidence; ML logits when a site model is loaded), and tries
+ * the soft decoder on the sum, so frames that are each too blurred, noisy or
+ * glared to decode alone can decode together. The sum is kept only while the
+ * same symbol stays in view: same version and family, centre within half its
+ * size, size within 25%. A frame that does not match is skipped; three in a
+ * row restart the sum. A decode (alone or summed)
+ * resets it. Acceptance is unchanged: Reed-Solomon and CRC-32C on the summed
+ * reading, exactly as on a single frame. CKEY_SCAN_FLAG_ACCUMULATED marks a
+ * read from the sum. One accumulator per camera stream; not thread-safe.
+ */
+#define CKEY_SCAN_FLAG_ACCUMULATED 8u
+typedef struct ckey_frame_accumulator ckey_frame_accumulator;
+CKEY_API ckey_frame_accumulator *ckey_accumulator_create(void);
+CKEY_API void ckey_accumulator_destroy(ckey_frame_accumulator *accumulator);
+CKEY_API void ckey_accumulator_reset(ckey_frame_accumulator *accumulator);
+CKEY_API uint32_t ckey_accumulator_frames(const ckey_frame_accumulator *accumulator);
+CKEY_API ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                                      const ckey_scan_options *options, ckey_frame_accumulator *accumulator,
+                                                      uint8_t *out_payload, size_t out_capacity, ckey_scan_result *out_result);
+
+CKEY_API ckey_status ckey_ml_rectify_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                           const double quad_xy[8], uint32_t version, uint32_t samples_per_module,
+                                           uint32_t align, uint8_t *out, size_t out_capacity, uint32_t *out_side,
+                                           int *out_dark);
 CKEY_API ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
                                             const ckey_scan_options *options,
                                             uint8_t *out_payload, size_t out_capacity,
@@ -438,6 +484,9 @@ typedef struct ckey_scalable_symbol {
 /* Modules across the field for a version (29..232); 0 if invalid. The
  * module pitch in the 29-unit canonical field is 29 / modules. */
 CKEY_API uint32_t ckey_scalable_modules_across(uint32_t version);
+/* ML site map: see ckey_ml_rectify_gray8 above. */
+CKEY_API ckey_status ckey_ml_site_map(const ckey_scalable_symbol *symbol, float *out_xy, uint8_t *out_kind,
+                                      uint8_t *out_printed, size_t capacity, size_t *out_count);
 /* Maximum payload bytes for a version, level, and layout; 0 if invalid. */
 CKEY_API size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level, ckey_scalable_layout layout);
 /* version 0 selects the smallest version whose capacity fits the payload. */

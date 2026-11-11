@@ -1,5 +1,7 @@
 // Public C ABI: scan functions. Included after core_internal.inc.
 #include "scan_internal.inc"
+#include "ml_locator.inc"
+#include "ml_sites.inc"
 
 extern "C" {
 
@@ -520,11 +522,22 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         samples.edge_blur = edge_blur;
       bool hopeless = false;
       const bool leading = &attempt - attempts.data() < 2;  // sequence detection is costly: only for the two best hypotheses
-      for (const unsigned mode : kReadModes) {
+      // With a site model loaded, its reading is tried right after the plain
+      // one (it is built for the frames the plain reading loses).
+      const bool ml_sites = ml_sites_current() != nullptr;
+      std::vector<float> ml_logits; bool ml_done = false;
+      for (const unsigned mode : kReadModesWithMl) {
         if (work_exhausted()) break;
+        if (mode == kReadMl) {
+            if (!ml_sites || !leading) continue;
+            if (!ml_done) { ml_logits = ml_site_logits(L, gray, width, height, stride, attempt.h); ml_done = true; }
+            if (ml_logits.size() != L.nodes.size()) continue;
+            ml_site_read(ml_logits, read);
+        } else {
         if ((mode & kReadRingSequence) && !leading) continue;
         if (hopeless && !(mode & kReadLocalLevels)) continue;  // only a change of levels can rescue a reading this far off
         if (!scalable_decide_sites(L, samples, mode, read)) continue;
+        }
         // Both placements share the sites. Try the one whose raw header reads
         // better first; the other gets the full soft decode only if its own
         // header is plausible.
@@ -532,6 +545,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
         std::vector<uint8_t> cw[2], rel[2];
         scalable_assemble(L, read, cw[0], rel[0]); scalable_assemble(G, read, cw[1], rel[1]);
         const int match[2] = {scalable_header_matches(L, cw[0]), scalable_header_matches(G, cw[1])};
+        capture_evidence(L, read, std::max(match[0], match[1]), attempt.h);
         const int first = match[1] > match[0] ? 1 : 0;
         // The header reads before any correction (the code is systematic).
         // If almost none of it is right under either placement, this reading
@@ -551,7 +565,8 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
             std::memcpy(out_payload, candidate.data(), length); *out_payload_len = length;
             if (out_version) *out_version = static_cast<uint32_t>(attempt.version);
             if (out_layout) *out_layout = static_cast<uint32_t>(attempt.family + 2 * which);
-            set_status(diag, CKEY_OK, local.message);
+            if (mode == kReadMl) { char m[96]; std::snprintf(m, sizeof m, "%.70s (ML site reading)", local.message); set_status(diag, CKEY_OK, m); }
+            else set_status(diag, CKEY_OK, local.message);
             if (diag) { diag->corrected_symbols = local.corrected_symbols; diag->erasures_used = local.erasures_used; }
             return CKEY_OK;
         }

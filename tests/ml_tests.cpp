@@ -6,12 +6,15 @@
 //     garbage everywhere still yields only the true payload or no read;
 //   - with no model, the ML option changes nothing;
 //   - the gate skips the border search only when a model is loaded and sees
-//     nothing, and ML-only (no gate) still falls back to the border search.
+//     nothing, and ML-only (no gate) still falls back to the border search;
+//   - multi-frame: frames too noisy to decode alone decode together, and two
+//     different symbols alternating in one place never yield a wrong payload.
 #include "../src/ckey.cpp"
 #include "check.h"
 #include "svg_raster.h"
 
 #include <cstdio>
+#include <random>
 
 namespace {
 
@@ -134,6 +137,63 @@ int main() {
     CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML, with_ml) == CKEY_OK && is_text(with_ml));
     CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) != CKEY_OK);
     CKEY_CHECK(std::strstr(with_ml.message, "ML locator") != nullptr);
+
+
+    // ---- Multi-frame accumulation ----
+    {
+        CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+        const char *texts[2] = {"https://openckey.org/ml/accumulate", "https://openckey.org/ml/other-one"};
+        std::vector<uint8_t> raster[2];
+        for (int t = 0; t < 2; ++t) {
+            ckey_scalable_symbol a{};
+            CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(texts[t]), std::strlen(texts[t]), 8, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &a, &d) == CKEY_OK);
+            raster[t] = svgtest::rasterize(svgtest::parse(render(a)), 320, 320, 3);
+        }
+        const int FW = 480, FH = 420, fx = 80, fy = 50;
+        std::mt19937 rng(1); std::normal_distribution<double> noise(0, 60);
+        auto noisy = [&](int t) {
+            std::vector<uint8_t> fr(static_cast<size_t>(FW) * FH);
+            for (int y = 0; y < FH; ++y) for (int x = 0; x < FW; ++x) {
+                double v = 128;
+                if (x >= fx && y >= fy && x < fx + 320 && y < fy + 320) v = 128 + 60 * (raster[t][static_cast<size_t>(y - fy) * 320 + x - fx] - 128.0) / 128.0;
+                fr[static_cast<size_t>(y) * FW + x] = static_cast<uint8_t>(std::clamp(v + noise(rng), 0.0, 255.0));
+            }
+            return fr;
+        };
+        ckey_frame_accumulator *acc = ckey_accumulator_create();
+        CKEY_CHECK(acc && ckey_accumulator_frames(acc) == 0);
+        ckey_scan_options o; ckey_scan_options_init(&o);
+        int decoded_at = -1, single = 0;
+        for (int f = 0; f < 8 && decoded_at < 0; ++f) {
+            const auto fr = noisy(0);
+            ckey_scan_result r{};
+            single += ckey_scan_frame_gray8(fr.data(), FW, FH, FW, &o, out.data(), out.size(), &r) == CKEY_OK;
+            const ckey_status st = ckey_scan_frame_accumulate_gray8(fr.data(), FW, FH, FW, &o, acc, out.data(), out.size(), &r);
+            if (st == CKEY_OK) {
+                CKEY_CHECK(r.payload_length == std::strlen(texts[0]) && std::memcmp(out.data(), texts[0], r.payload_length) == 0);
+                CKEY_CHECK(r.flags & CKEY_SCAN_FLAG_ACCUMULATED);
+                CKEY_CHECK(ckey_accumulator_frames(acc) == 0);
+                decoded_at = f;
+            }
+        }
+        CKEY_CHECK(single == 0);            // no frame decodes alone ...
+        CKEY_CHECK(decoded_at >= 1);        // ... but together they do
+        // Two different symbols alternating in the same place: only a true payload, never a mix.
+        ckey_accumulator_reset(acc);
+        for (int f = 0; f < 16; ++f) {
+            const auto fr = noisy(f % 2);
+            ckey_scan_result r{};
+            if (ckey_scan_frame_accumulate_gray8(fr.data(), FW, FH, FW, &o, acc, out.data(), out.size(), &r) == CKEY_OK) {
+                const bool a = r.payload_length == std::strlen(texts[0]) && std::memcmp(out.data(), texts[0], r.payload_length) == 0;
+                const bool b = r.payload_length == std::strlen(texts[1]) && std::memcmp(out.data(), texts[1], r.payload_length) == 0;
+                CKEY_CHECK(a || b);
+            }
+        }
+        ckey_scan_result r{};
+        CKEY_CHECK(ckey_scan_frame_accumulate_gray8(nullptr, FW, FH, FW, &o, acc, out.data(), out.size(), &r) == CKEY_INVALID_ARGUMENT);
+        ckey_accumulator_destroy(acc);
+        ckey_accumulator_destroy(nullptr);
+    }
 
     // ---- Invalid arguments ----
     CKEY_CHECK(ckey_ml_locate_gray8(nullptr, W, H, W, 0.3, det, 8) == 0);
