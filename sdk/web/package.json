@@ -1,6 +1,6 @@
 {
   "name": "openckey",
-  "version": "0.1.0-build.96",
+  "version": "0.1.0-build.97",
   "description": "CKey optical codes for the web: encode, render (canvas, pixels, PNG, SVG, PDF) and scan, with the CKey C core compiled to WebAssembly.",
   "license": "MIT",
   "homepage": "https://openckey.org",

@@ -686,10 +686,12 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
             const bool ink = 10 * cov.ink[i] >= cov.samples;
             out[i] = !ink ? 0 : cov.paint[i] >= 0 ? static_cast<uint8_t>(2 + cov.paint[i]) : 1;
         }
-        // Grid modules from the data, as centred dots with gaps (the reader's
-        // mark model): 1 of 3, 2 of 4, 3 of 5, 4 of 6 cells across; at 1 and
-        // 2 cells per module the whole block.
-        const uint32_t dot = c <= 2 ? c : c - 2, off = (c - dot) / 2;
+        // Grid modules from the data. Standard: centred dots with gaps (its
+        // reader mark model): 1 of 3, 2 of 4, 3 of 5, 4 of 6 cells across, the
+        // whole block at 1 and 2. Print: always the whole block, which reads
+        // there and survives a display's sub-pixel structure (a lone one-cell
+        // dot does not).
+        const uint32_t dot = c <= 2 ? c : L->family ? c - 1 : c - 2, off = (c - dot) / 2;
         for (size_t i = 0; i < L->nodes.size(); ++i) {
             const auto &n = L->nodes[i];
             if (n.kind != 0 || !scalable_site_value(*L, s, i)) continue;

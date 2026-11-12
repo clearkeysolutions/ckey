@@ -10,6 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.97 — 2026-11-12
+
+* **Pixel-perfect lattice, Print family:** grid modules are drawn as a dot one cell smaller than the module (2 of 3, 3 of 4 cells across) instead of Standard's `c − 2`.
+  * Under a sub-pixel display model (RGB stripes and black matrix), the build-96 one-cell dot at the default 3 cells per module read 6/9 at version 14 and 5/9 at version 28; it now reads 9/9 and 8/9. A lone one-cell dot is mostly stripe and black matrix to a camera.
+  * Solid blocks were also tried. They fail clean decodes of versions 26–31 at 3 pixels per cell, where large solid areas merge.
+  * Clean decodes at 3 cells per module: 278/279; at 4: 279/279. The ideal-display sweep is unchanged or better (Print, 3 cells: 120/120).
+  * Standard is unchanged.
+
 ## 0.1.0-build.96 — 2026-11-12
 
 **Pixel-perfect rendering** in the core, the Web SDK and the Swift SDK.
