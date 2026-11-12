@@ -154,11 +154,16 @@ int main() {
     for (size_t i = 0; i < n; ++i) for (double v : det[i].quad) CKEY_CHECK(std::isfinite(v));
     CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML, with_ml) == CKEY_OK && is_text(with_ml));
     CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE, with_ml) == CKEY_OK && is_text(with_ml));
+    // ML_AFTER: a frame the border search reads never uses a proposal.
+    CKEY_CHECK(scan(CKEY_SCAN_OPTION_ML_AFTER, with_ml) == CKEY_OK && is_text(with_ml));
+    CKEY_CHECK(!(with_ml.flags & CKEY_SCAN_FLAG_ML));
     // Blank frames with the noisy model: proposals, but never a payload.
     {
         std::vector<uint8_t> blank(static_cast<size_t>(W) * H);
         uint32_t r = 99; for (auto &x : blank) { r = r * 1664525u + 1013904223u; x = static_cast<uint8_t>(100 + (r >> 26)); }
         ckey_scan_options o; ckey_scan_options_init(&o); o.flags = CKEY_SCAN_OPTION_ML; ckey_scan_result res{};
+        CKEY_CHECK(ckey_scan_frame_gray8(blank.data(), W, H, W, &o, out.data(), out.size(), &res) != CKEY_OK);
+        o.flags = CKEY_SCAN_OPTION_ML_AFTER; res = ckey_scan_result{};
         CKEY_CHECK(ckey_scan_frame_gray8(blank.data(), W, H, W, &o, out.data(), out.size(), &res) != CKEY_OK);
     }
 

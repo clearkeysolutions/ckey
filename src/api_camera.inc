@@ -90,7 +90,8 @@ void scan_image(const uint8_t *gray, size_t width, size_t height, size_t stride,
         }
         return false;
     };
-    if (option_flags & CKEY_SCAN_OPTION_ML) {
+    // ML locator proposals, before the border search (ML) or after it (ML_AFTER).
+    const auto try_ml = [&](bool allow_gate) -> bool {
         MlDetection det[kMlMaxProposals];
         const size_t n = ml_locate(gray, width, height, stride, std::min(kMlPropose, kMlGate), det, kMlMaxProposals);
         double best = 0;
@@ -102,20 +103,24 @@ void scan_image(const uint8_t *gray, size_t width, size_t height, size_t stride,
             // (a density estimate: a wider window than a caller's exact hint).
             const bool caller = version_hint().version != 0;
             const VersionHintScope hint(caller ? version_hint().version : static_cast<int>(std::lround(det[i].version)), caller ? version_hint().window : 2);
-            if (try_border(det[i].quad, CKEY_SCAN_PROFILE_SCALABLE, true)) return;
+            if (try_border(det[i].quad, CKEY_SCAN_PROFILE_SCALABLE, true)) return true;
         }
         const bool model = ml_current() != nullptr;
-        if (model && (option_flags & CKEY_SCAN_OPTION_ML_GATE) && best < kMlGate) {
+        if (allow_gate && model && (option_flags & CKEY_SCAN_OPTION_ML_GATE) && best < kMlGate) {
             std::snprintf(r.message, sizeof(r.message), "%s", "ML locator: no symbol");
-            return;
+            return true;   // stop: the gate says there is nothing to search for
         }
-    }
+        return false;
+    };
+    if ((option_flags & CKEY_SCAN_OPTION_ML) && try_ml(true)) return;
     std::vector<double> borders(8 * max_candidates);
     bool cut = false;
     const size_t count = find_borders(gray, width, height, stride, borders.data(), max_candidates, &cut);
     r.candidates = static_cast<uint32_t>(count);
     if (cut) r.flags |= CKEY_SCAN_FLAG_SYMBOL_CUT;
     for (size_t i = 0; i < count; ++i) if (try_border(borders.data() + 8 * i, CKEY_SCAN_PROFILE_ALL, false)) return;
+    // ML_AFTER: frames the border search reads never pay for the locator.
+    if ((option_flags & CKEY_SCAN_OPTION_ML_AFTER) && !(option_flags & CKEY_SCAN_OPTION_ML) && !work_exhausted()) try_ml(false);
 }
 
 // Brown radial model on focal-normalised coordinates: distorted = undistorted

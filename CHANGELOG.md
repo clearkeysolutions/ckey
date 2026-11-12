@@ -10,6 +10,24 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.92 — 2026-11-12
+
+**The corner refiner is built in**, and the locator can run after the classical search instead of before it.
+
+* **Built-in corner refiner `refiner-v1`** (`src/ml_builtin_refiner.inc`; key-test `ml/locator-models/refiner-v1.*`, commit `294de49`): width 3, 450k weights, 473,276 bytes, sha256 `9fd91f51…`. It was trained on the owner's Mac with 60,000 fresh-seed cases. It runs only when a Profile 0 decode fails from the given corners: the symbol is rectified through them, the model corrects each corner (two rounds), and the decode is retried once.
+  * **Measured** against the classical reader on identical frames, fresh seeds never used in training:
+
+| | Classical | With refiner |
+|---|---|---|
+| 2,000 cases (owner's Mac): full scan | 59.5% | **63.3%** (+69, lost 0) |
+| 1,200 other cases (4-core container): full scan | 56.4% | **61.4%** (+54, lost 0) |
+| 1,200 cases: from corners 0.6 module off | 3.9% | **66.2%** |
+| Wrong payloads | 0 | 0 |
+
+  * The gains are largest under motion and defocus, ring stress and colour.
+  * **Cost:** only frames whose first decode fails run it. The full-scan 95th percentile rose from 250 to 470 ms on the owner's Mac, and from 598 to 1,111 ms on the busy container; medians rose 6–24 ms. Device timing on the CPU path is not measured yet.
+* **`CKEY_SCAN_OPTION_ML_AFTER`:** the locator's proposals are tried only after the border search found nothing that decodes, so frames the classical reader reads never pay for the locator. With `CKEY_SCAN_OPTION_ML` the proposals still come first. Test: a frame the border search reads never uses a proposal.
+
 ## 0.1.0-build.91 — 2026-11-11
 
 **The Swift SDK now has everything the iPhone app's scanner had**, so the app can be a thin client of it (Open CKey Scanner on openckey.org `main` now is). Reading other barcode symbologies stays in the app by design.
