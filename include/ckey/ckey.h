@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.95"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.96"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -738,22 +738,21 @@ CKEY_API ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *sym
                                                  size_t out_capacity, size_t *out_required);
 
 /*
- * EXPERIMENTAL (build 95): the API and its output may change. Pixel-perfect
- * lattice traced from the drawn geometry. Measured on a version-26 symbol,
- * this tracing alone does not yet decode: round grid dots and ring dashes
- * thinner than a cell are lost or merged. Drawing each grid module as a
- * centred dot of 1 of 3x3 or 2 of 4x4 cells (from ckey_ml_site_map) decodes;
- * solid 1x1 and 2x2 cells do not, because the reader models dots with gaps.
- *
- * Pixel-perfect lattice. The symbol drawn on a grid of cells where every
- * Profile 0 grid module is exactly cells_per_module x cells_per_module cells
- * (1..4) and every other mark (rings, rays, frame) is snapped to whole cells.
- * Each out byte is one cell: 0 background, 1 ink, 2 + i accent i. Display it
- * only at whole-number scales without smoothing (one cell = N device pixels),
- * export PNG by repeating each cell N x N, and SVG as one square per cell, so
- * every copy is the same pixel-perfect image. Flat colours only: materials
- * and logos are not drawn. *out_side is the side in cells (the field plus a
- * quiet margin of at least one canonical unit). Call with out NULL for the size.
+ * Pixel-perfect lattice: the symbol on a grid of whole cells, for displays and
+ * exports that must never be resampled. Every Profile 0 grid module is
+ * exactly cells_per_module x cells_per_module cells (1..6; 0 = the smallest
+ * size that decodes at every version: 3 for the Print family, 6 for Standard)
+ * and is drawn as a centred dot of 1, 2, 3 or 4 cells across at 3, 4, 5 or 6
+ * cells per module (the whole block at 1 and 2); every other mark (frame,
+ * finders, rings, rays, Ring Key) is snapped to the cells it covers by at
+ * least 10%. Smaller sizes than the default do not decode reliably (the
+ * Standard family's ring dots are 0.2 of a module). Each out byte is one
+ * cell: 0 background, 1 ink, 2 + i accent i. Display it only at whole-number
+ * scales without smoothing (one cell = N device pixels); export PNG by
+ * repeating each cell N x N and SVG as one square per cell, so every copy is
+ * the same image. Flat colours only: materials and logos are not drawn.
+ * *out_side is the side in cells (the field plus a quiet margin of at least
+ * one canonical unit). Call with out NULL for the size.
  */
 #define CKEY_HAS_LATTICE 1
 CKEY_API ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *symbol, const ckey_style *style,

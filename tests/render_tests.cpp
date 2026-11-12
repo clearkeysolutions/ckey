@@ -270,6 +270,43 @@ int main() {
         CKEY_CHECK(ckey_render_scalable_print(&s, nullptr, 0.5, 600, px.data(), px.size(), &side) == CKEY_OK);
         for (uint8_t v : px) CKEY_CHECK(v == 0 || v == 255);
     }
+    // Pixel-perfect lattice: whole cells, grid modules exactly c x c cells,
+    // decodes at the layout's default size (0) across versions, deterministic,
+    // and refuses invalid sizes.
+    {
+        for (const auto &[version, layout] : {std::pair{1u, CKEY_LAYOUT_STANDARD}, std::pair{9u, CKEY_LAYOUT_PRINT}, std::pair{18u, CKEY_LAYOUT_STANDARD},
+                                              std::pair{26u, CKEY_LAYOUT_PRINT}, std::pair{31u, CKEY_LAYOUT_STANDARD}}) {
+            const size_t bytes = std::min<size_t>(40, ckey_scalable_capacity(version, CKEY_ECC_M, layout));
+            const auto s = encode(version, layout, bytes, version * 3);
+            uint32_t side = 0; size_t need = 0;
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
+            const uint32_t c = layout == CKEY_LAYOUT_PRINT ? 3 : 6, modules = ckey_scalable_modules_across(version);
+            CKEY_CHECK(side == modules * c + 2 * ((modules * c + 28) / 29) && need == static_cast<size_t>(side) * side);
+            std::vector<uint8_t> cells(need), again(need);
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, cells.data(), cells.size(), &side, &need) == CKEY_OK);
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, again.data(), again.size(), &side, &need) == CKEY_OK && cells == again);
+            for (uint8_t v : cells) CKEY_CHECK(v <= 1);  // the plain style has no accents
+            for (const uint32_t px : {1u, 2u}) {
+                const uint32_t w = side * px + 80;
+                std::vector<uint8_t> frame(static_cast<size_t>(w) * w, 255);
+                for (uint32_t y = 0; y < side * px; ++y) for (uint32_t x = 0; x < side * px; ++x)
+                    frame[static_cast<size_t>(y + 40) * w + x + 40] = cells[(y / px) * side + x / px] ? 0 : 255;
+                ckey_scan_options so{}; so.abi_version = CKEY_ABI_VERSION;
+                ckey_scan_result r{}; r.abi_version = CKEY_ABI_VERSION;
+                std::vector<uint8_t> out(4096);
+                CKEY_CHECK(ckey_scan_frame_gray8(frame.data(), w, w, w, &so, out.data(), out.size(), &r) == CKEY_OK);
+                const auto payload = pseudo(bytes, version * 3);
+                CKEY_CHECK(r.payload_length == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
+            }
+        }
+        const auto s = encode(5, CKEY_LAYOUT_STANDARD, 10, 7);
+        uint32_t side = 0; size_t need = 0;
+        CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 7, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);
+        CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, nullptr, 0, nullptr, &need) == CKEY_INVALID_ARGUMENT);
+        CKEY_CHECK(ckey_render_scalable_lattice(nullptr, nullptr, 0, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);
+        std::vector<uint8_t> small(10);
+        CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 4, small.data(), small.size(), &side, &need) == CKEY_INSUFFICIENT_BUFFER);
+    }
     std::printf("native render tests passed\n");
     return 0;
 }

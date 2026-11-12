@@ -10,6 +10,25 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.96 — 2026-11-12
+
+**Pixel-perfect rendering** in the core, the Web SDK and the Swift SDK.
+
+* **`ckey_render_scalable_lattice`** (`CKEY_HAS_LATTICE`) draws a Profile 0 symbol on whole cells.
+  * Every grid module is exactly `cells_per_module` × `cells_per_module` cells, drawn as a centred dot from the data: 1, 2, 3 or 4 cells across at 3, 4, 5 or 6 cells per module, or the whole block at 1 and 2. The reader's mark model needs gaps between dots.
+  * Every other mark (frame, finders, rings, rays, Ring Key) is snapped to the cells it covers by at least 10%.
+  * `cells_per_module` 0 selects the measured default: **3 for the Print family, 6 for Standard**, whose ring dots are 0.2 of a module against Print's 0.3.
+  * Clean decodes over 3 payloads at each of 31 versions and 3 screen scales: Print 2 cells 272/279 (version 11 fails), **Print 3 cells 278/279**, Standard 5 cells 276/279, **Standard 6 cells 279/279**. No wrong payloads.
+  * This replaces the experimental build-95 tracing, which did not decode.
+* **Web SDK:** `renderLattice`, `renderPixelPerfect`, `pixelPerfectScale`, `renderToCanvasPixelPerfect`, `renderPNGPixelPerfect` and `renderSVGPixelPerfect`.
+  * `renderToCanvasPixelPerfect` picks whole device pixels per cell from `cssPx` and `devicePixelRatio` and sets the canvas's CSS size, so one canvas pixel is one device pixel.
+  * Bridge `ckw_render_lattice`. Native, fake-module and WebAssembly tests: the output is exactly two colours and decodes.
+* **Swift SDK:**
+  * `CKeyLattice`, `lattice(cellsPerModule:)`, `pixelPerfectPixels`, `pixelPerfectImage`, `pixelPerfectPNG` and `pixelPerfectSVG`.
+  * **`CKeyView`, `CKeyUIView` and `CKeyNSView` now draw pixel-perfect** instead of the antialiased raster at the view's size. `policy` now applies only to `cgImage` and `pngData`.
+  * Not compiled here (no Apple toolchain).
+* `rasterize_scene` takes an optional canonical origin and scale.
+
 ## 0.1.0-build.95 — 2026-11-12
 
 * **Experimental `ckey_render_scalable_lattice`** (`CKEY_HAS_LATTICE`): draws a Profile 0 symbol on a grid of whole cells, `cells_per_module` (1–4) cells per grid module, with every mark snapped to cells, for pixel-perfect display and export. A prototype toward one pixel-perfect renderer for the app, the site and the SDKs; not used by any of them yet.

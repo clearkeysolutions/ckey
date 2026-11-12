@@ -294,6 +294,38 @@ CKW_EXPORT uint8_t *ckw_render_raster(const ckey_scalable_symbol *sym, const Web
     return out;
 }
 
+// Pixel-perfect lattice (ckey_render_scalable_lattice). Returns malloc'd
+// bytes: side (uint32 little-endian), the palette as 6 RGB triples
+// (background, ink, accents 0..3; unused accents repeat the ink), then
+// side * side cell codes (0 background, 1 ink, 2 + i accent i).
+CKW_EXPORT uint8_t *ckw_render_lattice(const ckey_scalable_symbol *sym, const WebStyle *ws, uint32_t cells_per_module) {
+    if (!sym) { set_error("missing symbol"); return nullptr; }
+    ckey_style fallback;
+    const ckey_style *style = style_of(ws, fallback);
+    ckey_style colours;
+    if (style) colours = *style; else ckey_style_default(&colours);
+    uint32_t side = 0;
+    size_t need = 0;
+    ckey_status st = ckey_render_scalable_lattice(sym, style, cells_per_module, nullptr, 0, &side, &need);
+    if (st != CKEY_INSUFFICIENT_BUFFER || need == 0) {
+        explain_refusal(sym, ws, "invalid lattice options (cells per module 0..6)");
+        return nullptr;
+    }
+    const size_t head = 4 + 18;
+    auto *out = static_cast<uint8_t *>(std::malloc(head + need));
+    if (!out) { set_error("out of memory"); return nullptr; }
+    st = ckey_render_scalable_lattice(sym, style, cells_per_module, out + head, need, &side, &need);
+    if (st != CKEY_OK) { std::free(out); set_error("lattice render failed"); return nullptr; }
+    for (int i = 0; i < 4; ++i) out[i] = static_cast<uint8_t>(side >> (8 * i));
+    const ckey_rgb ink = colours.ink;
+    const ckey_rgb palette[6] = {colours.background, ink,
+                                 colours.accent_count > 0 ? colours.accents[0] : ink, colours.accent_count > 1 ? colours.accents[1] : ink,
+                                 colours.accent_count > 2 ? colours.accents[2] : ink, colours.accent_count > 3 ? colours.accents[3] : ink};
+    for (int i = 0; i < 6; ++i) { out[4 + 3 * i] = palette[i].r; out[5 + 3 * i] = palette[i].g; out[6 + 3 * i] = palette[i].b; }
+    g_last_len = head + need;
+    return out;
+}
+
 // Encodes RGBA8 pixels (stride = width * 4) as a PNG. dpi <= 0 omits pHYs.
 CKW_EXPORT uint8_t *ckw_encode_png_rgba(const uint8_t *rgba, uint32_t width, uint32_t height, double dpi) {
     size_t need = 0;

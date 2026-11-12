@@ -43,7 +43,15 @@ let png: Data  = try symbol.pngData(size: 1024, dpi: 300)
 let svg: String = try symbol.svg(scale: 8, style: .concept)
 let pdf: Data  = try symbol.pdfData(widthPoints: 144)                // 2 inches wide
 let raw = try symbol.pixels(size: 256)                               // straight-alpha RGBA8 buffer
+
+// Pixel-perfect (what CKeyView displays): every module a fixed block of whole pixels
+let lattice = try symbol.lattice()                                   // cells: 0 background, 1 ink, 2+ accents
+let exact: CGImage = try symbol.pixelPerfectImage(pxPerCell: lattice.pxPerCell(fitting: 900))
+let exactPNG = try symbol.pixelPerfectPNG(pxPerCell: 4, dpi: 300)
+let exactSVG = try symbol.pixelPerfectSVG(pxPerCell: 4)
 ```
+
+`CKeyView`, `CKeyUIView` and `CKeyNSView` draw pixel-perfect. They show the core's lattice (`ckey_render_scalable_lattice`) with the most whole display pixels per cell that fit, unscaled and centred, so a code on screen is never resampled. `lattice(cellsPerModule:)` takes 0 (the default: 3 for `.print`, 6 for `.standard`, the smallest size that decoded at every version on clean output) or 1...6. Pixel-perfect output draws flat colours: no materials, and a logo is composited by the caller.
 
 `size` is the pixel size of the full 31-unit canvas, which includes the quiet margin. The raster policies are `.coverage` (antialiased, the default), `.binary` and `.hybrid` (thin marks kept at least 1 px wide). `CKeySymbol.capacity(version:level:layout:)` gives the payload limit for a version. `CKeyError` explains any refusal.
 

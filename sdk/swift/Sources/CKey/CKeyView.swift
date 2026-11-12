@@ -81,8 +81,13 @@ final class CKeyImageCache {
         guard pixels >= 16 else { return nil }
         let box = Box(Key(content: content, pixels: min(pixels, 16384), style: style, policy: policy, transparent: transparent))
         if let hit = cache.object(forKey: box) { return hit }
+        // Pixel-perfect: the most whole pixels per lattice cell that fit,
+        // drawn at one image pixel per display pixel (the views centre it and
+        // never scale it). `policy` applies only to `CKeySymbol.cgImage`.
         guard let symbol = try? content.makeSymbol(),
-              let image = try? symbol.cgImage(size: box.key.pixels, policy: policy, transparent: transparent, style: style)
+              let lattice = try? symbol.lattice(style: style),
+              let image = try? symbol.pixelPerfectImage(pxPerCell: lattice.pxPerCell(fitting: box.key.pixels),
+                                                        transparent: transparent, style: style)
         else { return nil }
         cache.setObject(image, forKey: box)
         return image
@@ -90,9 +95,11 @@ final class CKeyImageCache {
 }
 
 #if canImport(SwiftUI)
-/// A SwiftUI view that draws a CKey as native pixels: the core rasterizes
-/// the symbol at the view's exact pixel size (points x display scale) into a
-/// `CGImage`; no SVG, file or web view is involved. The view is square
+/// A SwiftUI view that draws a CKey pixel-perfect: the core's lattice, with
+/// the most whole display pixels per cell that fit the view's pixel size
+/// (points x display scale), shown unscaled and centred; no SVG, file or web
+/// view is involved. A view smaller than the lattice at one pixel per cell
+/// shows it at one pixel per cell, cropped by the view's bounds. The view is square
 /// (aspect ratio 1) and transparent by default: no background, border or
 /// chrome. With `transparent: true` the host must place it on a background
 /// that contrasts with the style's ink (black for `.plain`).

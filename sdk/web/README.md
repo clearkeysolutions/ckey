@@ -32,7 +32,13 @@ const ckey = await loadCKey();
 const sym = ckey.encode('https://openckey.org', { version: 0, level: 'M', layout: 'standard' });
 console.log(sym.version, sym.level, sym.layout, sym.payloadLength, sym.capacity);
 
-// draw into a canvas: ImageData + putImageData, no intermediate file
+// pixel-perfect on screen (recommended for display): every module a fixed
+// block of whole device pixels, never resampled; sets the canvas's CSS size
+ckey.renderToCanvasPixelPerfect(sym, document.querySelector('canvas'), { cssPx: 460, devicePixelRatio: window.devicePixelRatio });
+const pngExact = ckey.renderPNGPixelPerfect(sym, { pxPerCell: 4 });   // the same image as a file
+const svgExact = ckey.renderSVGPixelPerfect(sym, { pxPerCell: 4 });   // one square per cell
+
+// or the antialiased raster at any size: ImageData + putImageData
 ckey.renderToCanvas(sym, document.querySelector('canvas'), { size: 512, transparent: false, policy: 'coverage' });
 
 // or use the pixels yourself (also works in Node and in workers)
@@ -49,6 +55,14 @@ sym.free(); // release WebAssembly memory now; a forgotten symbol is freed by th
 `level` is `'L'`, `'M'` (default), `'Q'`, `'H'`, `'U'` (Ultra, 80% parity) or `'X'` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity, and the smallest versions carry nothing at those levels: `ckey.capacity(1, 'X')` is 0 and encoding there throws. `layout` is `'standard'` (default), `'print'` (Profile 0.1), or their byte-grouped forms `'standard-grouped'` (Format 0.29) and `'print-grouped'` (Format 0.30), which keep the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. Decoding reports the layout found; `'print-grouped'` reports profile `'0.1'`.
 
 `encode` throws an `Error` that carries the core's diagnostic message, for example `payload exceeds the selected Profile 0 version and level`. An invalid option throws a `TypeError` or a `RangeError`.
+
+#### Pixel-perfect rendering
+
+`renderLattice`, `renderPixelPerfect`, `renderToCanvasPixelPerfect`, `renderPNGPixelPerfect` and `renderSVGPixelPerfect` draw the core's lattice (`ckey_render_scalable_lattice`). Every grid module is exactly `cellsPerModule` × `cellsPerModule` cells, and each cell is `pxPerCell` × `pxPerCell` whole pixels, so the canvas, the PNG and the SVG are the same image and nothing is ever resampled.
+- `cellsPerModule` 0, the default, is the smallest size that decoded at every version on clean output: 3 for `'print'` and 6 for `'standard'`.
+- Show a pixel-perfect canvas only at one canvas pixel per device pixel. `renderToCanvasPixelPerfect` with `cssPx` and `devicePixelRatio` does this.
+- Redraw when `devicePixelRatio` changes, for example when the window moves to another screen.
+- Colours are flat: materials are not drawn, and logos are composited by the caller.
 
 #### Render options
 

@@ -198,6 +198,18 @@ export interface CKey {
   readonly abiVersion: number;
   encode(payload: string | ArrayBuffer | ArrayBufferView, options?: EncodeOptions): CKeySymbol;
   capacity(version: number, level?: Level, layout?: Layout): number;
+  /** The pixel-perfect lattice: side x side cells (0 background, 1 ink, 2 + i accent i) and the palette. */
+  renderLattice(symbol: CKeySymbol, options?: PixelPerfectOptions): { side: number; palette: [number, number, number][]; cells: Uint8Array };
+  /** Pixel-perfect RGBA pixels, (side * pxPerCell) square; every cell is whole pixels. */
+  renderPixelPerfect(symbol: CKeySymbol, options?: PixelPerfectOptions): { width: number; height: number; data: Uint8ClampedArray };
+  /** Largest pxPerCell that fits in maxDevicePx device pixels (at least 1). */
+  pixelPerfectScale(symbol: CKeySymbol, maxDevicePx: number, options?: PixelPerfectOptions): number;
+  /** Draws pixel-perfect into a canvas; with cssPx and devicePixelRatio, picks whole device pixels per cell and sets the CSS size. */
+  renderToCanvasPixelPerfect<C extends HTMLCanvasElement | OffscreenCanvas>(symbol: CKeySymbol, canvas: C, options?: PixelPerfectOptions & { cssPx?: number; devicePixelRatio?: number }): { canvas: C; pxPerCell: number; side: number; devicePx: number };
+  /** Pixel-perfect PNG (each cell pxPerCell x pxPerCell pixels; optional dpi). */
+  renderPNGPixelPerfect(symbol: CKeySymbol, options?: PixelPerfectOptions & { dpi?: number }): Uint8Array;
+  /** Pixel-perfect SVG: one square per cell, crisp edges. */
+  renderSVGPixelPerfect(symbol: CKeySymbol, options?: PixelPerfectOptions): string;
   renderToCanvas<C extends HTMLCanvasElement | OffscreenCanvas>(symbol: CKeySymbol, canvas: C, options?: RasterOptions): C;
   renderPixels(symbol: CKeySymbol, options?: RasterOptions): Pixels;
   renderPNG(symbol: CKeySymbol, options?: PNGOptions): Uint8Array;
@@ -285,3 +297,15 @@ export const CKEY_TELEMETRY_ENDPOINT: string;
 export const TELEMETRY_OFF: 0;
 export const TELEMETRY_ON: 1;
 export const TELEMETRY_LOCAL: 2;
+
+/** Options for the pixel-perfect renderers. */
+export interface PixelPerfectOptions {
+  /** Cells per grid module, 0..6; 0 (default) = 3 for the Print layout, 6 for Standard. */
+  cellsPerModule?: number;
+  /** Whole pixels per cell, 1..64 (default 1). */
+  pxPerCell?: number;
+  /** Background cells transparent (RGBA outputs). */
+  transparent?: boolean;
+  preset?: string;
+  style?: Record<string, unknown>;
+}

@@ -23,6 +23,36 @@ final class CKeyRoundTripTests: XCTestCase {
         XCTAssertEqual(result.telemetryProfileCode, 0)
     }
 
+    func testPixelPerfectRendersWholeCellsAndDecodes() throws {
+        for layout in [CKeyLayout.standard, .print] {
+            let text = String(repeating: "pixel-perfect ", count: 20)
+            let symbol = try CKeySymbol.encode(text, layout: layout)
+            let lattice = try symbol.lattice()
+            XCTAssertEqual(lattice.cells.count, lattice.side * lattice.side)
+            XCTAssertTrue(lattice.cells.allSatisfy { $0 <= 1 })
+            XCTAssertEqual(lattice.pxPerCell(fitting: lattice.side * 3 + 2), 3)
+            let image = try symbol.pixelPerfectImage(pxPerCell: 2)
+            XCTAssertEqual(image.width, lattice.side * 2)
+            let result = try XCTUnwrap(CKeyDecoder.decode(cgImage: image))
+            XCTAssertEqual(result.text, text)
+            let pixels = try symbol.pixelPerfectPixels(pxPerCell: 2)
+            var colours = Set<UInt32>()
+            pixels.rgba.withUnsafeBytes { raw in
+                let b = raw.bindMemory(to: UInt8.self)
+                for i in stride(from: 0, to: b.count, by: 4) { colours.insert(UInt32(b[i]) << 16 | UInt32(b[i + 1]) << 8 | UInt32(b[i + 2])) }
+            }
+            XCTAssertEqual(colours.count, 2, "only background and ink: nothing blended")
+            let png = try symbol.pixelPerfectPNG(pxPerCell: 3, dpi: 300)
+            XCTAssertEqual(Array(png.prefix(4)), [0x89, 0x50, 0x4E, 0x47])
+            let svg = try symbol.pixelPerfectSVG(pxPerCell: 3)
+            XCTAssertTrue(svg.contains("width=\"\(lattice.side * 3)\""))
+            XCTAssertTrue(svg.contains("shape-rendering=\"crispEdges\""))
+        }
+        let symbol = try CKeySymbol.encode("x")
+        XCTAssertThrowsError(try symbol.lattice(cellsPerModule: 7))
+        XCTAssertThrowsError(try symbol.pixelPerfectImage(pxPerCell: 0))
+    }
+
     func testTransparentRenderingDecodesOverWhite() throws {
         let symbol = try CKeySymbol.encode("https://openckey.org")
         let image = try symbol.cgImage(size: 400, transparent: true)

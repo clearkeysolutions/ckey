@@ -39,6 +39,74 @@ public enum CKeyRasterPolicy: Int, Sendable, CaseIterable {
 
 /// A straight-alpha (non-premultiplied) sRGB RGBA8 pixel buffer, rows top to
 /// bottom with no padding: what the core's raster backend produces.
+/// A pixel-perfect lattice (`CKeySymbol.lattice`): `side` x `side` cells,
+/// each 0 (background), 1 (ink) or 2 + i (accent i), and the palette
+/// (background, ink, accents 0...3; unused accents repeat the ink).
+public struct CKeyLattice: Sendable, Equatable {
+    public let side: Int
+    public let palette: [CKeyColor]
+    public let cells: [UInt8]
+
+    /// The largest whole number of pixels per cell that fits in `pixels`
+    /// (at least 1).
+    public func pxPerCell(fitting pixels: Int) -> Int { max(1, pixels / max(1, side)) }
+
+    /// RGBA8, each cell `pxPerCell` x `pxPerCell` pixels.
+    public func pixels(pxPerCell: Int, transparent: Bool = false) -> CKeyPixels {
+        let width = side * pxPerCell
+        var rgba = Data(count: width * width * 4)
+        rgba.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: UInt8.self)
+            for cy in 0..<side {
+                for cx in 0..<side {
+                    let value = Int(cells[cy * side + cx])
+                    let colour = palette[min(value, palette.count - 1)]
+                    let alpha: UInt8 = transparent && value == 0 ? 0 : 255
+                    for y in 0..<pxPerCell {
+                        var at = ((cy * pxPerCell + y) * width + cx * pxPerCell) * 4
+                        for _ in 0..<pxPerCell {
+                            out[at] = colour.red; out[at + 1] = colour.green; out[at + 2] = colour.blue; out[at + 3] = alpha
+                            at += 4
+                        }
+                    }
+                }
+            }
+        }
+        return CKeyPixels(width: width, height: width, rgba: rgba, hasAlpha: transparent)
+    }
+
+    /// SVG: one path per colour of whole-cell runs, crisp edges.
+    public func svg(pxPerCell: Int, transparent: Bool = false) -> String {
+        func hex(_ c: CKeyColor) -> String { String(format: "#%02x%02x%02x", c.red, c.green, c.blue) }
+        let size = side * pxPerCell
+        var out = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"\(size)\" height=\"\(size)\" viewBox=\"0 0 \(side) \(side)\" shape-rendering=\"crispEdges\" role=\"img\" aria-label=\"CKey symbol\">"
+        if !transparent { out += "<rect width=\"\(side)\" height=\"\(side)\" fill=\"\(hex(palette[0]))\"/>" }
+        for colour in 1..<palette.count {
+            var d = ""
+            for y in 0..<side {
+                var x = 0
+                while x < side {
+                    guard cells[y * side + x] == UInt8(colour) else { x += 1; continue }
+                    var end = x + 1
+                    while end < side, cells[y * side + end] == UInt8(colour) { end += 1 }
+                    d += "M\(x) \(y)h\(end - x)v1h\(x - end)z"
+                    x = end
+                }
+            }
+            if !d.isEmpty { out += "<path fill=\"\(hex(palette[colour]))\" d=\"\(d)\"/>" }
+        }
+        return out + "</svg>"
+    }
+
+    /// Geometry for overlays: the quiet margin and the field in cells, and
+    /// cells per canonical unit (the field spans 29 units).
+    public var margin: Int {
+        for m in 1..<max(2, side) where Int((Double(side - 2 * m) / 29).rounded(.up)) == m { return m }
+        return 1
+    }
+    public var cellsPerUnit: Double { Double(side - 2 * margin) / 29 }
+}
+
 public struct CKeyPixels: Sendable {
     public let width: Int
     public let height: Int
@@ -161,7 +229,10 @@ public final class CKeySymbol: @unchecked Sendable {
     /// See `pixels(size:policy:transparent:style:materials:)` for the parameters.
     public func cgImage(size: Int = 512, policy: CKeyRasterPolicy = .coverage, transparent: Bool = false,
                         style: CKeyStyle = .plain, materials: Bool = true) throws -> CGImage {
-        let rendered = try pixels(size: size, policy: policy, transparent: transparent, style: style, materials: materials)
+        try makeImage(pixels(size: size, policy: policy, transparent: transparent, style: style, materials: materials))
+    }
+
+    private func makeImage(_ rendered: CKeyPixels) throws -> CGImage {
         let alpha: CGImageAlphaInfo = rendered.hasAlpha ? .last : .noneSkipLast
         guard let provider = CGDataProvider(data: rendered.rgba as CFData),
               let space = CGColorSpace(name: CGColorSpace.sRGB),
@@ -175,14 +246,74 @@ public final class CKeySymbol: @unchecked Sendable {
         return image
     }
 
+    // MARK: - Pixel-perfect
+
+    /// The symbol on a grid of whole cells (`ckey_render_scalable_lattice`):
+    /// every grid module is exactly `cellsPerModule` x `cellsPerModule`
+    /// cells and every other mark is snapped to cells. Display it only at
+    /// whole-number scales without smoothing, so every copy (screen, PNG,
+    /// SVG) is the same image.
+    /// - Parameter cellsPerModule: 1...6; 0 (default) is the smallest size
+    ///   that decodes at every version: 3 for the Print layout, 6 for Standard.
+    public func lattice(cellsPerModule: Int = 0, style: CKeyStyle = .plain) throws -> CKeyLattice {
+        guard (0...6).contains(cellsPerModule) else { throw CKeyError(.invalidArgument, "cellsPerModule must be 0...6") }
+        let symbol = UnsafePointer(storage)
+        return try style.withCStyle { cStyle -> CKeyLattice in
+            var side: UInt32 = 0
+            var required = 0
+            let probe = ckey_render_scalable_lattice(symbol, cStyle, UInt32(cellsPerModule), nil, 0, &side, &required)
+            guard probe == CKEY_INSUFFICIENT_BUFFER, required > 0 else {
+                throw refusal(probe, symbol, cStyle, "the style was refused or the lattice size is invalid")
+            }
+            var cells = [UInt8](repeating: 0, count: required)
+            let status = cells.withUnsafeMutableBufferPointer {
+                ckey_render_scalable_lattice(symbol, cStyle, UInt32(cellsPerModule), $0.baseAddress, $0.count, &side, &required)
+            }
+            guard status == CKEY_OK else { throw CKeyError.core(status, nil, "pixel-perfect rendering failed") }
+            var palette = [style.background, style.ink]
+            for i in 0..<4 { palette.append(i < style.accents.count ? style.accents[i] : style.ink) }
+            return CKeyLattice(side: Int(side), palette: palette, cells: cells)
+        }
+    }
+
+    /// Pixel-perfect RGBA8: each cell exactly `pxPerCell` x `pxPerCell` pixels.
+    public func pixelPerfectPixels(pxPerCell: Int = 1, cellsPerModule: Int = 0, transparent: Bool = false,
+                                   style: CKeyStyle = .plain) throws -> CKeyPixels {
+        guard (1...64).contains(pxPerCell) else { throw CKeyError(.invalidArgument, "pxPerCell must be 1...64") }
+        return try lattice(cellsPerModule: cellsPerModule, style: style).pixels(pxPerCell: pxPerCell, transparent: transparent)
+    }
+
+    /// Pixel-perfect `CGImage` (sRGB, no interpolation). On screen, size it
+    /// so one image pixel is one display pixel (`CKeyLattice.pxPerCell(fitting:)`).
+    public func pixelPerfectImage(pxPerCell: Int = 1, cellsPerModule: Int = 0, transparent: Bool = false,
+                                  style: CKeyStyle = .plain) throws -> CGImage {
+        try makeImage(pixelPerfectPixels(pxPerCell: pxPerCell, cellsPerModule: cellsPerModule, transparent: transparent, style: style))
+    }
+
+    /// Pixel-perfect PNG bytes (written by the core).
+    public func pixelPerfectPNG(pxPerCell: Int = 1, cellsPerModule: Int = 0, transparent: Bool = false,
+                                style: CKeyStyle = .plain, dpi: Double = 0) throws -> Data {
+        try encodePNG(pixelPerfectPixels(pxPerCell: pxPerCell, cellsPerModule: cellsPerModule, transparent: transparent, style: style), dpi: dpi)
+    }
+
+    /// Pixel-perfect SVG: one square per cell, crisp edges.
+    public func pixelPerfectSVG(pxPerCell: Int = 1, cellsPerModule: Int = 0, transparent: Bool = false,
+                                style: CKeyStyle = .plain) throws -> String {
+        guard (1...64).contains(pxPerCell) else { throw CKeyError(.invalidArgument, "pxPerCell must be 1...64") }
+        return try lattice(cellsPerModule: cellsPerModule, style: style).svg(pxPerCell: pxPerCell, transparent: transparent)
+    }
+
     // MARK: - Exports
 
     /// PNG bytes of the raster (lossless; written by the core, no ImageIO).
     /// - Parameter dpi: when > 0, records the physical resolution (pHYs).
     public func pngData(size: Int = 512, policy: CKeyRasterPolicy = .coverage, transparent: Bool = false,
                         style: CKeyStyle = .plain, materials: Bool = true, dpi: Double = 0) throws -> Data {
-        let rendered = try pixels(size: size, policy: policy, transparent: transparent, style: style, materials: materials)
-        return try rendered.rgba.withUnsafeBytes { raw -> Data in
+        try encodePNG(pixels(size: size, policy: policy, transparent: transparent, style: style, materials: materials), dpi: dpi)
+    }
+
+    private func encodePNG(_ rendered: CKeyPixels, dpi: Double) throws -> Data {
+        try rendered.rgba.withUnsafeBytes { raw -> Data in
             let pixels = raw.bindMemory(to: UInt8.self).baseAddress
             let width = UInt32(rendered.width), height = UInt32(rendered.height), stride = rendered.width * 4
             var required = 0

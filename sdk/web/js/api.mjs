@@ -12,6 +12,7 @@ import {
   pdfOptions,
   rasterOptions,
   rgbaFrame,
+  styleSpec,
   svgOptions,
   telemetryMode,
 } from './options.mjs';
@@ -236,6 +237,138 @@ export function createCKey(M, options = {}) {
     return withStyle(o.style, (ws) => takeOut(M._ckw_render_pdf(ptr, ws, o.widthPt, o.transparent ? 1 : 0), 'PDF export'));
   }
 
+  // ---- pixel-perfect rendering -------------------------------------------
+  // Every grid module is exactly cellsPerModule x cellsPerModule cells and
+  // every cell is drawn as pxPerCell x pxPerCell whole pixels, never
+  // resampled, so a canvas, a PNG and an SVG of the same symbol are the same
+  // image. cellsPerModule 0 (default) is the smallest size that decodes at
+  // every version: 3 for the Print layout, 6 for Standard.
+  const latticeOptions = (o, what) => {
+    o = o || {};
+    if (typeof o !== 'object') throw new TypeError(`${what} options must be an object`);
+    const cells = o.cellsPerModule === undefined ? 0 : o.cellsPerModule;
+    if (!Number.isInteger(cells) || cells < 0 || cells > 6) throw new RangeError('cellsPerModule must be 0..6');
+    const px = o.pxPerCell === undefined ? 1 : o.pxPerCell;
+    if (!Number.isInteger(px) || px < 1 || px > 64) throw new RangeError('pxPerCell must be an integer 1..64');
+    const dpi = o.dpi === undefined ? 0 : o.dpi;
+    if (typeof dpi !== 'number' || !(dpi >= 0)) throw new RangeError('dpi must be >= 0');
+    return { cells, px, dpi, transparent: !!o.transparent, style: styleSpec({ preset: o.preset, style: o.style }) };
+  };
+  const latticeCells = (sym, o) => {
+    const ptr = CKeySymbol.ptrOf(sym);
+    const raw = withStyle(o.style, (ws) => takeOut(M._ckw_render_lattice(ptr, ws, o.cells), 'pixel-perfect render'));
+    const side = raw[0] | (raw[1] << 8) | (raw[2] << 16) | (raw[3] << 24);
+    const palette = [];
+    for (let i = 0; i < 6; i++) palette.push([raw[4 + 3 * i], raw[5 + 3 * i], raw[6 + 3 * i]]);
+    return { side, palette, cells: raw.subarray(22, 22 + side * side) };
+  };
+
+  /** The lattice itself: { side, palette: [[r,g,b] x6], cells } (0 background, 1 ink, 2+i accent i). */
+  function renderLattice(sym, opts) {
+    const o = latticeOptions(opts, 'renderLattice');
+    const l = latticeCells(sym, o);
+    return { side: l.side, palette: l.palette, cells: Uint8Array.from(l.cells) };
+  }
+
+  const latticeRGBA = (l, px, transparent) => {
+    const w = l.side * px;
+    const out = new Uint8ClampedArray(w * w * 4);
+    for (let cy = 0; cy < l.side; cy++) {
+      for (let cx = 0; cx < l.side; cx++) {
+        const v = l.cells[cy * l.side + cx];
+        const [r, g, b] = l.palette[v];
+        const a = transparent && v === 0 ? 0 : 255;
+        for (let y = 0; y < px; y++) {
+          let at = ((cy * px + y) * w + cx * px) * 4;
+          for (let x = 0; x < px; x++, at += 4) { out[at] = r; out[at + 1] = g; out[at + 2] = b; out[at + 3] = a; }
+        }
+      }
+    }
+    return { width: w, height: w, data: out };
+  };
+
+  /** Pixel-perfect RGBA pixels: { width, height, data }, side * pxPerCell square. */
+  function renderPixelPerfect(sym, opts) {
+    const o = latticeOptions(opts, 'renderPixelPerfect');
+    return latticeRGBA(latticeCells(sym, o), o.px, o.transparent);
+  }
+
+  /** Largest pxPerCell for which the symbol fits in maxDevicePx device pixels (at least 1). */
+  function pixelPerfectScale(sym, maxDevicePx, opts) {
+    const o = latticeOptions(opts, 'pixelPerfectScale');
+    const l = latticeCells(sym, o);
+    return Math.max(1, Math.floor(maxDevicePx / l.side));
+  }
+
+  /**
+   * Draws pixel-perfect into a canvas. With cssPx (the box's CSS width) and
+   * devicePixelRatio, pxPerCell is chosen as the largest whole number of
+   * device pixels per cell that fits; the canvas's CSS size is then set so one
+   * canvas pixel is exactly one device pixel, and smoothing is off.
+   */
+  function renderToCanvasPixelPerfect(sym, canvas, opts) {
+    if (!canvas || typeof canvas.getContext !== 'function') {
+      throw new TypeError('renderToCanvasPixelPerfect needs an HTMLCanvasElement or OffscreenCanvas');
+    }
+    const o = latticeOptions(opts, 'renderToCanvasPixelPerfect');
+    const l = latticeCells(sym, o);
+    const dpr = opts && opts.devicePixelRatio > 0 ? opts.devicePixelRatio : 1;
+    let px = o.px;
+    if (opts && opts.cssPx > 0 && opts.pxPerCell === undefined) px = Math.max(1, Math.floor((opts.cssPx * dpr) / l.side));
+    const img = latticeRGBA(l, px, o.transparent);
+    if (canvas.width !== img.width) canvas.width = img.width;
+    if (canvas.height !== img.height) canvas.height = img.height;
+    if (canvas.style) {
+      canvas.style.width = img.width / dpr + 'px';
+      canvas.style.height = img.height / dpr + 'px';
+      canvas.style.imageRendering = 'pixelated';
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('CKey: could not get a 2d context from the canvas');
+    ctx.imageSmoothingEnabled = false;
+    const data = typeof ImageData === 'function' ? new ImageData(img.data, img.width, img.height) : ctx.createImageData(img.width, img.height);
+    if (typeof ImageData !== 'function') data.data.set(img.data);
+    ctx.putImageData(data, 0, 0);
+    return { canvas, pxPerCell: px, side: l.side, devicePx: img.width };
+  }
+
+  /** Pixel-perfect PNG: each cell exactly pxPerCell x pxPerCell pixels. */
+  function renderPNGPixelPerfect(sym, opts) {
+    const o = latticeOptions(opts, 'renderPNGPixelPerfect');
+    const img = latticeRGBA(latticeCells(sym, o), o.px, o.transparent);
+    const p = copyIn(img.data);
+    try {
+      return takeOut(M._ckw_encode_png_rgba(p, img.width, img.height, o.dpi), 'PNG export');
+    } finally {
+      M._ckw_free(p);
+    }
+  }
+
+  /** Pixel-perfect SVG: one rectangle per run of equal cells, crisp edges; pxPerCell sets its pixel size. */
+  function renderSVGPixelPerfect(sym, opts) {
+    const o = latticeOptions(opts, 'renderSVGPixelPerfect');
+    const l = latticeCells(sym, o);
+    const hex = ([r, g, b]) => '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+    const size = l.side * o.px;
+    const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${l.side} ${l.side}" shape-rendering="crispEdges" role="img" aria-label="CKey symbol">`];
+    if (!o.transparent) parts.push(`<rect width="${l.side}" height="${l.side}" fill="${hex(l.palette[0])}"/>`);
+    for (let colour = 1; colour < 6; colour++) {
+      let d = '';
+      for (let y = 0; y < l.side; y++) {
+        for (let x = 0; x < l.side; ) {
+          if (l.cells[y * l.side + x] !== colour) { x++; continue; }
+          let end = x + 1;
+          while (end < l.side && l.cells[y * l.side + end] === colour) end++;
+          d += `M${x} ${y}h${end - x}v1h${x - end}z`;
+          x = end;
+        }
+      }
+      if (d) parts.push(`<path fill="${hex(l.palette[colour])}" d="${d}"/>`);
+    }
+    parts.push('</svg>');
+    return parts.join('');
+  }
+
   /** Checks a style against a symbol: { ok, message } (the core's explanation). */
   function checkStyle(sym, opts) {
     const o = rasterOptions({ preset: opts?.preset, style: opts?.style });
@@ -397,6 +530,12 @@ export function createCKey(M, options = {}) {
 
     renderToCanvas,
     renderPixels,
+    renderLattice,
+    renderPixelPerfect,
+    pixelPerfectScale,
+    renderToCanvasPixelPerfect,
+    renderPNGPixelPerfect,
+    renderSVGPixelPerfect,
     renderPNG,
     renderSVG,
     renderPDF,

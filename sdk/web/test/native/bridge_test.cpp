@@ -31,6 +31,7 @@ int ckw_style_check(const void *, const void *);
 uint8_t *ckw_render_raster(const void *, const void *, uint32_t, uint32_t, uint32_t, uint32_t, double, uint32_t,
                            uint32_t, const uint8_t *, uint32_t, uint32_t);
 uint8_t *ckw_encode_png_rgba(const uint8_t *, uint32_t, uint32_t, double);
+uint8_t *ckw_render_lattice(const void *, const void *, uint32_t);
 char *ckw_render_svg(const void *, const void *, uint32_t);
 uint8_t *ckw_render_pdf(const void *, const void *, double, uint32_t);
 uint8_t *ckw_decode_rgba(const uint8_t *, uint32_t, uint32_t, uint32_t, uint32_t *);
@@ -67,6 +68,34 @@ static std::vector<uint8_t> pad(const uint8_t *px, uint32_t size, uint32_t margi
     for (uint32_t y = 0; y < size; ++y)
         std::memcpy(&f[(static_cast<size_t>(y + margin) * side + margin) * 4], px + static_cast<size_t>(y) * size * 4, size * 4);
     return f;
+}
+
+// Pixel-perfect lattice: expand each cell to px x px RGBA from the palette,
+// pad like a photo and decode.
+static bool lattice_roundtrip(const std::string &text, uint32_t layout, uint32_t cells, uint32_t px) {
+    void *sym = ckw_encode(reinterpret_cast<const uint8_t *>(text.data()), static_cast<uint32_t>(text.size()), 0, 1, layout);
+    if (!sym) return false;
+    uint8_t *raw = ckw_render_lattice(sym, nullptr, cells);
+    if (!raw) { std::fprintf(stderr, "lattice: %s\n", ckw_last_error()); ckw_symbol_free(sym); return false; }
+    const uint32_t side = raw[0] | (raw[1] << 8) | (raw[2] << 16) | (static_cast<uint32_t>(raw[3]) << 24);
+    bool ok = ckw_last_len() == 22 + static_cast<size_t>(side) * side;
+    const uint32_t size = side * px;
+    std::vector<uint8_t> rgba(static_cast<size_t>(size) * size * 4);
+    for (uint32_t y = 0; y < size; ++y) for (uint32_t x = 0; x < size; ++x) {
+        const uint8_t v = raw[22 + (y / px) * side + x / px];
+        ok = ok && v < 6;
+        uint8_t *d = &rgba[(static_cast<size_t>(y) * size + x) * 4];
+        d[0] = raw[4 + 3 * v]; d[1] = raw[5 + 3 * v]; d[2] = raw[6 + 3 * v]; d[3] = 255;
+    }
+    uint32_t fside = 0;
+    auto frame = pad(rgba.data(), size, 48, fside);
+    uint32_t info[4] = {0, 0, 0, 0};
+    uint8_t *out = ckw_decode_rgba(frame.data(), fside, fside, 0, info);
+    ok = ok && out && ckw_last_len() == text.size() && std::memcmp(out, text.data(), text.size()) == 0;
+    ckw_free(out);
+    ckw_free(raw);
+    ckw_symbol_free(sym);
+    return ok;
 }
 
 static bool roundtrip(const std::string &text, uint32_t layout, uint32_t transparent, const void *style, uint32_t level = 1) {
@@ -108,6 +137,15 @@ int main() {
 
     // Round trips through the reader pipeline (standard, print, transparent, concept).
     CHECK(roundtrip(url, 0, 0, nullptr));
+    // Pixel-perfect lattice at 3 and 4 cells per module, both layouts.
+    // Pixel-perfect lattice at the layout defaults (0) and explicit sizes.
+    CHECK(lattice_roundtrip(url, 0, 0, 2));
+    CHECK(lattice_roundtrip(url, 1, 0, 1));
+    CHECK(lattice_roundtrip(url, 1, 3, 2));
+    CHECK(lattice_roundtrip(std::string(900, 'k'), 0, 6, 1));
+    { void *sym = ckw_encode(reinterpret_cast<const uint8_t *>(url.data()), static_cast<uint32_t>(url.size()), 0, 1, 0);
+      CHECK(ckw_render_lattice(sym, nullptr, 7) == nullptr && ckw_render_lattice(sym, nullptr, 99) == nullptr);
+      ckw_symbol_free(sym); }
     CHECK(roundtrip("Hello, CKey! Grüße", 1, 0, nullptr));
     CHECK(roundtrip(url, 0, 1, nullptr));
     // Byte-grouped layouts (2 standard, 3 print) and levels U (4), X (5).

@@ -657,30 +657,48 @@ ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *s, const cke
 
 ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ckey_style *style, uint32_t cells_per_module,
                                          uint8_t *out, size_t cap, uint32_t *out_side, size_t *required) {
-    if (!required || !out_side || cells_per_module < 1 || cells_per_module > 4) return CKEY_INVALID_ARGUMENT;
+    if (!required || !out_side || cells_per_module > 6) return CKEY_INVALID_ARGUMENT;
     ckey_style st{};
     const ScalableLayout *L = scene_layout(s, style, st);
     if (!L) return CKEY_INVALID_ARGUMENT;
     const uint32_t modules = ckey_scalable_modules_across(s->version);
     if (modules == 0) return CKEY_INVALID_ARGUMENT;
-    // The field [0, 29] spans exactly cells_per_module cells per module, so
-    // every grid module is whole cells; the quiet margin is at least the
-    // canvas's 1 unit, rounded up to whole cells.
-    const uint32_t field = modules * cells_per_module;
-    const uint32_t margin = (field + 28) / 29;
-    const uint32_t side = field + 2 * margin;
+    // 0: the smallest size that decodes at every version on clean output:
+    // Print family 3 (its ring dots are 0.3 of a module), Standard 6 (0.2).
+    const uint32_t c = cells_per_module ? cells_per_module : (L->family ? 3u : 6u);
+    // The field [0, 29] is exactly c cells per module, so every grid module
+    // is a whole c x c block; the quiet margin is at least the canvas's one
+    // unit, rounded up to whole cells.
+    const uint32_t field = modules * c, margin = (field + 28) / 29, side = field + 2 * margin;
     *out_side = side;
     *required = static_cast<size_t>(side) * side;
     if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
     try {
         const double unit = 29.0 / field;
-        const auto scene = build_scalable_scene(*L, *s, st);
-        constexpr int kSamples = 5;  // 25 samples per cell; a cell is ink when at least half are covered
+        // Everything but the grid modules (frame, finders, rings, rays, Ring
+        // Key) is traced from the geometry: a cell is ink at 10% coverage,
+        // which keeps marks thinner than a cell.
+        auto scene = build_scalable_scene(*L, *s, st);
+        scene.erase(std::remove_if(scene.begin(), scene.end(), [](const ckey_shape &x) { return x.layer == CKEY_LAYER_DATA_CARTESIAN; }), scene.end());
+        constexpr int kSamples = 5;
         const Coverage cov = rasterize_scene(scene, static_cast<int>(side), kSamples, 0.0, -static_cast<double>(margin) * unit, unit);
         for (size_t i = 0; i < *required; ++i) {
-            // 10% coverage keeps thin marks (Ring Key ticks) that a half-coverage rule drops.
             const bool ink = 10 * cov.ink[i] >= cov.samples;
             out[i] = !ink ? 0 : cov.paint[i] >= 0 ? static_cast<uint8_t>(2 + cov.paint[i]) : 1;
+        }
+        // Grid modules from the data, as centred dots with gaps (the reader's
+        // mark model): 1 of 3, 2 of 4, 3 of 5, 4 of 6 cells across; at 1 and
+        // 2 cells per module the whole block.
+        const uint32_t dot = c <= 2 ? c : c - 2, off = (c - dot) / 2;
+        for (size_t i = 0; i < L->nodes.size(); ++i) {
+            const auto &n = L->nodes[i];
+            if (n.kind != 0 || !scalable_site_value(*L, s, i)) continue;
+            const int accent = accent_of(n.id, st);
+            const uint8_t v = accent >= 0 ? static_cast<uint8_t>(2 + accent) : 1;
+            const uint32_t mx = static_cast<uint32_t>(std::floor(n.x / L->pitch)), my = static_cast<uint32_t>(std::floor(n.y / L->pitch));
+            if (mx >= modules || my >= modules) return CKEY_INTERNAL_ERROR;
+            for (uint32_t y = 0; y < dot; ++y) for (uint32_t x = 0; x < dot; ++x)
+                out[static_cast<size_t>(margin + my * c + off + y) * side + margin + mx * c + off + x] = v;
         }
         return CKEY_OK;
     } catch (...) { return CKEY_INTERNAL_ERROR; }

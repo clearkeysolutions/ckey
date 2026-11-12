@@ -224,3 +224,34 @@ test('Safe Actions verify through the wasm core and agree with the conformance v
     if (v.expect !== 'ok') assert.equal(out.kind, 'rejected', v.name);
   }
 });
+
+test('pixel-perfect: whole cells, decodes, and canvas/PNG/SVG agree', { skip }, async () => {
+  const { ckey } = await fresh();
+  for (const layout of ['standard', 'print']) {
+    const text = 'pixel-perfect ' + layout + ' '.padEnd(300, 'x');
+    const sym = ckey.encode(text, { layout });
+    const lat = ckey.renderLattice(sym);
+    assert.equal(lat.cells.length, lat.side * lat.side);
+    assert.ok(lat.cells.every((v) => v <= 1));
+    const img = ckey.renderPixelPerfect(sym, { pxPerCell: 2 });
+    assert.equal(img.width, lat.side * 2);
+    // Every pixel is exactly the background or the ink colour: nothing blended.
+    const colours = new Set();
+    for (let i = 0; i < img.data.length; i += 4) colours.add(img.data[i] * 65536 + img.data[i + 1] * 256 + img.data[i + 2]);
+    assert.equal(colours.size, 2);
+    // Pad like a photo and decode with the core.
+    const pad = 40, w = img.width + 2 * pad;
+    const frame = new Uint8ClampedArray(w * w * 4).fill(255);
+    for (let y = 0; y < img.height; y++) frame.set(img.data.subarray(y * img.width * 4, (y + 1) * img.width * 4), ((y + pad) * w + pad) * 4);
+    const r = ckey.decodeImageData({ width: w, height: w, data: frame });
+    assert.ok(r, layout + ' pixel-perfect render decodes');
+    assert.equal(r.text, text);
+    const png = ckey.renderPNGPixelPerfect(sym, { pxPerCell: 3, dpi: 300 });
+    assert.deepEqual([...png.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+    const svg = ckey.renderSVGPixelPerfect(sym, { pxPerCell: 3 });
+    assert.match(svg, new RegExp(`width="${lat.side * 3}"`));
+    assert.match(svg, /shape-rendering="crispEdges"/);
+    assert.equal(ckey.pixelPerfectScale(sym, lat.side * 4 + 3), 4);
+    sym.free();
+  }
+});
