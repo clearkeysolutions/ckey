@@ -180,6 +180,23 @@ public enum CKeyDecoder {
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 
+    // MARK: - Machine learning
+
+    /// Turns the core's built-in ML assistance on or off for the whole
+    /// process (default on): the locator (tried after the classical border
+    /// search fails), the corner refiner (after a failed decode) and the site
+    /// model (after the plain reading fails). Off, scanning is exactly the
+    /// classical reader. A payload is accepted only after Reed-Solomon and
+    /// CRC-32C either way.
+    public static func setMachineLearning(enabled: Bool) {
+        if enabled { _ = ckey_ml_load_model(nil, 0) } else { ckey_ml_clear_models() }
+    }
+
+    /// True while any ML model is active.
+    public static var machineLearningEnabled: Bool {
+        ckey_ml_model_id() != 0 || ckey_ml_site_model_id() != 0 || ckey_ml_refiner_model_id() != 0
+    }
+
     // MARK: - Core call
 
     static let payloadCapacity = 65535
@@ -196,6 +213,10 @@ public enum CKeyDecoder {
         var options = ckey_scan_options()
         ckey_scan_options_init(&options)
         options.max_candidates = UInt32(maxCandidates)
+        // The ML locator's proposals only after the border search found nothing
+        // that decodes, so frames the classical reader reads pay nothing for it.
+        // Without a model (see `setMachineLearning(enabled:)`) this is a no-op.
+        options.flags |= CKEY_SCAN_OPTION_ML_AFTER
         if let region = region?.standardized, region.width >= 1, region.height >= 1,
            region.minX.isFinite, region.minY.isFinite, region.width.isFinite, region.height.isFinite {
             options.roi_x = Double(region.minX)

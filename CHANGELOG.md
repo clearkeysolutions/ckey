@@ -10,6 +10,25 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.93 — 2026-11-12
+
+**The ML locator is built in**, and the Swift SDK uses all three models by default, with a switch to turn them off.
+
+* **Built-in locator `locator-v1`** (`src/ml_builtin_locator.inc`; key-test `ml/locator-models/locator-v1.*`): 444,648 bytes, sha256 `f2a78390…`. It proposes symbol corners and a version hint when the border search finds nothing. Measured on 1,200 fresh-seed cases (never used in training), identical frames, 4-core container:
+
+| | Classical | ML proposals first | ML after classical |
+|---|---|---|---|
+| Valid symbols decoded | 56.4% (609/1080) | 59.1% (638/1080) | **59.1%** (638/1080) |
+| Readable from true corners, decoded | 83.1% | 86.6% | **86.6%** |
+| Dense (v25–31), readable, decoded | 103/133 | 114/133 | **114/133** |
+| Wrong payloads | 0 | 0 | 0 |
+| Frames that decoded, median | 46 ms | 77 ms | **48 ms** |
+| Frames that did not decode, median / p95 | 173 / 774 ms | 317 / 1067 ms | 311 / 1076 ms |
+
+  * +29 reads, none lost. After the classical search it gains the same reads as running first, and frames the classical reader reads pay about 2 ms. Frames that read nothing take longer (they try the proposals too).
+* **Swift SDK:** `CKeyDecoder` scans (camera frames and photos) set `CKEY_SCAN_OPTION_ML_AFTER`. New `CKeyDecoder.setMachineLearning(enabled:)` (process-wide; off makes scanning exactly classical, through `ckey_ml_clear_models`) and `CKeyDecoder.machineLearningEnabled`. The Swift changes are not compiled here (no Swift toolchain in this container).
+* **Site model:** `sites-v2` (doubt channel) read exactly as many as `sites-v1` (57.3% on the same 1,200 cases), so `sites-v1` stays built in.
+
 ## 0.1.0-build.92 — 2026-11-12
 
 **The corner refiner is built in**, and the locator can run after the classical search instead of before it.

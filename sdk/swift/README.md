@@ -142,6 +142,8 @@ outcome.erasuresUsed    // bytes read as erasures (glare, occlusion) in the deco
 outcome.correctedSymbols, outcome.candidates, outcome.budgetExhausted
 ```
 
+**Built-in ML assistance** (on by default) helps only where the classical reader fails: the locator proposes the symbol after the border search finds nothing that decodes, the corner refiner corrects the corners after a failed decode, and the site model reads the modules after the plain reading fails. Frames the classical reader reads pay nothing for it. A payload is still accepted only after Reed-Solomon and CRC-32C. `CKeyDecoder.setMachineLearning(enabled: false)` makes scanning exactly classical for the whole process.
+
 With a **region of interest** only that rectangle is searched, at full resolution and in place (no copy); coordinates in the outcome are always full-frame. A region around the expected symbol is faster and keeps the rest of the scene out of the search. Alternate it with whole frames so symbols outside the region still read. `decode(gray:width:height:stride:region:)` and `decode(pixelBuffer:normalizedRegion:)` take the same region; `CKeyDecoder.pixelRegion(normalized:width:height:)` converts a normalized rectangle (plus an 18% margin) to pixels.
 
 ### Live camera: the SDK owns the camera
