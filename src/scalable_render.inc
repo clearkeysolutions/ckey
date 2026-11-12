@@ -221,7 +221,10 @@ struct Coverage {
 // are the centres of an ss x ss grid in each pixel, the same as the
 // reference SVG rasterizer, so the two backends agree sample for sample.
 // Rows are processed in bands so the per-sample masks stay small.
-Coverage rasterize_scene(const std::vector<ckey_shape> &scene, int side, int ss, double min_feature_units) {
+// Maps sample (x + .5) to canonical origin + (x + .5) * units_per_px / ss. The
+// default is the 31-unit canvas [-1, 30] over side pixels.
+Coverage rasterize_scene(const std::vector<ckey_shape> &scene, int side, int ss, double min_feature_units,
+                         double origin = -1, double units_per_px = 0) {
     Coverage cov; cov.side = side; cov.samples = ss * ss;
     cov.ink.assign(static_cast<size_t>(side) * side, 0);
     cov.paint.assign(static_cast<size_t>(side) * side, CKEY_PAINT_INK);
@@ -229,7 +232,8 @@ Coverage rasterize_scene(const std::vector<ckey_shape> &scene, int side, int ss,
     shapes.reserve(scene.size());
     for (const auto &s : scene) if (s.kind != CKEY_SHAPE_LOGO) shapes.push_back(prepare(s, min_feature_units));
     const int W = side * ss;
-    const double k = 31.0 / W;  // canonical units per sample
+    const double k = (units_per_px > 0 ? units_per_px : 31.0 / side) / ss;  // canonical units per sample
+    const double o = origin;
     constexpr int kBandPixels = 32;
     const int band_samples = kBandPixels * ss;
     std::vector<uint8_t> hit(static_cast<size_t>(W) * band_samples);
@@ -237,21 +241,21 @@ Coverage rasterize_scene(const std::vector<ckey_shape> &scene, int side, int ss,
     for (int band = 0; band * kBandPixels < side; ++band) {
         const int sy0 = band * band_samples, sy1 = std::min(side * ss, sy0 + band_samples) - 1;
         std::fill(hit.begin(), hit.end(), 0);
-        const double uy0 = -1 + sy0 * k, uy1 = -1 + (sy1 + 1) * k;
+        const double uy0 = o + sy0 * k, uy1 = o + (sy1 + 1) * k;
         for (const auto &q : shapes) {
             if (q.by1 < uy0 - k || q.by0 > uy1 + k) continue;
-            const int x0 = std::max(0, static_cast<int>(std::floor((q.bx0 + 1) / k)) - 1);
-            const int x1 = std::min(W - 1, static_cast<int>(std::ceil((q.bx1 + 1) / k)) + 1);
-            const int y0 = std::max(sy0, static_cast<int>(std::floor((q.by0 + 1) / k)) - 1);
-            const int y1 = std::min(sy1, static_cast<int>(std::ceil((q.by1 + 1) / k)) + 1);
+            const int x0 = std::max(0, static_cast<int>(std::floor((q.bx0 - o) / k)) - 1);
+            const int x1 = std::min(W - 1, static_cast<int>(std::ceil((q.bx1 - o) / k)) + 1);
+            const int y0 = std::max(sy0, static_cast<int>(std::floor((q.by0 - o) / k)) - 1);
+            const int y1 = std::min(sy1, static_cast<int>(std::ceil((q.by1 - o) / k)) + 1);
             const bool erase = q.s.paint == CKEY_PAINT_BACKGROUND;
             for (int y = y0; y <= y1; ++y) {
-                const double uy = -1 + (y + .5) * k;
+                const double uy = o + (y + .5) * k;
                 uint8_t *row = &hit[static_cast<size_t>(y - sy0) * W];
                 int8_t *prow = &paint[static_cast<size_t>(y - sy0) * W];
                 for (int x = x0; x <= x1; ++x) {
-                    if (erase) { if (row[x] && shape_hit(q, -1 + (x + .5) * k, uy)) row[x] = 0; }
-                    else if (!row[x] && shape_hit(q, -1 + (x + .5) * k, uy)) { row[x] = 1; prow[x] = static_cast<int8_t>(q.s.paint); }
+                    if (erase) { if (row[x] && shape_hit(q, o + (x + .5) * k, uy)) row[x] = 0; }
+                    else if (!row[x] && shape_hit(q, o + (x + .5) * k, uy)) { row[x] = 1; prow[x] = static_cast<int8_t>(q.s.paint); }
                 }
             }
         }
@@ -649,6 +653,37 @@ ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *s, const cke
     *required = static_cast<size_t>(o->size_px) * o->size_px * (o->format == CKEY_PIXELS_RGBA8 ? 4 : 1);
     if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
     try { return render_raster(*L, *s, st, *o, out); } catch (...) { return CKEY_INTERNAL_ERROR; }
+}
+
+ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ckey_style *style, uint32_t cells_per_module,
+                                         uint8_t *out, size_t cap, uint32_t *out_side, size_t *required) {
+    if (!required || !out_side || cells_per_module < 1 || cells_per_module > 4) return CKEY_INVALID_ARGUMENT;
+    ckey_style st{};
+    const ScalableLayout *L = scene_layout(s, style, st);
+    if (!L) return CKEY_INVALID_ARGUMENT;
+    const uint32_t modules = ckey_scalable_modules_across(s->version);
+    if (modules == 0) return CKEY_INVALID_ARGUMENT;
+    // The field [0, 29] spans exactly cells_per_module cells per module, so
+    // every grid module is whole cells; the quiet margin is at least the
+    // canvas's 1 unit, rounded up to whole cells.
+    const uint32_t field = modules * cells_per_module;
+    const uint32_t margin = (field + 28) / 29;
+    const uint32_t side = field + 2 * margin;
+    *out_side = side;
+    *required = static_cast<size_t>(side) * side;
+    if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
+    try {
+        const double unit = 29.0 / field;
+        const auto scene = build_scalable_scene(*L, *s, st);
+        constexpr int kSamples = 5;  // 25 samples per cell; a cell is ink when at least half are covered
+        const Coverage cov = rasterize_scene(scene, static_cast<int>(side), kSamples, 0.0, -static_cast<double>(margin) * unit, unit);
+        for (size_t i = 0; i < *required; ++i) {
+            // 10% coverage keeps thin marks (Ring Key ticks) that a half-coverage rule drops.
+            const bool ink = 10 * cov.ink[i] >= cov.samples;
+            out[i] = !ink ? 0 : cov.paint[i] >= 0 ? static_cast<uint8_t>(2 + cov.paint[i]) : 1;
+        }
+        return CKEY_OK;
+    } catch (...) { return CKEY_INTERNAL_ERROR; }
 }
 
 ckey_status ckey_encode_png(const uint8_t *px, uint32_t w, uint32_t h, size_t stride, ckey_png_format format, double dpi,

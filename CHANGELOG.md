@@ -10,6 +10,12 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.95 — 2026-11-12
+
+* **Experimental `ckey_render_scalable_lattice`** (`CKEY_HAS_LATTICE`): draws a Profile 0 symbol on a grid of whole cells, `cells_per_module` (1–4) cells per grid module, with every mark snapped to cells, for pixel-perfect display and export. A prototype toward one pixel-perfect renderer for the app, the site and the SDKs; not used by any of them yet.
+  * Measured on a 2,022-byte version-26 symbol (164 modules), zero wrong payloads throughout: with grid modules drawn as centred dots from the site map, 3×3 cells per module (526 px) decodes from about 2 camera pixels per screen pixel, and 4×4 (702 px) at every distance tried. Solid 1×1 and 2×2 cells (176 and 352 px, QR-like density) do not decode even from true corners: the reader models round dots with gaps and ring dashes, and the Ring Key's tick lengths need a 10% coverage rule to survive snapping.
+* `rasterize_scene` takes an optional canonical origin and scale (default unchanged).
+
 ## 0.1.0-build.94 — 2026-11-12
 
 * **Swift SDK compile fix** (`CKeyCameraControl.swift`): `guard snaps < 2, change > (…)` was parsed by Swift as a generic specialization `snaps<2, change>`, which failed the iOS build ("Cannot specialize non-generic type 'Int'"). It is now two separate conditions. Behaviour is unchanged.
