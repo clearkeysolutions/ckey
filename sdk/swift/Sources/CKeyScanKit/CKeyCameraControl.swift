@@ -324,7 +324,11 @@ public final class CKeyCameraControl {
         if desired > current {
             // Hold steady: the first snap needs a 12% change; after it, one
             // correction only, and only for a 25% change.
-            guard snaps < 2, change > (snaps == 0 ? 0.12 : 0.25) else { return }
+            // (Two conditions, not one `snaps < 2, change > (...)`: Swift
+            // parses that as a generic specialization `snaps<2, change>`.)
+            let needed: CGFloat = snaps == 0 ? 0.12 : 0.25
+            guard snaps < 2 else { return }
+            guard change > needed else { return }
             snaps += 1
         } else {
             guard change > 0.1 else { return }

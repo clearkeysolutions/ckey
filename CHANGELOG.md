@@ -10,6 +10,10 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.94 — 2026-11-12
+
+* **Swift SDK compile fix** (`CKeyCameraControl.swift`): `guard snaps < 2, change > (…)` was parsed by Swift as a generic specialization `snaps<2, change>`, which failed the iOS build ("Cannot specialize non-generic type 'Int'"). It is now two separate conditions. Behaviour is unchanged.
+
 ## 0.1.0-build.93 — 2026-11-12
 
 **The ML locator is built in**, and the Swift SDK uses all three models by default, with a switch to turn them off.
