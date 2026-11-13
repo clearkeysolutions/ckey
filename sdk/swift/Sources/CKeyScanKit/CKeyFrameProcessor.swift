@@ -43,12 +43,12 @@ public final class CKeyFrameProcessor {
     public static let defaultScanRegion = CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
     /// Of every `wholeFrameEvery` analysed frames, one is searched whole.
     public static let wholeFrameEvery = 3
-    /// The full reader (ML locator, corner refiner, site model, multi-frame
-    /// averaging) runs only on a tracked code that the fast classical scan has
-    /// failed `fullLadderAfterFailures` times in a row, then on one of every
-    /// `fullLadderEvery` frames; with nothing tracked it never runs. Every
-    /// other frame uses the fast scan, so a blurred frame costs tens of
-    /// milliseconds instead of a second and the phone stays cool.
+    /// Every analysed frame gets the fast classical scan on the analysis
+    /// queue, so the camera keeps up. The full reader (ML locator, corner
+    /// refiner, site model, multi-frame averaging) runs beside it on its own
+    /// queue, on a copy of the frame, one at a time, for a tracked code the
+    /// fast scan has missed `fullLadderAfterFailures` times in a row; with
+    /// nothing tracked it never runs. (`fullLadderEvery` is no longer used.)
     public static let fullLadderEvery = 3
     /// Analysed frames per second while no code is tracked.
     public static let searchFramesPerSecond: Double = 8
@@ -181,6 +181,9 @@ public final class CKeyFrameProcessor {
         let decoded: Bool
         let width: Int
         let height: Int
+        /// Measured on the latest tracked frame (false while the tracker
+        /// holds the last corners through missed frames).
+        var fresh = true
     }
 
     private struct Analysis {
@@ -215,7 +218,7 @@ public final class CKeyFrameProcessor {
     private var diagnosticWanted = 0
     private var diagnosticFrames: [CKeyDiagnosticFrame] = []
     private var diagnosticDone: (@Sendable ([CKeyDiagnosticFrame]) -> Void)?
-    // Analysis-queue state: the multi-frame accumulator (core-owned).
+    // Full-reader-queue state: the multi-frame accumulator (core-owned).
     private let accumulator: OpaquePointer? = ckey_accumulator_create()
     // Guarded by lock: restart the accumulator before the next analysis.
     private var pendingAccumulatorReset = false
@@ -502,7 +505,8 @@ public final class CKeyFrameProcessor {
             return
         }
         let quad = ckeyQuadArray(track.quad)
-        let held = Seed(quad: quad, score: track.score, decoded: track.decoded != 0, width: width, height: height)
+        let held = Seed(quad: quad, score: track.score, decoded: track.decoded != 0, width: width, height: height,
+                        fresh: track.fresh != 0)
         sync { trackedQuad = held }
         // A missed frame holds the last corners: nothing new to report.
         guard track.fresh != 0 else { return }
@@ -557,27 +561,35 @@ public final class CKeyFrameProcessor {
             return (settings.scanRegion, settings.regionOfInterest, trackedQuad, reset, settings.multiFrame, resetAcc)
         }
         if resetPolicy { ckey_camera_policy_init(&policy) }
-        if resetAccumulator { ckey_accumulator_reset(accumulator) }
+        // The accumulator is the full reader's (its own queue).
+        if resetAccumulator { fullQueue.async { ckey_accumulator_reset(self.accumulator) } }
         // While the tracker holds the code, read around it (its corners plus a
         // margin) on every frame: the code is wherever the brackets are, even
         // when it is larger than the reticle, which a reticle region would cut.
         // Otherwise two of every three analysed frames read only the reticle
         // region, at full resolution and in place, and every third is read whole.
+        // A held (not freshly measured) track may lag a moving code, so its
+        // box gets a wider margin.
         var pixelRegion: CGRect?
         if let held, held.width == width, held.height == height,
-           let around = Self.trackedRegion(held.quad, width: width, height: height) {
+           let around = Self.trackedRegion(held.quad, width: width, height: height, margin: held.fresh ? 0.25 : 0.6) {
             pixelRegion = around
         } else if useRegion, let region, index % Self.wholeFrameEvery != 0 {
             pixelRegion = CKeyDecoder.pixelRegion(normalized: region, width: width, height: height)
         }
         let tracked = held != nil && held?.width == width && held?.height == height
         if !tracked { trackedFailures = 0 }
-        let fast = !(tracked && trackedFailures >= Self.fullLadderAfterFailures && index % Self.fullLadderEvery == 0)
+        // This queue always runs the fast scan, so the camera keeps up. The
+        // full reader runs beside it, on its own queue and a copy of the
+        // frame, for a tracked code the fast scan keeps missing.
+        let fast = true
         let scanStarted = CACurrentMediaTime()
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
-                                       region: pixelRegion, payload: &payload,
-                                       accumulator: multiFrame ? accumulator : nil, fast: fast)
+                                       region: pixelRegion, payload: &payload, accumulator: nil, fast: true)
         if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
+        if tracked, outcome.result == nil, trackedFailures >= Self.fullLadderAfterFailures {
+            startFullReader(gray, width, height, stride, region: pixelRegion, multiFrame: multiFrame, index: index)
+        }
         let scanMilliseconds = (CACurrentMediaTime() - scanStarted) * 1000
         keepDiagnostic(gray, width, height, stride, region: pixelRegion, outcome: outcome, held: held, fast: fast,
                        milliseconds: scanMilliseconds, index: index)
@@ -625,11 +637,11 @@ public final class CKeyFrameProcessor {
 
     /// The tracked code's bounding box grown by a quarter of its size on each
     /// side, in whole pixels and clamped to the frame; `nil` if degenerate.
-    public static func trackedRegion(_ quad: [Double], width: Int, height: Int) -> CGRect? {
+    public static func trackedRegion(_ quad: [Double], width: Int, height: Int, margin: Double = 0.25) -> CGRect? {
         guard quad.count == 8, quad.allSatisfy({ $0.isFinite }) else { return nil }
         let xs = stride(from: 0, to: 8, by: 2).map { quad[$0] }, ys = stride(from: 1, to: 8, by: 2).map { quad[$0] }
         guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() else { return nil }
-        let pad = 0.25 * max(maxX - minX, maxY - minY)
+        let pad = margin * max(maxX - minX, maxY - minY)
         let x0 = max(0, Int((minX - pad).rounded(.down))), y0 = max(0, Int((minY - pad).rounded(.down)))
         let x1 = min(width, Int((maxX + pad).rounded(.up))), y1 = min(height, Int((maxY + pad).rounded(.up)))
         guard x1 - x0 >= 64, y1 - y0 >= 64 else { return nil }
@@ -664,6 +676,48 @@ public final class CKeyFrameProcessor {
                                contrast: advice?.contrast ?? 0, clippedFraction: advice?.clippedFraction ?? 0,
                                zoomAdvice: advice?.zoomFactor ?? 1, histogram: histogram,
                                version: outcome.result?.version ?? 0)
+    }
+
+    // MARK: Full reader beside the fast scans
+
+    private let fullQueue = DispatchQueue(label: "org.openckey.scanner.full", qos: .utility)
+    /// Guarded by `lock`.
+    private var fullBusy = false
+    /// Full-reader queue only.
+    private var fullPayload = [UInt8](repeating: 0, count: CKeyDecoder.payloadCapacity)
+
+    /// Copies the frame and runs the full reader (ML locator, refiner, site
+    /// model, multi-frame averaging) on its own queue, at most one at a time,
+    /// while the analysis queue keeps scanning new frames fast.
+    private func startFullReader(_ gray: UnsafePointer<UInt8>, _ width: Int, _ height: Int, _ stride: Int,
+                                 region: CGRect?, multiFrame: Bool, index: Int) {
+        let start: Bool = sync {
+            if fullBusy || didDecode { return false }
+            fullBusy = true
+            return true
+        }
+        guard start else { return }
+        let copy = Data(bytes: gray, count: stride * height)
+        let report = sync { settings.onFrameReport }
+        fullQueue.async {
+            let started = CACurrentMediaTime()
+            let outcome: CKeyScanOutcome = copy.withUnsafeBytes { raw in
+                CKeyDecoder.scan(gray: raw.bindMemory(to: UInt8.self).baseAddress!, width: width, height: height, stride: stride,
+                                 region: region, payload: &self.fullPayload,
+                                 accumulator: multiFrame ? self.accumulator : nil, fast: false)
+            }
+            let ms = (CACurrentMediaTime() - started) * 1000
+            if let report {
+                copy.withUnsafeBytes { raw in
+                    report(Self.frameReport(raw.bindMemory(to: UInt8.self).baseAddress!, width, height, stride, index: index,
+                                            fast: false, region: region, outcome: outcome,
+                                            quad: outcome.located && outcome.quad.count == 4 ? CKeyCorners.flat(outcome.quad) : nil,
+                                            tracked: true, advice: nil, milliseconds: ms))
+                }
+            }
+            self.sync { self.fullBusy = false }
+            if outcome.result != nil { self.finish(Analysis(outcome: outcome, advice: nil, usedRegion: region != nil), started: started) }
+        }
     }
 
     private func finish(_ analysis: Analysis, started: CFTimeInterval) {

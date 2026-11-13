@@ -39,7 +39,7 @@ import QuartzCore
 /// exposure points apply.
 public final class CKeyCameraControl {
     /// The longest exposure the control allows, as 1/n s (with `exposureControl`).
-    public static let maxExposureTimescale: Int32 = 120
+    public static let maxExposureTimescale: Int32 = 250
     /// The device this control drives.
     public let device: AVCaptureDevice
 
@@ -224,7 +224,8 @@ public final class CKeyCameraControl {
         if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
         #if os(iOS)
         // Short exposures: auto-exposure may otherwise pick 1/30 s indoors,
-        // which smears a handheld code across several pixels. The cap trades
+        // which smears a handheld code across several pixels (1/120 s still
+        // smeared at 2x zoom in a field capture). The cap trades
         // a little noise (higher ISO) for sharp frames.
         if flags.exposureControl {
             let cap = CMTime(value: 1, timescale: Self.maxExposureTimescale)

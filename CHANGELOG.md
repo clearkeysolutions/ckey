@@ -10,6 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.106 — 2026-11-13
+
+From a field capture on the owner's iPhone. Built optimized, fast scans took 114 to 143 ms, against 545 to 1,014 ms in the Debug build, and the frame that read took 51 ms. The capture showed three delays.
+* **A stale tracked box cut the code off.** The tracker holds its last corners through missed frames. The processor scanned around those corners while the code moved, so two sharp frames were cropped through the code; the reader cannot read those crops even classically and without a time limit. A held track's box now gets a 60% margin, and a freshly measured one 25% as before (`trackedRegion(_:width:height:margin:)`).
+* **The full reader no longer blocks the camera loop.** One full-ladder attempt on a blurred frame took 1.14 s, during which no frame was scanned.
+  * The analysis queue now runs the fast scan on every frame.
+  * The full reader runs beside it on its own queue, on a copy of the frame, one at a time, for a tracked code the fast scan has missed twice in a row. The multi-frame accumulator belongs to that queue.
+* **The exposure cap is 1/250 s.** At 1/120 s, frames at 2× zoom were still smeared by hand movement.
+* Not compiled here.
+
 ## 0.1.0-build.105 — 2026-11-13
 
 * **Per-frame diagnostic reports** (Swift SDK), for charting a scan from the first candidate to the read.
