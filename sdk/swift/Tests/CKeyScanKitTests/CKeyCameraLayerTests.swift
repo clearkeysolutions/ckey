@@ -312,6 +312,7 @@ final class CKeyScanLayerTests: XCTestCase {
         let edge = try XCTUnwrap(CKeyFrameProcessor.trackedRegion([0, 0, 400, 0, 400, 400, 0, 400], width: 1000, height: 800))
         XCTAssertEqual(edge, CGRect(x: 0, y: 0, width: 500, height: 500))
         XCTAssertNil(CKeyFrameProcessor.trackedRegion([1, 2, 3], width: 1000, height: 800))
+        XCTAssertNil(CKeyFrameProcessor.trackedRegion([0, 0, 60, 0, 60, 60, 0, 60], width: 1000, height: 800))  // too small: a false lock
         // Clamped to the frame.
         let clamped = try XCTUnwrap(CKeyDecoder.pixelRegion(normalized: CGRect(x: 0, y: 0, width: 1, height: 1),
                                                             width: 640, height: 480))

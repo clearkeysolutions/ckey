@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.106"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.107"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -522,6 +522,20 @@ typedef struct ckey_scalable_symbol {
  * module pitch in the 29-unit canonical field is 29 / modules. */
 CKEY_API uint32_t ckey_scalable_modules_across(uint32_t version);
 /* ML site map: see ckey_ml_rectify_gray8 above. */
+/* Diagnostics: reads every site of a known symbol (`truth`, e.g. one just
+ * decoded) from an image at the given field corners (any corner order: the
+ * orientation and reading mode that agree best with the truth are kept).
+ * out_correct[i] is 1 when site i (ckey_ml_site_map's order) read as printed,
+ * 0 when wrong, 255 when unknown (outside the image or washed out);
+ * out_confidence[i] the reader's confidence (noise deviations). *out_errors
+ * counts wrong sites. CKEY_UNCORRECTABLE when no orientation could be sampled;
+ * CKEY_INSUFFICIENT_BUFFER (with *out_count set) when out is NULL or short.
+ * Call with out NULL for *out_count. */
+#define CKEY_HAS_READ_SITES 1
+CKEY_API ckey_status ckey_read_sites_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride,
+                                          const double quad_xy[8], const ckey_scalable_symbol *truth,
+                                          uint8_t *out_correct, float *out_confidence, size_t capacity,
+                                          size_t *out_count, uint32_t *out_errors);
 CKEY_API ckey_status ckey_ml_site_map(const ckey_scalable_symbol *symbol, float *out_xy, uint8_t *out_kind,
                                       uint8_t *out_printed, size_t capacity, size_t *out_count);
 /* Maximum payload bytes for a version, level, and layout; 0 if invalid. */

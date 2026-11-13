@@ -399,6 +399,43 @@ ckey_status ckey_ml_site_map(const ckey_scalable_symbol *symbol, float *out_xy, 
     return CKEY_OK;
 }
 
+ckey_status ckey_read_sites_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
+                                 const ckey_scalable_symbol *truth, uint8_t *out_correct, float *out_confidence,
+                                 size_t capacity, size_t *out_count, uint32_t *out_errors) {
+    if (!truth || !out_count || !valid_image_args(gray, width, height, stride, quad_xy) || truth->version < 1 ||
+        truth->version > static_cast<uint32_t>(kScalableVersions) || truth->layout >= static_cast<uint32_t>(kScalableLayouts)) return CKEY_INVALID_ARGUMENT;
+    const ScalableLayout &L = scalable_layout(static_cast<int>(truth->version), static_cast<int>(truth->layout));
+    if (truth->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
+    const size_t sites = L.nodes.size();
+    *out_count = sites;
+    if (!out_correct || !out_confidence || capacity < sites) return CKEY_INSUFFICIENT_BUFFER;
+    std::vector<uint8_t> printed(sites);
+    for (size_t i = 0; i < sites; ++i) printed[i] = scalable_site_value(L, truth, i) ? 1 : 0;
+    // The corners may come in any order (a frame that did not decode does not
+    // know its orientation): keep the orientation and reading mode that
+    // agree best with the truth.
+    const WorkScope work(kDecodeWorkBudget);
+    SiteSamples samples; SiteRead read, best; size_t best_errors = sites + 1;
+    for (int reverse = 0; reverse < 2; ++reverse) for (int start = 0; start < 4; ++start) {
+        double h[8]; bool ok; orientation_homography(quad_xy, reverse, start, h, ok);
+        if (!ok || !scalable_sample_sites(L, gray, width, height, stride, h, samples)) continue;
+        for (const unsigned mode : {0u, kReadLocalLevels | kReadRingSequence}) {
+            if (!scalable_decide_sites(L, samples, mode, read)) continue;
+            size_t errors = 0;
+            for (size_t i = 0; i < sites; ++i) errors += read.confidence[i] > 0 && read.printed[i] != printed[i];
+            if (errors < best_errors) { best_errors = errors; best = read; }
+        }
+    }
+    if (best_errors > sites) return CKEY_UNCORRECTABLE;
+    for (size_t i = 0; i < sites; ++i) {
+        const bool known = best.confidence[i] > 0;
+        out_correct[i] = !known ? 255 : best.printed[i] == printed[i] ? 1 : 0;
+        out_confidence[i] = best.confidence[i];
+    }
+    if (out_errors) *out_errors = static_cast<uint32_t>(best_errors);
+    return CKEY_OK;
+}
+
 ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const ckey_scan_options *options,
                                              ckey_frame_accumulator *acc, uint8_t *out_payload, size_t out_capacity, ckey_scan_result *result) {
     EvidenceCapture &capture = evidence_capture();

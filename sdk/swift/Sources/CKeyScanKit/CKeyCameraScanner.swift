@@ -220,6 +220,15 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
     }
 
+    /// Diagnostics: the per-site heatmap after each read, on the main queue
+    /// (`CKeyFrameProcessor.onSiteHeatmap`). Leave nil in production.
+    public var onSiteHeatmap: ((CKeySiteHeatmap) -> Void)? {
+        didSet {
+            guard let handler = onSiteHeatmap else { processor.onSiteHeatmap = nil; return }
+            processor.onSiteHeatmap = { map in DispatchQueue.main.async { handler(map) } }
+        }
+    }
+
     /// The queue `onTrack` is called on (default main).
     public var trackQueue: DispatchQueue {
         get { processor.trackQueue }

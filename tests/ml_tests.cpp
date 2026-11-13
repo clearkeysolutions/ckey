@@ -321,6 +321,22 @@ int main() {
         const double full = timed(CKEY_SCAN_OPTION_ML_AFTER, 6), fast = timed(CKEY_SCAN_OPTION_ML_AFTER | CKEY_SCAN_OPTION_FAST, 2);
         std::printf("fast scan of a smeared frame: %.0f ms (full ladder %.0f ms)\n", fast, full);
         CKEY_CHECK(fast <= full * 1.1 + 5);
+        // ckey_read_sites_gray8: the clean frame re-reads with (almost) every
+        // site as printed, in any corner order; the smeared one reads worse.
+        size_t sites = 0; uint32_t errors = 0, smearedErrors = 0;
+        CKEY_CHECK(ckey_read_sites_gray8(frame.data(), W, W, W, r.quad, &sym, nullptr, nullptr, 0, &sites, nullptr) == CKEY_INSUFFICIENT_BUFFER);
+        size_t mapped = 0; (void)ckey_ml_site_map(&sym, nullptr, nullptr, nullptr, 0, &mapped);
+        CKEY_CHECK(mapped == sites && sites > 0);
+        std::vector<uint8_t> correct(sites); std::vector<float> confidence(sites);
+        CKEY_CHECK(ckey_read_sites_gray8(frame.data(), W, W, W, r.quad, &sym, correct.data(), confidence.data(), sites, &sites, &errors) == CKEY_OK);
+        CKEY_CHECK(errors * 100 < sites);
+        double rotated[8]; for (int k = 0; k < 8; ++k) rotated[k] = r.quad[(k + 2) % 8];
+        uint32_t rotatedErrors = 0;
+        CKEY_CHECK(ckey_read_sites_gray8(frame.data(), W, W, W, rotated, &sym, correct.data(), confidence.data(), sites, &sites, &rotatedErrors) == CKEY_OK);
+        CKEY_CHECK(rotatedErrors == errors);
+        CKEY_CHECK(ckey_read_sites_gray8(smeared.data(), W, W, W, r.quad, &sym, correct.data(), confidence.data(), sites, &sites, &smearedErrors) == CKEY_OK);
+        std::printf("site re-read: %u of %zu wrong clean, %u smeared\n", errors, sites, smearedErrors);
+        CKEY_CHECK(smearedErrors > errors);
     }
     std::puts("ml tests passed");
     return 0;

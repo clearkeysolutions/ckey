@@ -50,6 +50,8 @@ public final class CKeyFrameProcessor {
     /// fast scan has missed `fullLadderAfterFailures` times in a row; with
     /// nothing tracked it never runs. (`fullLadderEvery` is no longer used.)
     public static let fullLadderEvery = 3
+    /// A tracked box smaller than this (pixels) is not used for the scan region.
+    public static let minimumTrackedSide: Double = 96
     /// Analysed frames per second while no code is tracked.
     public static let searchFramesPerSecond: Double = 8
     /// Fast scans of a tracked code that must fail before the full ladder runs.
@@ -145,6 +147,15 @@ public final class CKeyFrameProcessor {
         set { sync { settings.onFrameReport = newValue } }
     }
 
+    /// Diagnostics: after each read, a per-site heatmap of the frames since the
+    /// first candidate: every site re-read from each frame and compared with
+    /// the decoded truth (`CKeySiteHeatmap`). Called on a utility queue. Keeps
+    /// up to 40 cropped frames in memory; leave it nil in production.
+    public var onSiteHeatmap: ((CKeySiteHeatmap) -> Void)? {
+        get { sync { settings.onSiteHeatmap } }
+        set { sync { settings.onSiteHeatmap = newValue; if newValue == nil { heatFrames = [] } } }
+    }
+
     /// Called on `callbackQueue` when what the user should be told changes
     /// (an empty set clears the hint). Flags are steadied over a few frames
     /// so a hint does not flicker.
@@ -170,6 +181,7 @@ public final class CKeyFrameProcessor {
         var trackQueue = DispatchQueue.main
         var onAdvice: ((CKeyCameraAdvice) -> Void)?
         var onFrameReport: ((CKeyFrameReport) -> Void)?
+        var onSiteHeatmap: ((CKeySiteHeatmap) -> Void)?
         var onGuidance: ((CKeyGuidance) -> Void)?
         var callbackQueue = DispatchQueue.main
     }
@@ -587,6 +599,9 @@ public final class CKeyFrameProcessor {
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
                                        region: pixelRegion, payload: &payload, accumulator: nil, fast: true)
         if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
+        keepHeatFrame(gray, width, height, stride,
+                      quad: outcome.located && outcome.quad.count == 4 ? CKeyCorners.flat(outcome.quad) : (tracked ? held?.quad : nil),
+                      fast: true)
         if tracked, outcome.result == nil, trackedFailures >= Self.fullLadderAfterFailures {
             startFullReader(gray, width, height, stride, region: pixelRegion, multiFrame: multiFrame, index: index)
         }
@@ -641,6 +656,9 @@ public final class CKeyFrameProcessor {
         guard quad.count == 8, quad.allSatisfy({ $0.isFinite }) else { return nil }
         let xs = stride(from: 0, to: 8, by: 2).map { quad[$0] }, ys = stride(from: 1, to: 8, by: 2).map { quad[$0] }
         guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() else { return nil }
+        // No code reads below about 90 pixels across; a smaller "track" is a
+        // false lock (in a field capture, a round Dock icon), so read normally.
+        guard max(maxX - minX, maxY - minY) >= Self.minimumTrackedSide else { return nil }
         let pad = margin * max(maxX - minX, maxY - minY)
         let x0 = max(0, Int((minX - pad).rounded(.down))), y0 = max(0, Int((minY - pad).rounded(.down)))
         let x1 = min(width, Int((maxX + pad).rounded(.up))), y1 = min(height, Int((maxY + pad).rounded(.up)))
@@ -676,6 +694,60 @@ public final class CKeyFrameProcessor {
                                contrast: advice?.contrast ?? 0, clippedFraction: advice?.clippedFraction ?? 0,
                                zoomAdvice: advice?.zoomFactor ?? 1, histogram: histogram,
                                version: outcome.result?.version ?? 0)
+    }
+
+    // MARK: Site heatmap (diagnostics)
+
+    private struct HeatFrame {
+        let gray: Data
+        let width: Int
+        let height: Int
+        let quad: [Double]
+        let time: Double
+        let fast: Bool
+    }
+    /// Guarded by `lock`: frames since the first candidate (at most 40).
+    private var heatFrames: [HeatFrame] = []
+    private var heatMisses = 0
+    private let heatQueue = DispatchQueue(label: "org.openckey.scanner.heatmap", qos: .utility)
+
+    /// Keeps the code's crop of a frame with a candidate or a track.
+    private func keepHeatFrame(_ gray: UnsafePointer<UInt8>, _ width: Int, _ height: Int, _ stride: Int,
+                               quad: [Double]?, fast: Bool) {
+        guard sync({ settings.onSiteHeatmap != nil }) else { return }
+        guard let quad, quad.count == 8,
+              let box = Self.trackedRegion(quad, width: width, height: height, margin: 0.15) else {
+            sync { heatMisses += 1; if heatMisses > 24 { heatFrames = []; heatMisses = 0 } }
+            return
+        }
+        let x0 = Int(box.minX), y0 = Int(box.minY), w = Int(box.width), h = Int(box.height)
+        var bytes = Data(count: w * h)
+        bytes.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: UInt8.self)
+            for y in 0..<h { for x in 0..<w { out[y * w + x] = gray[(y0 + y) * stride + x0 + x] } }
+        }
+        let local = quad.enumerated().map { $0.offset % 2 == 0 ? $0.element - Double(x0) : $0.element - Double(y0) }
+        let frame = HeatFrame(gray: bytes, width: w, height: h, quad: local, time: CACurrentMediaTime(), fast: fast)
+        sync {
+            heatMisses = 0
+            heatFrames.append(frame)
+            if heatFrames.count > 40 { heatFrames.removeFirst(heatFrames.count - 40) }
+        }
+    }
+
+    /// After a read: re-reads every kept frame's sites against the truth.
+    private func buildHeatmap(for result: CKeyResult) {
+        let (frames, handler) = sync { () -> ([HeatFrame], ((CKeySiteHeatmap) -> Void)?) in
+            let kept = heatFrames
+            heatFrames = []
+            return (kept, settings.onSiteHeatmap)
+        }
+        guard let handler, !frames.isEmpty, result.profile == .scalable, let layout = result.layout else { return }
+        heatQueue.async {
+            if let map = CKeySiteHeatmap.build(result: result, layout: layout, frames: frames.map {
+                CKeySiteHeatmap.Input(gray: $0.gray, width: $0.width, height: $0.height, quad: $0.quad, time: $0.time, fast: $0.fast)
+            }) { handler(map) }
+        }
     }
 
     // MARK: Full reader beside the fast scans
@@ -741,6 +813,7 @@ public final class CKeyFrameProcessor {
             }
             clearGuidance()
             guard first else { return }
+            buildHeatmap(for: result)
             observer?.scanSessionDidDecode(result)
             if let onResult = snapshot.onResult {
                 snapshot.callbackQueue.async { onResult(result) }
@@ -819,4 +892,96 @@ public struct CKeyFrameReport: Sendable {
     public let histogram: [UInt32]
     /// The decoded version, 0 unless decoded.
     public let version: Int
+}
+
+/// Diagnostics: how each site of a code read across the frames of one scan,
+/// from the first candidate to the read (`CKeyFrameProcessor.onSiteHeatmap`).
+/// The truth is the decoded symbol, re-encoded; each frame's sites are read
+/// at its corners (any orientation) with the reader's plain and ring readings.
+public struct CKeySiteHeatmap: Sendable {
+    public struct Frame: Sendable {
+        /// Host clock, seconds.
+        public let time: Double
+        public let fast: Bool
+        /// Per site: 1 read as printed, 0 wrong, 255 unknown.
+        public let correct: [UInt8]
+        public let errors: Int
+    }
+    public struct Input: Sendable {
+        let gray: Data
+        let width: Int
+        let height: Int
+        let quad: [Double]
+        let time: Double
+        let fast: Bool
+    }
+    public let version: Int
+    public let layout: CKeyLayout
+    /// Error-correction level of the decoded symbol (0 L ... 5 X).
+    public let level: Int
+    /// Site centres in the 29-unit field (x right, y down) and kinds
+    /// (0 grid module, 1 dial ray, 2 ring mark), in the core's site order.
+    public let siteX: [Float]
+    public let siteY: [Float]
+    public let siteKind: [UInt8]
+    /// Printed value of each site (1 ink).
+    public let printed: [UInt8]
+    public let frames: [Frame]
+
+    /// Share of frames (with the site known) in which site `i` read wrong.
+    public func errorRate(site i: Int) -> Double? {
+        var wrong = 0, known = 0
+        for frame in frames where frame.correct[i] != 255 { known += 1; if frame.correct[i] == 0 { wrong += 1 } }
+        return known == 0 ? nil : Double(wrong) / Double(known)
+    }
+
+    static func build(result: CKeyResult, layout: CKeyLayout, frames: [Input]) -> CKeySiteHeatmap? {
+        // The level is not in the result: re-encode at each and keep the one
+        // that agrees best with the most recent frame.
+        var best: (ckey_scalable_symbol, Int, UInt32)?
+        for level in 0..<6 {
+            var symbol = ckey_scalable_symbol()
+            var diagnostics = ckey_diagnostics()
+            let status = result.bytes.withUnsafeBytes { raw in
+                ckey_encode_scalable(raw.bindMemory(to: UInt8.self).baseAddress, raw.count, UInt32(result.version),
+                                     ckey_ecc_level(rawValue: UInt32(level)), ckey_scalable_layout(rawValue: UInt32(layout.rawValue)),
+                                     &symbol, &diagnostics)
+            }
+            guard status == CKEY_OK, let last = frames.last, let errors = read(last, symbol)?.1 else { continue }
+            if best == nil || errors < best!.2 { best = (symbol, level, errors) }
+        }
+        guard var truth = best?.0, let level = best?.1 else { return nil }
+        var count = 0
+        _ = ckey_ml_site_map(&truth, nil, nil, nil, 0, &count)
+        guard count > 0 else { return nil }
+        var xy = [Float](repeating: 0, count: 2 * count), kind = [UInt8](repeating: 0, count: count), printed = [UInt8](repeating: 0, count: count)
+        guard ckey_ml_site_map(&truth, &xy, &kind, &printed, count, &count) == CKEY_OK else { return nil }
+        var out: [Frame] = []
+        for input in frames {
+            guard let (correct, errors) = read(input, truth) else { continue }
+            out.append(Frame(time: input.time, fast: input.fast, correct: correct, errors: Int(errors)))
+        }
+        return CKeySiteHeatmap(version: result.version, layout: layout, level: level,
+                               siteX: Swift.stride(from: 0, to: 2 * count, by: 2).map { xy[$0] },
+                               siteY: Swift.stride(from: 1, to: 2 * count, by: 2).map { xy[$0] },
+                               siteKind: kind, printed: printed, frames: out)
+    }
+
+    private static func read(_ input: Input, _ symbol: ckey_scalable_symbol) -> ([UInt8], UInt32)? {
+        var truth = symbol
+        var count = 0
+        var quad = input.quad
+        var errors: UInt32 = 0
+        _ = input.gray.withUnsafeBytes { raw in
+            ckey_read_sites_gray8(raw.bindMemory(to: UInt8.self).baseAddress, input.width, input.height, input.width, &quad,
+                                  &truth, nil, nil, 0, &count, nil)
+        }
+        guard count > 0 else { return nil }
+        var correct = [UInt8](repeating: 255, count: count), confidence = [Float](repeating: 0, count: count)
+        let status = input.gray.withUnsafeBytes { raw in
+            ckey_read_sites_gray8(raw.bindMemory(to: UInt8.self).baseAddress, input.width, input.height, input.width, &quad,
+                                  &truth, &correct, &confidence, count, &count, &errors)
+        }
+        return status == CKEY_OK ? (correct, errors) : nil
+    }
 }

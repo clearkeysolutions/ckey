@@ -10,6 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.107 — 2026-11-13
+
+* **Per-site heatmap of a scan** (diagnostics). The owner wants to see which parts of a code read wrong while the scanner tries, so the weak areas can be fixed.
+  * Core: `ckey_read_sites_gray8` re-reads every site of a known symbol at given corners and reports, per site, whether it read as printed (1), wrong (0) or not at all (255), with the reader's confidence. It tries all 8 corner orders and both the plain and the local-levels-plus-ring-sequence readings, and keeps the one that agrees best with the truth (`CKEY_HAS_READ_SITES`). A clean rendered frame re-reads with 0 of 3,719 sites wrong; the same frame smeared over 14 px has 1,446 wrong. Tested in `ml_tests`.
+  * Swift SDK: `CKeyFrameProcessor.onSiteHeatmap` / `CKeyCameraScanner.onSiteHeatmap`. While it is set, the processor keeps the code's crop of up to 40 frames since the first candidate. After a read, it re-encodes the decoded payload at each level, keeps the level that best matches the last frame, and re-reads every kept frame against that truth (`CKeySiteHeatmap`: site positions and kinds from `ckey_ml_site_map`, the printed values, and per-frame correctness). The work runs on a utility queue. Leave it nil in production.
+  * On the first capture the core re-read, the 13 wrong sites in the frame that read were all ring marks (0 of 7,027 grid modules, 0 of 285 dial rays, 13 of 4,829 ring marks).
+* **A tracked box under 96 px is ignored** (`CKeyFrameProcessor.minimumTrackedSide`). In a field capture the tracker locked onto a round Dock icon (a 68 × 70 px crop) and the scanner kept reading only that crop.
+* Swift not compiled here (parsed only).
+
 ## 0.1.0-build.106 — 2026-11-13
 
 From a field capture on the owner's iPhone. Built optimized, fast scans took 114 to 143 ms, against 545 to 1,014 ms in the Debug build, and the frame that read took 51 ms. The capture showed three delays.
