@@ -10,6 +10,12 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.108 — 2026-11-13
+
+* **The site heatmap carries the frame it was read from** (Swift SDK). `CKeySiteHeatmap.readFrame` is the last kept frame (the frame that read, when the fast scan read it): the code's 8-bit gray crop and the field corners in it. Open CKey Scanner uploads it with detailed scan reports when the person opts in.
+* The heatmap keeps at most 30 frames (was 40), to bound memory now that it can run in release builds.
+* Swift not compiled here (parsed only).
+
 ## 0.1.0-build.107 — 2026-11-13
 
 * **Per-site heatmap of a scan** (diagnostics). The owner wants to see which parts of a code read wrong while the scanner tries, so the weak areas can be fixed.

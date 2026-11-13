@@ -150,7 +150,7 @@ public final class CKeyFrameProcessor {
     /// Diagnostics: after each read, a per-site heatmap of the frames since the
     /// first candidate: every site re-read from each frame and compared with
     /// the decoded truth (`CKeySiteHeatmap`). Called on a utility queue. Keeps
-    /// up to 40 cropped frames in memory; leave it nil in production.
+    /// up to 30 cropped frames in memory; leave it nil in production.
     public var onSiteHeatmap: ((CKeySiteHeatmap) -> Void)? {
         get { sync { settings.onSiteHeatmap } }
         set { sync { settings.onSiteHeatmap = newValue; if newValue == nil { heatFrames = [] } } }
@@ -706,7 +706,7 @@ public final class CKeyFrameProcessor {
         let time: Double
         let fast: Bool
     }
-    /// Guarded by `lock`: frames since the first candidate (at most 40).
+    /// Guarded by `lock`: frames since the first candidate (at most 30).
     private var heatFrames: [HeatFrame] = []
     private var heatMisses = 0
     private let heatQueue = DispatchQueue(label: "org.openckey.scanner.heatmap", qos: .utility)
@@ -731,7 +731,7 @@ public final class CKeyFrameProcessor {
         sync {
             heatMisses = 0
             heatFrames.append(frame)
-            if heatFrames.count > 40 { heatFrames.removeFirst(heatFrames.count - 40) }
+            if heatFrames.count > 30 { heatFrames.removeFirst(heatFrames.count - 30) }
         }
     }
 
@@ -927,6 +927,17 @@ public struct CKeySiteHeatmap: Sendable {
     /// Printed value of each site (1 ink).
     public let printed: [UInt8]
     public let frames: [Frame]
+    /// The last kept frame (the one that read, when the fast scan read it):
+    /// the code's crop in 8-bit gray, row-major, and the field corners in it.
+    public let readFrame: ReadFrame?
+
+    public struct ReadFrame: Sendable {
+        public let gray: Data
+        public let width: Int
+        public let height: Int
+        /// Field corners in the crop, x0 y0 ... x3 y3.
+        public let quad: [Double]
+    }
 
     /// Share of frames (with the site known) in which site `i` read wrong.
     public func errorRate(site i: Int) -> Double? {
@@ -964,7 +975,8 @@ public struct CKeySiteHeatmap: Sendable {
         return CKeySiteHeatmap(version: result.version, layout: layout, level: level,
                                siteX: Swift.stride(from: 0, to: 2 * count, by: 2).map { xy[$0] },
                                siteY: Swift.stride(from: 1, to: 2 * count, by: 2).map { xy[$0] },
-                               siteKind: kind, printed: printed, frames: out)
+                               siteKind: kind, printed: printed, frames: out,
+                               readFrame: frames.last.map { ReadFrame(gray: $0.gray, width: $0.width, height: $0.height, quad: $0.quad) })
     }
 
     private static func read(_ input: Input, _ symbol: ckey_scalable_symbol) -> ([UInt8], UInt32)? {
