@@ -144,7 +144,7 @@ int main() {
     CHECK(lattice_roundtrip(url, 1, 3, 2));
     CHECK(lattice_roundtrip(std::string(900, 'k'), 0, 6, 1));
     { void *sym = ckw_encode(reinterpret_cast<const uint8_t *>(url.data()), static_cast<uint32_t>(url.size()), 0, 1, 0);
-      CHECK(ckw_render_lattice(sym, nullptr, 7) == nullptr && ckw_render_lattice(sym, nullptr, 99) == nullptr);
+      CHECK(ckw_render_lattice(sym, nullptr, 33) == nullptr && ckw_render_lattice(sym, nullptr, 99) == nullptr);
       ckw_symbol_free(sym); }
     CHECK(roundtrip("Hello, CKey! Grüße", 1, 0, nullptr));
     CHECK(roundtrip(url, 0, 1, nullptr));

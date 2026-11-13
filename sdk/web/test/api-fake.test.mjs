@@ -111,7 +111,7 @@ function fakeModule() {
   M._ckw_render_pdf = () => putBytes(enc.encode('%PDF-1.4\n'));
   // A 3x3 lattice: ink on the diagonal, accent 0 in the centre.
   M._ckw_render_lattice = (s, ws, cells) => {
-    if (cells > 6) return setError('invalid lattice options (cells per module 0..6)'), 0;
+    if (cells > 32) return setError('invalid lattice options (cells per module 0..32)'), 0;
     const out = new Uint8Array(22 + 9);
     out[0] = 3;
     [255, 255, 255, 0, 0, 0, 200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].forEach((v, i) => (out[4 + i] = v));
@@ -207,7 +207,7 @@ test('encode, render, decode marshalling with a growing heap and no leaks', () =
   assert.match(svg, /shape-rendering="crispEdges"/);
   assert.match(svg, /<path fill="#000000" d="M0 0h1v1h-1zM2 2h1v1h-1z"\/>/);
   assert.match(svg, /<path fill="#c80000" d="M1 1h1v1h-1z"\/>/);
-  assert.throws(() => ckey.renderLattice(sym, { cellsPerModule: 7 }), RangeError);
+  assert.throws(() => ckey.renderLattice(sym, { cellsPerModule: 33 }), RangeError);
   assert.throws(() => ckey.renderPixelPerfect(sym, { pxPerCell: 1.5 }), RangeError);
   assert.deepEqual([...ckey.renderPNGPixelPerfect(sym).subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
   assert.throws(() => ckey.encode('x'.repeat(101)), /payload exceeds/);

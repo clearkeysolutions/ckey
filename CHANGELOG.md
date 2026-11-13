@@ -10,6 +10,20 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.100 — 2026-11-13
+
+**Pixel-perfect drawing uses the pixels it has for detail.** In build 96 to 99 the renderers drew the lattice at its minimum size (6 cells per module for Standard, 3 for Print) and repeated each cell over several screen pixels. On a typical preview that made blocky rays and blob-like ring marks.
+* **Core:**
+  * `ckey_render_scalable_lattice` accepts 1 to 32 cells per module.
+  * Module dots are about 0.68 of the module at every size: `c − 2·round(0.16c)` cells, and 2 of 3 and 3 of 4 for Print and Pixel.
+  * From 12 cells per module, marks are snapped at half coverage, which draws them at their true width.
+  * Pixel's centreline rays apply only at 1 and 2 cells per module.
+  * Clean decodes at 3 to 32 cells per module, versions 2, 8, 14 and 21: 44/44 for Print, 44/44 for Pixel, and 41/44 for Standard (all 3 misses at 3 cells, below its minimum of 6).
+* **Web SDK:**
+  * New `pixelPerfectFit(sym, maxDevicePx)` picks the most cells per module that fit at one pixel per cell, then whole pixels per cell beyond 32.
+  * `renderToCanvasPixelPerfect` with `cssPx` uses it.
+* **Swift SDK:** new `pixelPerfectFit(pixels:)`, which `CKeyView` uses.
+
 ## 0.1.0-build.99 — 2026-11-13
 
 * **Pixel layout: the lattice defaults to 2 cells per module.** At 1 cell per module the data rays are a full module wide. A version-28 symbol drawn that way did not decode even shown at 2 to 4 screen pixels per cell. At 2 cells per module it decodes at 1 and 2 pixels per cell, as every tested version did in build 98.

@@ -49,7 +49,7 @@ final class CKeyRoundTripTests: XCTestCase {
             XCTAssertTrue(svg.contains("shape-rendering=\"crispEdges\""))
         }
         let symbol = try CKeySymbol.encode("x")
-        XCTAssertThrowsError(try symbol.lattice(cellsPerModule: 7))
+        XCTAssertThrowsError(try symbol.lattice(cellsPerModule: 33))
         XCTAssertThrowsError(try symbol.pixelPerfectImage(pxPerCell: 0))
     }
 

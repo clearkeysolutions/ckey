@@ -253,10 +253,10 @@ public final class CKeySymbol: @unchecked Sendable {
     /// cells and every other mark is snapped to cells. Display it only at
     /// whole-number scales without smoothing, so every copy (screen, PNG,
     /// SVG) is the same image.
-    /// - Parameter cellsPerModule: 1...6; 0 (default) is the smallest size
-    ///   that decodes at every version: 3 for the Print layout, 6 for Standard.
+    /// - Parameter cellsPerModule: 1...32; 0 (default) is the smallest size
+    ///   that decodes at every version: 3 for Print, 6 for Standard, 2 for Pixel.
     public func lattice(cellsPerModule: Int = 0, style: CKeyStyle = .plain) throws -> CKeyLattice {
-        guard (0...6).contains(cellsPerModule) else { throw CKeyError(.invalidArgument, "cellsPerModule must be 0...6") }
+        guard (0...32).contains(cellsPerModule) else { throw CKeyError(.invalidArgument, "cellsPerModule must be 0...32") }
         let symbol = UnsafePointer(storage)
         return try style.withCStyle { cStyle -> CKeyLattice in
             var side: UInt32 = 0
@@ -274,6 +274,21 @@ public final class CKeySymbol: @unchecked Sendable {
             for i in 0..<4 { palette.append(i < style.accents.count ? style.accents[i] : style.ink) }
             return CKeyLattice(side: Int(side), palette: palette, cells: cells)
         }
+    }
+
+    /// The finest pixel-perfect drawing that fits `pixels` across: the most
+    /// cells per module (from the layout's minimum up to 32) at one pixel per
+    /// cell, then whole pixels per cell beyond 32. Spare pixels buy detail
+    /// (thin rays, round ring marks), not bigger blocks.
+    public func pixelPerfectFit(pixels: Int) throws -> (cellsPerModule: Int, pxPerCell: Int, side: Int) {
+        let modules = modulesAcross
+        func side(_ c: Int) -> Int { c * modules + 2 * ((c * modules + 28) / 29) }
+        let minimum = try lattice().side
+        var c = 1
+        while c < 32, side(c) < minimum { c += 1 }
+        while c < 32, side(c + 1) <= pixels { c += 1 }
+        let px = c == 32 ? max(1, pixels / side(c)) : 1
+        return (c, px, side(c))
     }
 
     /// Pixel-perfect RGBA8: each cell exactly `pxPerCell` x `pxPerCell` pixels.

@@ -308,7 +308,7 @@ CKW_EXPORT uint8_t *ckw_render_lattice(const ckey_scalable_symbol *sym, const We
     size_t need = 0;
     ckey_status st = ckey_render_scalable_lattice(sym, style, cells_per_module, nullptr, 0, &side, &need);
     if (st != CKEY_INSUFFICIENT_BUFFER || need == 0) {
-        explain_refusal(sym, ws, "invalid lattice options (cells per module 0..6)");
+        explain_refusal(sym, ws, "invalid lattice options (cells per module 0..32)");
         return nullptr;
     }
     const size_t head = 4 + 18;

@@ -247,7 +247,7 @@ export function createCKey(M, options = {}) {
     o = o || {};
     if (typeof o !== 'object') throw new TypeError(`${what} options must be an object`);
     const cells = o.cellsPerModule === undefined ? 0 : o.cellsPerModule;
-    if (!Number.isInteger(cells) || cells < 0 || cells > 6) throw new RangeError('cellsPerModule must be 0..6');
+    if (!Number.isInteger(cells) || cells < 0 || cells > 32) throw new RangeError('cellsPerModule must be 0..32');
     const px = o.pxPerCell === undefined ? 1 : o.pxPerCell;
     if (!Number.isInteger(px) || px < 1 || px > 64) throw new RangeError('pxPerCell must be an integer 1..64');
     const dpi = o.dpi === undefined ? 0 : o.dpi;
@@ -300,6 +300,25 @@ export function createCKey(M, options = {}) {
     return Math.max(1, Math.floor(maxDevicePx / l.side));
   }
 
+  const latticeSide = (modules, c) => c * modules + 2 * Math.ceil((c * modules) / 29);
+  /**
+   * The finest pixel-perfect drawing that fits maxDevicePx: the most cells per
+   * module (from the layout's minimum up to 32) at one pixel per cell, then
+   * whole pixels per cell beyond 32. Spare pixels buy detail (thin rays, round
+   * ring marks), not bigger blocks. { cellsPerModule, pxPerCell, side, devicePx }.
+   */
+  function pixelPerfectFit(sym, maxDevicePx) {
+    const modules = sym.modules;
+    let min = 1;
+    const defaultSide = latticeCells(sym, latticeOptions({}, 'pixelPerfectFit')).side;
+    while (min < 32 && latticeSide(modules, min) < defaultSide) min++;
+    let c = min;
+    while (c < 32 && latticeSide(modules, c + 1) <= maxDevicePx) c++;
+    const side = latticeSide(modules, c);
+    const px = c === 32 ? Math.max(1, Math.floor(maxDevicePx / side)) : 1;
+    return { cellsPerModule: c, pxPerCell: px, side, devicePx: side * px };
+  }
+
   /**
    * Draws pixel-perfect into a canvas. With cssPx (the box's CSS width) and
    * devicePixelRatio, pxPerCell is chosen as the largest whole number of
@@ -310,11 +329,14 @@ export function createCKey(M, options = {}) {
     if (!canvas || typeof canvas.getContext !== 'function') {
       throw new TypeError('renderToCanvasPixelPerfect needs an HTMLCanvasElement or OffscreenCanvas');
     }
-    const o = latticeOptions(opts, 'renderToCanvasPixelPerfect');
-    const l = latticeCells(sym, o);
     const dpr = opts && opts.devicePixelRatio > 0 ? opts.devicePixelRatio : 1;
-    let px = o.px;
-    if (opts && opts.cssPx > 0 && opts.pxPerCell === undefined) px = Math.max(1, Math.floor((opts.cssPx * dpr) / l.side));
+    let o = latticeOptions(opts, 'renderToCanvasPixelPerfect');
+    if (opts && opts.cssPx > 0 && opts.pxPerCell === undefined && opts.cellsPerModule === undefined) {
+      const fit = pixelPerfectFit(sym, Math.floor(opts.cssPx * dpr));
+      o = { ...o, cells: fit.cellsPerModule, px: fit.pxPerCell };
+    }
+    const l = latticeCells(sym, o);
+    const px = o.px;
     const img = latticeRGBA(l, px, o.transparent);
     if (canvas.width !== img.width) canvas.width = img.width;
     if (canvas.height !== img.height) canvas.height = img.height;
@@ -329,7 +351,7 @@ export function createCKey(M, options = {}) {
     const data = typeof ImageData === 'function' ? new ImageData(img.data, img.width, img.height) : ctx.createImageData(img.width, img.height);
     if (typeof ImageData !== 'function') data.data.set(img.data);
     ctx.putImageData(data, 0, 0);
-    return { canvas, pxPerCell: px, side: l.side, devicePx: img.width };
+    return { canvas, pxPerCell: px, cellsPerModule: o.cells, side: l.side, devicePx: img.width };
   }
 
   /** Pixel-perfect PNG: each cell exactly pxPerCell x pxPerCell pixels. */
@@ -533,6 +555,7 @@ export function createCKey(M, options = {}) {
     renderLattice,
     renderPixelPerfect,
     pixelPerfectScale,
+    pixelPerfectFit,
     renderToCanvasPixelPerfect,
     renderPNGPixelPerfect,
     renderSVGPixelPerfect,

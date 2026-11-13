@@ -204,6 +204,8 @@ export interface CKey {
   renderLattice(symbol: CKeySymbol, options?: PixelPerfectOptions): { side: number; palette: [number, number, number][]; cells: Uint8Array };
   /** Pixel-perfect RGBA pixels, (side * pxPerCell) square; every cell is whole pixels. */
   renderPixelPerfect(symbol: CKeySymbol, options?: PixelPerfectOptions): { width: number; height: number; data: Uint8ClampedArray };
+  /** The finest pixel-perfect drawing that fits: most cells per module (layout minimum..32), then whole pixels per cell. */
+  pixelPerfectFit(symbol: CKeySymbol, maxDevicePx: number): { cellsPerModule: number; pxPerCell: number; side: number; devicePx: number };
   /** Largest pxPerCell that fits in maxDevicePx device pixels (at least 1). */
   pixelPerfectScale(symbol: CKeySymbol, maxDevicePx: number, options?: PixelPerfectOptions): number;
   /** Draws pixel-perfect into a canvas; with cssPx and devicePixelRatio, picks whole device pixels per cell and sets the CSS size. */
@@ -302,7 +304,7 @@ export const TELEMETRY_LOCAL: 2;
 
 /** Options for the pixel-perfect renderers. */
 export interface PixelPerfectOptions {
-  /** Cells per grid module, 0..6; 0 (default) = 3 for the Print layout, 6 for Standard. */
+  /** Cells per grid module, 0..32; 0 (default) = the layout's minimum: 3 for Print, 6 for Standard, 2 for Pixel. */
   cellsPerModule?: number;
   /** Whole pixels per cell, 1..64 (default 1). */
   pxPerCell?: number;

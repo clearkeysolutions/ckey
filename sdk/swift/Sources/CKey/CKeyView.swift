@@ -81,12 +81,12 @@ final class CKeyImageCache {
         guard pixels >= 16 else { return nil }
         let box = Box(Key(content: content, pixels: min(pixels, 16384), style: style, policy: policy, transparent: transparent))
         if let hit = cache.object(forKey: box) { return hit }
-        // Pixel-perfect: the most whole pixels per lattice cell that fit,
+        // Pixel-perfect: the finest lattice that fits (most cells per module),
         // drawn at one image pixel per display pixel (the views centre it and
         // never scale it). `policy` applies only to `CKeySymbol.cgImage`.
         guard let symbol = try? content.makeSymbol(),
-              let lattice = try? symbol.lattice(style: style),
-              let image = try? symbol.pixelPerfectImage(pxPerCell: lattice.pxPerCell(fitting: box.key.pixels),
+              let fit = try? symbol.pixelPerfectFit(pixels: box.key.pixels),
+              let image = try? symbol.pixelPerfectImage(pxPerCell: fit.pxPerCell, cellsPerModule: fit.cellsPerModule,
                                                         transparent: transparent, style: style)
         else { return nil }
         cache.setObject(image, forKey: box)

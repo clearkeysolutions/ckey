@@ -327,7 +327,7 @@ int main() {
         }
         const auto s = encode(5, CKEY_LAYOUT_STANDARD, 10, 7);
         uint32_t side = 0; size_t need = 0;
-        CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 7, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);
+        CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 33, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);
         CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, nullptr, 0, nullptr, &need) == CKEY_INVALID_ARGUMENT);
         CKEY_CHECK(ckey_render_scalable_lattice(nullptr, nullptr, 0, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);
         std::vector<uint8_t> small(10);

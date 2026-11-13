@@ -657,7 +657,7 @@ ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *s, const cke
 
 ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ckey_style *style, uint32_t cells_per_module,
                                          uint8_t *out, size_t cap, uint32_t *out_side, size_t *required) {
-    if (!required || !out_side || cells_per_module > 6) return CKEY_INVALID_ARGUMENT;
+    if (!required || !out_side || cells_per_module > 32) return CKEY_INVALID_ARGUMENT;
     ckey_style st{};
     const ScalableLayout *L = scene_layout(s, style, st);
     if (!L) return CKEY_INVALID_ARGUMENT;
@@ -680,22 +680,28 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
         // which keeps marks thinner than a cell.
         auto scene = build_scalable_scene(*L, *s, st);
         // Pixel: data rays are drawn along their centrelines below, not traced.
-        const bool pixel = L->family == 2;
+        // Pixel at 1 or 2 cells per module: data rays along their centrelines
+        // (no two rays may touch a neighbour's sampled cell). Finer lattices
+        // trace them like every other mark.
+        const bool pixel = L->family == 2 && c <= 2;
         scene.erase(std::remove_if(scene.begin(), scene.end(), [pixel](const ckey_shape &x) {
             return x.layer == CKEY_LAYER_DATA_CARTESIAN || (pixel && x.layer == CKEY_LAYER_DATA_POLAR && x.kind == CKEY_SHAPE_LINE);
         }), scene.end());
         constexpr int kSamples = 5;
         const Coverage cov = rasterize_scene(scene, static_cast<int>(side), kSamples, 0.0, -static_cast<double>(margin) * unit, unit);
         for (size_t i = 0; i < *required; ++i) {
-            const bool ink = 10 * cov.ink[i] >= cov.samples;
+            // Coarse lattices keep thin marks (Ring Key ticks) at 10% coverage;
+            // from 12 cells per module every mark is several cells wide and
+            // half coverage draws it at its true width.
+            const bool ink = (c >= 12 ? 2 : 10) * cov.ink[i] >= cov.samples;
             out[i] = !ink ? 0 : cov.paint[i] >= 0 ? static_cast<uint8_t>(2 + cov.paint[i]) : 1;
         }
-        // Grid modules from the data. Standard: centred dots with gaps (its
-        // reader mark model): 1 of 3, 2 of 4, 3 of 5, 4 of 6 cells across, the
-        // whole block at 1 and 2. Print: always the whole block, which reads
-        // there and survives a display's sub-pixel structure (a lone one-cell
-        // dot does not).
-        const uint32_t dot = c <= 2 ? c : L->family ? c - 1 : c - 2, off = (c - dot) / 2;
+        // Dot sizes: the whole block at 1 and 2 cells per module; Print and
+        // Pixel 2 of 3 and 3 of 4; otherwise centred (same parity as c) and
+        // about 0.68 of the module, the drawn mark's size: 1 of 3, 2 of 4,
+        // 3 of 5, 4 of 6, ... 8 of 12, 12 of 18.
+        const uint32_t gap = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(0.16 * c)));
+        const uint32_t dot = c <= 2 ? c : (L->family && c <= 4) ? c - 1 : c - 2 * gap, off = (c - dot) / 2;
         if (pixel) {
             // Each data ray: the cells its centreline passes through, from the
             // dial's inner radius to the ray's end (long or short).

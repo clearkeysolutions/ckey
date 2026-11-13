@@ -252,6 +252,14 @@ test('pixel-perfect: whole cells, decodes, and canvas/PNG/SVG agree', { skip }, 
     assert.match(svg, new RegExp(`width="${lat.side * 3}"`));
     assert.match(svg, /shape-rendering="crispEdges"/);
     assert.equal(ckey.pixelPerfectScale(sym, lat.side * 4 + 3), 4);
+    // The fit spends spare pixels on cells per module, and stays pixel-perfect and decodable.
+    const fit = ckey.pixelPerfectFit(sym, 900);
+    assert.ok(fit.cellsPerModule > (layout === 'print' ? 3 : 6) && fit.devicePx <= 900, JSON.stringify(fit));
+    const fine = ckey.renderPixelPerfect(sym, { cellsPerModule: fit.cellsPerModule });
+    assert.equal(fine.width, fit.side);
+    const w2 = fine.width + 80, f2 = new Uint8ClampedArray(w2 * w2 * 4).fill(255);
+    for (let y = 0; y < fine.height; y++) f2.set(fine.data.subarray(y * fine.width * 4, (y + 1) * fine.width * 4), ((y + 40) * w2 + 40) * 4);
+    assert.equal(ckey.decodeImageData({ width: w2, height: w2, data: f2 }).text, text);
     sym.free();
   }
 });
