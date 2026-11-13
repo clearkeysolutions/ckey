@@ -10,6 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.102 — 2026-11-13
+
+**Live scanning reads where the code is, not just inside the reticle.** From a screen recording: the scanner locked its brackets on sharp, well-lit codes (a 122-byte Standard code and the 2,022-byte Pixel one) but did not read them for several seconds.
+* **Cause.** Both codes were held a little larger than the reticle. Two of every three analysed frames read only the reticle region plus an 18% margin, which cut the code off. Before build 101, each such doomed scan also ran the full reader ladder. Only every third frame was read whole.
+* **Swift SDK.**
+  * While the tracker holds a code, `CKeyFrameProcessor` reads the tracked corners' bounding box plus a quarter of its size, on every frame (`trackedRegion`).
+  * The reticle margin (`CKeyDecoder.regionMargin`) is 35%, up from 18%, so a code larger than the reticle reads before the track locks.
+  * Not compiled here.
+
 ## 0.1.0-build.101 — 2026-11-13
 
 **Live scanning: frames that will not read give up fast, and frames come out sharper.**

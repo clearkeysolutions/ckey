@@ -302,10 +302,16 @@ final class CKeyScanLayerTests: XCTestCase {
     }
 
     func testPixelRegion() throws {
-        // The reticle plus 18% on each side, in whole pixels.
+        // The reticle plus 35% on each side, in whole pixels.
         let region = try XCTUnwrap(CKeyDecoder.pixelRegion(normalized: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5),
                                                            width: 1000, height: 800))
-        XCTAssertEqual(region, CGRect(x: 160, y: 128, width: 680, height: 544))
+        XCTAssertEqual(region, CGRect(x: 75, y: 60, width: 850, height: 680))
+        // While tracked: the code's box plus a quarter of its size, clamped.
+        let tracked = try XCTUnwrap(CKeyFrameProcessor.trackedRegion([100, 100, 300, 100, 300, 300, 100, 300], width: 1000, height: 800))
+        XCTAssertEqual(tracked, CGRect(x: 50, y: 50, width: 300, height: 300))
+        let edge = try XCTUnwrap(CKeyFrameProcessor.trackedRegion([0, 0, 400, 0, 400, 400, 0, 400], width: 1000, height: 800))
+        XCTAssertEqual(edge, CGRect(x: 0, y: 0, width: 500, height: 500))
+        XCTAssertNil(CKeyFrameProcessor.trackedRegion([1, 2, 3], width: 1000, height: 800))
         // Clamped to the frame.
         let clamped = try XCTUnwrap(CKeyDecoder.pixelRegion(normalized: CGRect(x: 0, y: 0, width: 1, height: 1),
                                                             width: 640, height: 480))

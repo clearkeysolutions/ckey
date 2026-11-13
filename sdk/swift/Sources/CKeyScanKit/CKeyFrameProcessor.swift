@@ -486,10 +486,16 @@ public final class CKeyFrameProcessor {
         }
         if resetPolicy { ckey_camera_policy_init(&policy) }
         if resetAccumulator { ckey_accumulator_reset(accumulator) }
-        // Two of every three analysed frames read only the region, at full
-        // resolution and in place; every third is read whole.
+        // While the tracker holds the code, read around it (its corners plus a
+        // margin) on every frame: the code is wherever the brackets are, even
+        // when it is larger than the reticle, which a reticle region would cut.
+        // Otherwise two of every three analysed frames read only the reticle
+        // region, at full resolution and in place, and every third is read whole.
         var pixelRegion: CGRect?
-        if useRegion, let region, index % Self.wholeFrameEvery != 0 {
+        if let held, held.width == width, held.height == height,
+           let around = Self.trackedRegion(held.quad, width: width, height: height) {
+            pixelRegion = around
+        } else if useRegion, let region, index % Self.wholeFrameEvery != 0 {
             pixelRegion = CKeyDecoder.pixelRegion(normalized: region, width: width, height: height)
         }
         let fast = index % Self.fullLadderEvery != 0
@@ -531,6 +537,19 @@ public final class CKeyFrameProcessor {
                 })
         }
         return Analysis(outcome: outcome, advice: swiftAdvice, usedRegion: pixelRegion != nil)
+    }
+
+    /// The tracked code's bounding box grown by a quarter of its size on each
+    /// side, in whole pixels and clamped to the frame; `nil` if degenerate.
+    public static func trackedRegion(_ quad: [Double], width: Int, height: Int) -> CGRect? {
+        guard quad.count == 8, quad.allSatisfy({ $0.isFinite }) else { return nil }
+        let xs = stride(from: 0, to: 8, by: 2).map { quad[$0] }, ys = stride(from: 1, to: 8, by: 2).map { quad[$0] }
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() else { return nil }
+        let pad = 0.25 * max(maxX - minX, maxY - minY)
+        let x0 = max(0, Int((minX - pad).rounded(.down))), y0 = max(0, Int((minY - pad).rounded(.down)))
+        let x1 = min(width, Int((maxX + pad).rounded(.up))), y1 = min(height, Int((maxY + pad).rounded(.up)))
+        guard x1 - x0 >= 64, y1 - y0 >= 64 else { return nil }
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 
     private func finish(_ analysis: Analysis, started: CFTimeInterval) {

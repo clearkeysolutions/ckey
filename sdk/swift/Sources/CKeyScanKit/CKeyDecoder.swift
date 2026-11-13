@@ -70,8 +70,9 @@ public enum CKeyDecoder {
     /// Maximum border candidates tried per frame.
     public static let maxCandidates = 6
     /// The margin `pixelRegion` adds around a region, as a fraction of its
-    /// size on each side, so a code that slightly overhangs it is still whole.
-    public static let regionMargin: CGFloat = 0.18
+    /// size on each side, so a code that overhangs it is still whole (codes
+    /// held close are often larger than the reticle).
+    public static let regionMargin: CGFloat = 0.35
 
     // MARK: - Decode (payload only)
 
