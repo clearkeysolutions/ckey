@@ -205,7 +205,7 @@ export interface CKey {
   /** Pixel-perfect RGBA pixels, (side * pxPerCell) square; every cell is whole pixels. */
   renderPixelPerfect(symbol: CKeySymbol, options?: PixelPerfectOptions): { width: number; height: number; data: Uint8ClampedArray };
   /** The finest pixel-perfect drawing that fits: most cells per module (layout minimum..32), then whole pixels per cell. */
-  pixelPerfectFit(symbol: CKeySymbol, maxDevicePx: number): { cellsPerModule: number; pxPerCell: number; side: number; devicePx: number };
+  pixelPerfectFit(symbol: CKeySymbol, maxDevicePx: number, options?: { allowBelowMinimum?: boolean }): { cellsPerModule: number; pxPerCell: number; side: number; devicePx: number; minimumCellsPerModule: number; belowMinimum: boolean; overflow: boolean };
   /** Largest pxPerCell that fits in maxDevicePx device pixels (at least 1). */
   pixelPerfectScale(symbol: CKeySymbol, maxDevicePx: number, options?: PixelPerfectOptions): number;
   /** Draws pixel-perfect into a canvas; with cssPx and devicePixelRatio, picks whole device pixels per cell and sets the CSS size. */

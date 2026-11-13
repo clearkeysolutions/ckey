@@ -265,6 +265,14 @@ test('pixel-perfect: whole cells, decodes, and canvas/PNG/SVG agree', { skip }, 
     // The fit spends spare pixels on cells per module, and stays pixel-perfect and decodable.
     const fit = ckey.pixelPerfectFit(sym, 900);
     assert.ok(fit.cellsPerModule > (layout === 'print' ? 3 : 6) && fit.devicePx <= 900, JSON.stringify(fit));
+    assert.equal(fit.belowMinimum, false);
+    // A box too small for the scannable minimum: the default never goes
+    // below it; allowBelowMinimum fits the box and says so.
+    const tight = Math.floor(fit.side / fit.cellsPerModule * 2);
+    assert.equal(ckey.pixelPerfectFit(sym, tight).cellsPerModule, fit.minimumCellsPerModule);
+    const small = ckey.pixelPerfectFit(sym, tight, { allowBelowMinimum: true });
+    assert.ok(small.belowMinimum && small.cellsPerModule < small.minimumCellsPerModule && small.devicePx <= tight, JSON.stringify(small));
+    assert.equal(ckey.pixelPerfectFit(sym, 4, { allowBelowMinimum: true }).overflow, true);
     const fine = ckey.renderPixelPerfect(sym, { cellsPerModule: fit.cellsPerModule });
     assert.equal(fine.width, fit.side);
     const w2 = fine.width + 80, f2 = new Uint8ClampedArray(w2 * w2 * 4).fill(255);

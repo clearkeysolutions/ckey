@@ -10,6 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.109 — 2026-11-13
+
+* **Previews can be drawn below the scannable minimum** instead of growing past their space. A dense code (3,001 bytes, Standard) needs 6 cells per module, about 1,300 device pixels; its preview overflowed the box on the owner's screen.
+  * Web SDK: `pixelPerfectFit(sym, maxDevicePx, { allowBelowMinimum: true })` goes down to 1 cell per module, and returns `minimumCellsPerModule`, `belowMinimum` and `overflow` (still wider at 1). `renderToCanvasPixelPerfect` passes `allowBelowMinimum` through with `cssPx`. The default is unchanged. Tested in `wasm.test.mjs`.
+  * Swift SDK: `pixelPerfectFit(pixels:allowBelowMinimum:)` and `minimumCellsPerModule`.
+  * Exports keep the minimum: only on-screen previews go below it, and they say it is too small to scan as shown.
+* **`CKeyFrameReport.codeSize` is in frame pixels**, as documented. It was the core's fraction of the shorter frame side (0 to 1), so field reports showed sizes near 0.
+* **`CKeySiteHeatmap.readTime`**: the host time of the last kept frame, so an app can match the heatmap to the right scan. In field reports a heatmap that arrived late was attached to the next read.
+* Swift not compiled here (parsed only).
+
 ## 0.1.0-build.108 — 2026-11-13
 
 * **The site heatmap carries the frame it was read from** (Swift SDK). `CKeySiteHeatmap.readFrame` is the last kept frame (the frame that read, when the fast scan read it): the code's 8-bit gray crop and the field corners in it. Open CKey Scanner uploads it with detailed scan reports when the person opts in.

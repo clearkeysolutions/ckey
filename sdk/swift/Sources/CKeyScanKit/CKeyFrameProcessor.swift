@@ -690,7 +690,7 @@ public final class CKeyFrameProcessor {
         return CKeyFrameReport(time: CACurrentMediaTime(), index: index, fast: fast,
                                regionWidth: Int(region?.width ?? CGFloat(width)), regionHeight: Int(region?.height ?? CGFloat(height)),
                                milliseconds: milliseconds, located: outcome.located, tracked: tracked, decoded: outcome.result != nil,
-                               score: outcome.score, codeSize: advice?.size ?? 0, sharpness: advice?.sharpness ?? 0,
+                               score: outcome.score, codeSize: (advice?.size ?? 0) * Double(min(width, height)), sharpness: advice?.sharpness ?? 0,
                                contrast: advice?.contrast ?? 0, clippedFraction: advice?.clippedFraction ?? 0,
                                zoomAdvice: advice?.zoomFactor ?? 1, histogram: histogram,
                                version: outcome.result?.version ?? 0)
@@ -930,6 +930,9 @@ public struct CKeySiteHeatmap: Sendable {
     /// The last kept frame (the one that read, when the fast scan read it):
     /// the code's crop in 8-bit gray, row-major, and the field corners in it.
     public let readFrame: ReadFrame?
+    /// Host clock (CACurrentMediaTime) of the last kept frame, about when the
+    /// code read: match it with `CKeyFrameReport.time` of the decoded frame.
+    public let readTime: Double
 
     public struct ReadFrame: Sendable {
         public let gray: Data
@@ -976,7 +979,8 @@ public struct CKeySiteHeatmap: Sendable {
                                siteX: Swift.stride(from: 0, to: 2 * count, by: 2).map { xy[$0] },
                                siteY: Swift.stride(from: 1, to: 2 * count, by: 2).map { xy[$0] },
                                siteKind: kind, printed: printed, frames: out,
-                               readFrame: frames.last.map { ReadFrame(gray: $0.gray, width: $0.width, height: $0.height, quad: $0.quad) })
+                               readFrame: frames.last.map { ReadFrame(gray: $0.gray, width: $0.width, height: $0.height, quad: $0.quad) },
+                               readTime: frames.last?.time ?? 0)
     }
 
     private static func read(_ input: Input, _ symbol: ckey_scalable_symbol) -> ([UInt8], UInt32)? {

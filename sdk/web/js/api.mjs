@@ -348,16 +348,18 @@ export function createCKey(M, options = {}) {
    * whole pixels per cell beyond 32. Spare pixels buy detail (thin rays, round
    * ring marks), not bigger blocks. { cellsPerModule, pxPerCell, side, devicePx }.
    */
-  function pixelPerfectFit(sym, maxDevicePx) {
+  function pixelPerfectFit(sym, maxDevicePx, opts) {
     const modules = sym.modules;
     let min = 1;
     const defaultSide = latticeCells(sym, latticeOptions({}, 'pixelPerfectFit')).side;
     while (min < 32 && latticeSide(modules, min) < defaultSide) min++;
-    let c = min;
+    // allowBelowMinimum: a preview that must fit its box goes below the
+    // smallest drawing that scans (down to 1) instead of growing past it.
+    let c = opts && opts.allowBelowMinimum ? 1 : min;
     while (c < 32 && latticeSide(modules, c + 1) <= maxDevicePx) c++;
     const side = latticeSide(modules, c);
     const px = c === 32 ? Math.max(1, Math.floor(maxDevicePx / side)) : 1;
-    return { cellsPerModule: c, pxPerCell: px, side, devicePx: side * px };
+    return { cellsPerModule: c, pxPerCell: px, side, devicePx: side * px, minimumCellsPerModule: min, belowMinimum: c < min, overflow: side > maxDevicePx };
   }
 
   /**
@@ -373,7 +375,7 @@ export function createCKey(M, options = {}) {
     const dpr = opts && opts.devicePixelRatio > 0 ? opts.devicePixelRatio : 1;
     let o = latticeOptions(opts, 'renderToCanvasPixelPerfect');
     if (opts && opts.cssPx > 0 && opts.pxPerCell === undefined && opts.cellsPerModule === undefined) {
-      const fit = pixelPerfectFit(sym, Math.floor(opts.cssPx * dpr));
+      const fit = pixelPerfectFit(sym, Math.floor(opts.cssPx * dpr), { allowBelowMinimum: !!opts.allowBelowMinimum });
       o = { ...o, cells: fit.cellsPerModule, px: fit.pxPerCell };
     }
     const px = o.px;

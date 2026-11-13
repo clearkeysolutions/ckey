@@ -280,15 +280,26 @@ public final class CKeySymbol: @unchecked Sendable {
     /// cells per module (from the layout's minimum up to 32) at one pixel per
     /// cell, then whole pixels per cell beyond 32. Spare pixels buy detail
     /// (thin rays, round ring marks), not bigger blocks.
-    public func pixelPerfectFit(pixels: Int) throws -> (cellsPerModule: Int, pxPerCell: Int, side: Int) {
+    /// `allowBelowMinimum`: for a preview that must fit its space, go below
+    /// the smallest drawing that scans (down to one cell per module) rather
+    /// than past `pixels`; compare with `minimumCellsPerModule` to say so.
+    public func pixelPerfectFit(pixels: Int, allowBelowMinimum: Bool = false) throws -> (cellsPerModule: Int, pxPerCell: Int, side: Int) {
         let modules = modulesAcross
         func side(_ c: Int) -> Int { c * modules + 2 * ((c * modules + 28) / 29) }
-        let minimum = try lattice().side
         var c = 1
-        while c < 32, side(c) < minimum { c += 1 }
+        if !allowBelowMinimum {
+            let minimum = try lattice().side
+            while c < 32, side(c) < minimum { c += 1 }
+        }
         while c < 32, side(c + 1) <= pixels { c += 1 }
         let px = c == 32 ? max(1, pixels / side(c)) : 1
         return (c, px, side(c))
+    }
+
+    /// The fewest cells per module that still scan for this symbol's layout
+    /// (the lattice's default: 6 Standard, 3 Print, 2 Pixel).
+    public var minimumCellsPerModule: Int {
+        get throws { try pixelPerfectFit(pixels: 0).cellsPerModule }
     }
 
     /// Pixel-perfect RGBA8 (`ckey_render_scalable_aligned_raster`): every grid
