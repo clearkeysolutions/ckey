@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.98"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.99"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -746,7 +746,8 @@ CKEY_API ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *sym
  * Pixel-perfect lattice: the symbol on a grid of whole cells, for displays and
  * exports that must never be resampled. Every Profile 0 grid module is
  * exactly cells_per_module x cells_per_module cells (1..6; 0 = the smallest
- * size that decodes at every version: 3 for the Print family, 6 for Standard)
+ * size that decodes at every version: 3 for the Print family, 6 for Standard,
+ * 2 for the experimental Pixel family)
  * and is drawn as a centred dot: Standard 1, 2, 3 or 4 cells across at 3, 4,
  * 5 or 6 cells per module, Print one cell less than the module (the whole
  * block at 1 and 2 cells per module in both); every other mark (frame,

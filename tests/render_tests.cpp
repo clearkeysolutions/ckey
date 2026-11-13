@@ -301,7 +301,7 @@ int main() {
         }
         // Pixel layout: decodes from its lattice at 2 cells per module (one and
         // two pixels per cell) and from the antialiased raster; the default is
-        // 1 cell per module.
+        // 2 cells per module.
         for (const uint32_t version : {3u, 12u, 26u}) {
             const size_t bytes = std::min<size_t>(60, ckey_scalable_capacity(version, CKEY_ECC_M, CKEY_LAYOUT_PIXEL));
             const auto s = encode(version, CKEY_LAYOUT_PIXEL, bytes, version * 5);
@@ -309,7 +309,7 @@ int main() {
             uint32_t side = 0; size_t need = 0;
             CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
             const uint32_t modules = ckey_scalable_modules_across(version);
-            CKEY_CHECK(side == modules + 2 * ((modules + 28) / 29));
+            CKEY_CHECK(side == 2 * modules + 2 * ((2 * modules + 28) / 29));
             CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 2, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
             std::vector<uint8_t> cells(need);
             CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 2, cells.data(), cells.size(), &side, &need) == CKEY_OK);

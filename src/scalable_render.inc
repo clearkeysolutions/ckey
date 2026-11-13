@@ -665,7 +665,7 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
     if (modules == 0) return CKEY_INVALID_ARGUMENT;
     // 0: the smallest size that decodes at every version on clean output:
     // Print family 3 (its ring dots are 0.3 of a module), Standard 6 (0.2).
-    const uint32_t c = cells_per_module ? cells_per_module : (L->family == 2 ? 1u : L->family ? 3u : 6u);
+    const uint32_t c = cells_per_module ? cells_per_module : (L->family == 2 ? 2u : L->family ? 3u : 6u);
     // The field [0, 29] is exactly c cells per module, so every grid module
     // is a whole c x c block; the quiet margin is at least the canvas's one
     // unit, rounded up to whole cells.

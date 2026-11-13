@@ -10,6 +10,11 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.99 — 2026-11-13
+
+* **Pixel layout: the lattice defaults to 2 cells per module.** At 1 cell per module the data rays are a full module wide. A version-28 symbol drawn that way did not decode even shown at 2 to 4 screen pixels per cell. At 2 cells per module it decodes at 1 and 2 pixels per cell, as every tested version did in build 98.
+  * Checked in a browser: the 2,022-byte example in the Pixel layout is 402 device pixels wide on a ratio-1 display and decodes. The same text needs 604 pixels in Print and 1,052 in Standard; a QR code at 2 pixels per module is 354.
+
 ## 0.1.0-build.98 — 2026-11-13
 
 **Experimental Pixel layout** (`CKEY_LAYOUT_PIXEL` = 4, Format 0.31, format byte `1F`, opt-in): a Profile 0 geometry family designed to be drawn pixel-perfect at QR-like density.
