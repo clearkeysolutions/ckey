@@ -235,10 +235,20 @@ test('pixel-perfect: whole cells, decodes, and canvas/PNG/SVG agree', { skip }, 
     assert.ok(lat.cells.every((v) => v <= 1));
     const img = ckey.renderPixelPerfect(sym, { pxPerCell: 2 });
     assert.equal(img.width, lat.side * 2);
-    // Every pixel is exactly the background or the ink colour: nothing blended.
-    const colours = new Set();
-    for (let i = 0; i < img.data.length; i += 4) colours.add(img.data[i] * 65536 + img.data[i + 1] * 256 + img.data[i + 2]);
-    assert.equal(colours.size, 2);
+    // Curves are antialiased (grey edge pixels), while every grid module is
+    // exact: the lattice's ink cells are pure ink in the aligned raster.
+    // (Ring and ray cells snapped at 10% coverage are partly grey there.)
+    const cells = ckey.renderLattice(sym, {});
+    let ink = 0, dark = 0, grey = 0;
+    for (let i = 0; i < cells.cells.length; i++) {
+      const y = Math.floor(i / cells.side), x = i % cells.side;
+      const v = img.data[((2 * y) * img.width + 2 * x) * 4];
+      if (v > 20 && v < 235) grey++;
+      if (cells.cells[i] !== 1) continue;
+      ink++; if (v < 128) dark++;
+    }
+    assert.ok(dark / ink > 0.75, `ink cells dark in the aligned raster: ${dark}/${ink}`);
+    assert.ok(grey > 0, 'curves are antialiased');
     // Pad like a photo and decode with the core.
     const pad = 40, w = img.width + 2 * pad;
     const frame = new Uint8ClampedArray(w * w * 4).fill(255);

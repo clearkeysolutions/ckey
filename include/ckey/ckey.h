@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.102"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.103"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -769,6 +769,21 @@ CKEY_API ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *sym
  * *out_side is the side in cells (the field plus a quiet margin of at least
  * one canonical unit). Call with out NULL for the size.
  */
+/*
+ * Pixel-aligned raster: the full renderer (antialiased rings, rays, frame and
+ * finders; colours, materials and logo) drawn on the lattice's pixel grid, so
+ * every grid module is an exact whole-pixel dot (the lattice's dot rule) and
+ * nothing is resampled, while curves stay smooth. One pixel per cell:
+ * *out_side = cells_per_module * modules + 2 * ceil(that / 29) pixels (the
+ * lattice's side). cells_per_module 1..64; options->size_px is ignored; other
+ * options as for ckey_render_scalable_raster. Call with out NULL for the size.
+ * This is what the SDKs show on screen and write to PNG.
+ */
+#define CKEY_HAS_ALIGNED_RASTER 1
+CKEY_API ckey_status ckey_render_scalable_aligned_raster(const ckey_scalable_symbol *symbol, const ckey_style *style,
+                                                         const ckey_raster_options *options, uint32_t cells_per_module,
+                                                         uint8_t *out, size_t out_capacity, uint32_t *out_side,
+                                                         size_t *out_required);
 #define CKEY_HAS_LATTICE 1
 CKEY_API ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *symbol, const ckey_style *style,
                                                   uint32_t cells_per_module, uint8_t *out, size_t out_capacity,

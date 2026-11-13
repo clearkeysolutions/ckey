@@ -326,6 +326,35 @@ CKW_EXPORT uint8_t *ckw_render_lattice(const ckey_scalable_symbol *sym, const We
     return out;
 }
 
+// Pixel-aligned raster (ckey_render_scalable_aligned_raster): grid modules as
+// exact whole-pixel dots, everything else antialiased. Returns malloc'd bytes:
+// side (uint32 little-endian) then side * side RGBA8 pixels.
+CKW_EXPORT uint8_t *ckw_render_aligned(const ckey_scalable_symbol *sym, const WebStyle *ws, uint32_t cells_per_module,
+                                       uint32_t transparent, uint32_t materials,
+                                       const uint8_t *logo_rgba, uint32_t logo_w, uint32_t logo_h) {
+    if (!sym) { set_error("missing symbol"); return nullptr; }
+    ckey_style fallback;
+    const ckey_style *style = style_of(ws, fallback);
+    ckey_raster_options o;
+    ckey_raster_options_default(&o);
+    o.format = CKEY_PIXELS_RGBA8;
+    o.transparent = transparent;
+    o.materials = materials;
+    ckey_logo_image logo{};
+    if (logo_rgba && logo_w && logo_h) { logo.rgba = logo_rgba; logo.width = logo_w; logo.height = logo_h; logo.stride = 0; o.logo = &logo; }
+    uint32_t side = 0;
+    size_t need = 0;
+    ckey_status st = ckey_render_scalable_aligned_raster(sym, style, &o, cells_per_module, nullptr, 0, &side, &need);
+    if (st != CKEY_INSUFFICIENT_BUFFER || need == 0) { explain_refusal(sym, ws, "invalid aligned raster options (cells per module 1..64)"); return nullptr; }
+    auto *out = static_cast<uint8_t *>(std::malloc(4 + need));
+    if (!out) { set_error("out of memory"); return nullptr; }
+    st = ckey_render_scalable_aligned_raster(sym, style, &o, cells_per_module, out + 4, need, &side, &need);
+    if (st != CKEY_OK) { std::free(out); set_error("aligned raster render failed"); return nullptr; }
+    for (int i = 0; i < 4; ++i) out[i] = static_cast<uint8_t>(side >> (8 * i));
+    g_last_len = 4 + need;
+    return out;
+}
+
 // Encodes RGBA8 pixels (stride = width * 4) as a PNG. dpi <= 0 omits pHYs.
 CKW_EXPORT uint8_t *ckw_encode_png_rgba(const uint8_t *rgba, uint32_t width, uint32_t height, double dpi) {
     size_t need = 0;

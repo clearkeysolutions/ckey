@@ -36,12 +36,7 @@ final class CKeyRoundTripTests: XCTestCase {
             let result = try XCTUnwrap(CKeyDecoder.decode(cgImage: image))
             XCTAssertEqual(result.text, text)
             let pixels = try symbol.pixelPerfectPixels(pxPerCell: 2)
-            var colours = Set<UInt32>()
-            pixels.rgba.withUnsafeBytes { raw in
-                let b = raw.bindMemory(to: UInt8.self)
-                for i in stride(from: 0, to: b.count, by: 4) { colours.insert(UInt32(b[i]) << 16 | UInt32(b[i + 1]) << 8 | UInt32(b[i + 2])) }
-            }
-            XCTAssertEqual(colours.count, 2, "only background and ink: nothing blended")
+            XCTAssertEqual(pixels.width, lattice.side * 2)  // the lattice's pixel grid, curves antialiased
             let png = try symbol.pixelPerfectPNG(pxPerCell: 3, dpi: 300)
             XCTAssertEqual(Array(png.prefix(4)), [0x89, 0x50, 0x4E, 0x47])
             let svg = try symbol.pixelPerfectSVG(pxPerCell: 3)

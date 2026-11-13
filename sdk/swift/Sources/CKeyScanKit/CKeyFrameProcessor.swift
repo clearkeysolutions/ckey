@@ -43,11 +43,17 @@ public final class CKeyFrameProcessor {
     public static let defaultScanRegion = CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
     /// Of every `wholeFrameEvery` analysed frames, one is searched whole.
     public static let wholeFrameEvery = 3
-    /// Of every `fullLadderEvery` analysed frames, one runs the full reader
-    /// (ML locator, corner refiner, site model, multi-frame averaging); the
-    /// rest use the fast classical scan, so a blurred frame costs tens of
-    /// milliseconds instead of a second and the camera keeps up.
-    public static let fullLadderEvery = 4
+    /// The full reader (ML locator, corner refiner, site model, multi-frame
+    /// averaging) runs only on a tracked code that the fast classical scan has
+    /// failed `fullLadderAfterFailures` times in a row, then on one of every
+    /// `fullLadderEvery` frames; with nothing tracked it never runs. Every
+    /// other frame uses the fast scan, so a blurred frame costs tens of
+    /// milliseconds instead of a second and the phone stays cool.
+    public static let fullLadderEvery = 3
+    /// Analysed frames per second while no code is tracked.
+    public static let searchFramesPerSecond: Double = 8
+    /// Fast scans of a tracked code that must fail before the full ladder runs.
+    public static let fullLadderAfterFailures = 2
 
     // MARK: Settings
 
@@ -202,6 +208,8 @@ public final class CKeyFrameProcessor {
     private var pendingAccumulatorReset = false
     private var stabilizer = CKeyGuidanceStabilizer()
     private var lastWholeFrameCut = false
+    /// Analysis queue only: consecutive failed scans of the tracked code.
+    private var trackedFailures = 0
 
     // Track queue only.
     private var track = ckey_track_state()
@@ -246,7 +254,10 @@ public final class CKeyFrameProcessor {
         lock.lock()
         let runTrack = settings.tracking && !trackBusy
         if runTrack { trackBusy = true }
-        let limit = settings.maxFramesPerSecond
+        // Until a code is tracked, look a few times a second only: nothing in
+        // view costs little power. While tracked, up to maxFramesPerSecond.
+        let limit = trackedQuad == nil ? min(Self.searchFramesPerSecond, settings.maxFramesPerSecond > 0 ? settings.maxFramesPerSecond : Self.searchFramesPerSecond)
+                                       : settings.maxFramesPerSecond
         let runAnalysis = !didDecode && !analysisBusy && (limit <= 0 || now - lastAnalysisTime >= 1 / limit)
         if runAnalysis {
             analysisBusy = true
@@ -498,10 +509,13 @@ public final class CKeyFrameProcessor {
         } else if useRegion, let region, index % Self.wholeFrameEvery != 0 {
             pixelRegion = CKeyDecoder.pixelRegion(normalized: region, width: width, height: height)
         }
-        let fast = index % Self.fullLadderEvery != 0
+        let tracked = held != nil && held?.width == width && held?.height == height
+        if !tracked { trackedFailures = 0 }
+        let fast = !(tracked && trackedFailures >= Self.fullLadderAfterFailures && index % Self.fullLadderEvery == 0)
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
                                        region: pixelRegion, payload: &payload,
                                        accumulator: multiFrame ? accumulator : nil, fast: fast)
+        if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
 
         // Advice on the scan's candidate, or on the tracked symbol between scans.
         var quad: [Double]?

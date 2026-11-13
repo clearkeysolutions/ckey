@@ -287,10 +287,51 @@ export function createCKey(M, options = {}) {
     return { width: w, height: w, data: out };
   };
 
+  // The pixel-aligned raster: grid modules exact whole-pixel dots, curves
+  // antialiased, the style's materials and logo drawn. pxPerCell > 1 repeats
+  // pixels (whole multiples only). Falls back to the flat lattice on a core
+  // without it.
+  const alignedRGBA = (sym, o, opts) => {
+    if (typeof M._ckw_render_aligned !== 'function') return latticeRGBA(latticeCells(sym, o), o.px, o.transparent);
+    const ptr = CKeySymbol.ptrOf(sym);
+    const cells = o.cells || latticeMinimum(sym);
+    const materials = !(opts && opts.materials === false);
+    const logoImg = opts && opts.logo ? opts.logo : null;
+    const raw = withStyle(o.style, (ws) => {
+      let logoPtr = 0;
+      try {
+        if (logoImg) logoPtr = copyIn(logoImg.data.subarray(0, logoImg.width * logoImg.height * 4));
+        return takeOut(M._ckw_render_aligned(ptr, ws, cells, o.transparent ? 1 : 0, materials ? 1 : 0, logoPtr,
+          logoImg ? logoImg.width : 0, logoImg ? logoImg.height : 0), 'pixel-perfect render');
+      } finally {
+        if (logoPtr) M._ckw_free(logoPtr);
+      }
+    });
+    const side = raw[0] | (raw[1] << 8) | (raw[2] << 16) | (raw[3] << 24);
+    const px = raw.subarray(4, 4 + side * side * 4);
+    if (o.px === 1) return { width: side, height: side, data: new Uint8ClampedArray(px.buffer, px.byteOffset, px.byteLength), side };
+    const w = side * o.px, out = new Uint8ClampedArray(w * w * 4);
+    for (let y = 0; y < w; y++) {
+      const srcRow = Math.floor(y / o.px) * side;
+      for (let x = 0; x < w; x++) {
+        const s4 = (srcRow + Math.floor(x / o.px)) * 4, d4 = (y * w + x) * 4;
+        out[d4] = px[s4]; out[d4 + 1] = px[s4 + 1]; out[d4 + 2] = px[s4 + 2]; out[d4 + 3] = px[s4 + 3];
+      }
+    }
+    return { width: w, height: w, data: out, side };
+  };
+  const latticeMinimum = (sym) => {
+    const side = latticeCells(sym, latticeOptions({}, 'pixelPerfect')).side;
+    let c = 1;
+    while (c < 32 && latticeSide(sym.modules, c) < side) c++;
+    return c;
+  };
+
   /** Pixel-perfect RGBA pixels: { width, height, data }, side * pxPerCell square. */
   function renderPixelPerfect(sym, opts) {
     const o = latticeOptions(opts, 'renderPixelPerfect');
-    return latticeRGBA(latticeCells(sym, o), o.px, o.transparent);
+    const img = alignedRGBA(sym, o, opts);
+    return { width: img.width, height: img.height, data: img.data };
   }
 
   /** Largest pxPerCell for which the symbol fits in maxDevicePx device pixels (at least 1). */
@@ -335,9 +376,9 @@ export function createCKey(M, options = {}) {
       const fit = pixelPerfectFit(sym, Math.floor(opts.cssPx * dpr));
       o = { ...o, cells: fit.cellsPerModule, px: fit.pxPerCell };
     }
-    const l = latticeCells(sym, o);
     const px = o.px;
-    const img = latticeRGBA(l, px, o.transparent);
+    const img = alignedRGBA(sym, o, opts);
+    const l = { side: img.side || img.width / px };
     if (canvas.width !== img.width) canvas.width = img.width;
     if (canvas.height !== img.height) canvas.height = img.height;
     if (canvas.style) {
@@ -357,7 +398,7 @@ export function createCKey(M, options = {}) {
   /** Pixel-perfect PNG: each cell exactly pxPerCell x pxPerCell pixels. */
   function renderPNGPixelPerfect(sym, opts) {
     const o = latticeOptions(opts, 'renderPNGPixelPerfect');
-    const img = latticeRGBA(latticeCells(sym, o), o.px, o.transparent);
+    const img = alignedRGBA(sym, o, opts);
     const p = copyIn(img.data);
     try {
       return takeOut(M._ckw_encode_png_rgba(p, img.width, img.height, o.dpi), 'PNG export');

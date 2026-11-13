@@ -10,6 +10,18 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.103 — 2026-11-13
+
+* **Smooth pixel-perfect drawing:** new `ckey_render_scalable_aligned_raster` (`CKEY_HAS_ALIGNED_RASTER`).
+  * The full renderer draws on the lattice's pixel grid. Every grid module is an exact whole-pixel dot, so nothing is resampled. Rings, rays, the frame and the finders are antialiased, and colours, materials and the logo are drawn.
+  * Snapping every mark to whole cells made dense codes look jagged (owner report, with screenshots).
+  * The Web SDK's `renderPixelPerfect`, `renderToCanvasPixelPerfect` and `renderPNGPixelPerfect` and the Swift SDK's `pixelPerfectPixels`, `pixelPerfectImage` and `pixelPerfectPNG` use it. `renderLattice` and the lattice SVG are unchanged.
+  * Tests: the aligned raster has the lattice's side, decodes, and has antialiased pixels (Standard v8 and v26, Print v20).
+* **Live scanning uses less power** (owner report: the phone heats up).
+  * `CKeyFrameProcessor` analyses at most 8 frames a second until a code is tracked (`searchFramesPerSecond`), and up to `maxFramesPerSecond` while tracked.
+  * The full reader ladder now runs only on a tracked code that two fast scans in a row failed to read, on one of every three frames. With nothing tracked it never runs.
+  * Not compiled here.
+
 ## 0.1.0-build.102 — 2026-11-13
 
 **Live scanning reads where the code is, not just inside the reticle.** From a screen recording: the scanner locked its brackets on sharp, well-lit codes (a 122-byte Standard code and the 2,022-byte Pixel one) but did not read them for several seconds.

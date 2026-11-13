@@ -325,6 +325,25 @@ int main() {
                 CKEY_CHECK(r.layout == CKEY_LAYOUT_PIXEL && r.payload_length == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
             }
         }
+        // Pixel-aligned raster: the lattice's side, decodes, antialiased curves.
+        for (const auto &[version, layout, c] : {std::tuple{8u, CKEY_LAYOUT_STANDARD, 6u}, std::tuple{20u, CKEY_LAYOUT_PRINT, 4u}, std::tuple{26u, CKEY_LAYOUT_STANDARD, 8u}}) {
+            const size_t bytes = std::min<size_t>(50, ckey_scalable_capacity(version, CKEY_ECC_M, layout));
+            const auto s = encode(version, layout, bytes, version + 11);
+            const auto payload = pseudo(bytes, version + 11);
+            ckey_raster_options o; ckey_raster_options_default(&o); o.format = CKEY_PIXELS_GRAY8;
+            uint32_t side = 0, lside = 0; size_t need = 0, lneed = 0;
+            CKEY_CHECK(ckey_render_scalable_aligned_raster(&s, nullptr, &o, c, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, c, nullptr, 0, &lside, &lneed) == CKEY_INSUFFICIENT_BUFFER && side == lside && need == lneed);
+            std::vector<uint8_t> px(need);
+            CKEY_CHECK(ckey_render_scalable_aligned_raster(&s, nullptr, &o, c, px.data(), px.size(), &side, &need) == CKEY_OK);
+            size_t grey = 0; for (uint8_t v : px) grey += v > 20 && v < 235;
+            CKEY_CHECK(grey > 0);
+            const uint32_t w = side + 80; std::vector<uint8_t> frame(static_cast<size_t>(w) * w, 255);
+            for (uint32_t y = 0; y < side; ++y) std::copy_n(&px[static_cast<size_t>(y) * side], side, &frame[static_cast<size_t>(y + 40) * w + 40]);
+            ckey_scan_options so{}; so.abi_version = CKEY_ABI_VERSION; ckey_scan_result r{}; r.abi_version = CKEY_ABI_VERSION; std::vector<uint8_t> out(4096);
+            CKEY_CHECK(ckey_scan_frame_gray8(frame.data(), w, w, w, &so, out.data(), out.size(), &r) == CKEY_OK);
+            CKEY_CHECK(r.payload_length == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
+        }
         const auto s = encode(5, CKEY_LAYOUT_STANDARD, 10, 7);
         uint32_t side = 0; size_t need = 0;
         CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 33, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);

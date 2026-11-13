@@ -322,14 +322,15 @@ Rgbaf over(const Rgbaf &src, double src_alpha, const Rgbaf &dst) {
             (src.b * src_alpha + dst.b * dst.a * (1 - src_alpha)) / a, a};
 }
 
-void draw_logo(std::vector<Rgbaf> &px, int side, const ckey_logo_image &logo, double cx, double cy, double r) {
+void draw_logo(std::vector<Rgbaf> &px, int side, const ckey_logo_image &logo, double cx, double cy, double r,
+               double origin = -1, double unit_px = 0) {
     if (!logo.rgba || !logo.width || !logo.height) return;
     const size_t stride = logo.stride ? logo.stride : static_cast<size_t>(logo.width) * 4;
     const double scale = 2 * r / std::max(logo.width, logo.height);  // "meet": fit inside the circle's box
     const double w = logo.width * scale, h = logo.height * scale, x0 = cx - w / 2, y0 = cy - h / 2;
-    const double unit = 31.0 / side;
+    const double unit = unit_px > 0 ? unit_px : 31.0 / side;
     for (int py = 0; py < side; ++py) for (int pxi = 0; pxi < side; ++pxi) {
-        const double ux = -1 + (pxi + .5) * unit, uy = -1 + (py + .5) * unit;
+        const double ux = origin + (pxi + .5) * unit, uy = origin + (py + .5) * unit;
         if (std::hypot(ux - cx, uy - cy) > r || ux < x0 || uy < y0 || ux >= x0 + w || uy >= y0 + h) continue;
         const double sx = (ux - x0) / scale - .5, sy = (uy - y0) / scale - .5;
         const int ix = static_cast<int>(std::floor(sx)), iy = static_cast<int>(std::floor(sy));
@@ -347,12 +348,39 @@ void draw_logo(std::vector<Rgbaf> &px, int side, const ckey_logo_image &logo, do
     }
 }
 
+// Pixel-aligned rendering (cells > 0): the canvas is the lattice's, `cells`
+// pixels per grid module, and grid modules are exact whole-pixel dots; every
+// other mark is antialiased as usual.
+uint32_t lattice_dot(const ScalableLayout &L, uint32_t c) {
+    const uint32_t gap = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(0.16 * c)));
+    return c <= 2 ? c : (L.family && c <= 4) ? c - 1 : c - 2 * gap;
+}
+
 ckey_status render_raster(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st,
-                          const ckey_raster_options &o, uint8_t *out) {
+                          const ckey_raster_options &o, uint8_t *out, uint32_t cells = 0) {
     const int side = static_cast<int>(o.size_px), ss = static_cast<int>(o.supersample);
-    const double unit = 31.0 / side;  // canonical units per pixel
-    const auto scene = build_scalable_scene(L, sym, st);
-    const Coverage cov = rasterize_scene(scene, side, ss, o.policy == CKEY_RASTER_HYBRID ? o.min_feature_px * unit : 0.0);
+    const uint32_t modules = static_cast<uint32_t>(L.grid);
+    const uint32_t margin = cells ? (cells * modules + 28) / 29 : 0;
+    const double unit = cells ? 29.0 / (cells * modules) : 31.0 / side;  // canonical units per pixel
+    const double origin = cells ? -static_cast<double>(margin) * unit : -1.0;
+    auto scene = build_scalable_scene(L, sym, st);
+    if (cells) scene.erase(std::remove_if(scene.begin(), scene.end(), [](const ckey_shape &x) { return x.layer == CKEY_LAYER_DATA_CARTESIAN; }), scene.end());
+    Coverage cov = rasterize_scene(scene, side, ss, o.policy == CKEY_RASTER_HYBRID ? o.min_feature_px * unit : 0.0, origin, unit);
+    if (cells) {
+        const uint32_t dot = lattice_dot(L, cells), off = (cells - dot) / 2;
+        for (size_t i = 0; i < L.nodes.size(); ++i) {
+            const auto &n = L.nodes[i];
+            if (n.kind != 0 || !scalable_site_value(L, &sym, i)) continue;
+            const uint32_t mx = static_cast<uint32_t>(std::floor(n.x / L.pitch)), my = static_cast<uint32_t>(std::floor(n.y / L.pitch));
+            if (mx >= modules || my >= modules) return CKEY_INTERNAL_ERROR;
+            const int accent = accent_of(n.id, st);
+            for (uint32_t y = 0; y < dot; ++y) for (uint32_t x = 0; x < dot; ++x) {
+                const size_t at = static_cast<size_t>(margin + my * cells + off + y) * side + margin + mx * cells + off + x;
+                cov.ink[at] = static_cast<uint8_t>(cov.samples);
+                cov.paint[at] = static_cast<int8_t>(accent >= 0 ? accent : CKEY_PAINT_INK);
+            }
+        }
+    }
     const size_t n = static_cast<size_t>(side) * side;
     std::vector<float> alpha(n);
     for (size_t i = 0; i < n; ++i) {
@@ -398,7 +426,7 @@ ckey_status render_raster(const ScalableLayout &L, const ckey_scalable_symbol &s
     const Rgbaf bg_centre = rgbf(st.background), bg_edge = rgbf(st.background_edge), ink = rgbf(st.ink), shade = rgbf(st.ink_shade);
     for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) {
         const size_t i = static_cast<size_t>(y) * side + x;
-        const double ux = -1 + (x + .5) * unit, uy = -1 + (y + .5) * unit;
+        const double ux = origin + (x + .5) * unit, uy = origin + (y + .5) * unit;
         Rgbaf c{0, 0, 0, 0};
         if (!transparent) {
             c = vignette ? mix(bg_centre, bg_edge, std::clamp(std::hypot(ux - kCenter, uy - kCenter) / 21.0, 0.0, 1.0)) : bg_centre;
@@ -417,7 +445,7 @@ ckey_status render_raster(const ScalableLayout &L, const ckey_scalable_symbol &s
         }
         px[i] = c;
     }
-    if (o.logo) for (const auto &s : scene) if (s.kind == CKEY_SHAPE_LOGO) draw_logo(px, side, *o.logo, s.p[0], s.p[1], s.p[2]);
+    if (o.logo) for (const auto &s : scene) if (s.kind == CKEY_SHAPE_LOGO) draw_logo(px, side, *o.logo, s.p[0], s.p[1], s.p[2], origin, unit);
     const auto byte = [](double v) { return static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); };
     for (size_t i = 0; i < n; ++i) {
         const Rgbaf &c = px[i];
@@ -655,6 +683,24 @@ ckey_status ckey_render_scalable_raster(const ckey_scalable_symbol *s, const cke
     try { return render_raster(*L, *s, st, *o, out); } catch (...) { return CKEY_INTERNAL_ERROR; }
 }
 
+ckey_status ckey_render_scalable_aligned_raster(const ckey_scalable_symbol *s, const ckey_style *style, const ckey_raster_options *o,
+                                                uint32_t cells_per_module, uint8_t *out, size_t cap, uint32_t *out_side, size_t *required) {
+    if (!o || !required || !out_side || cells_per_module < 1 || cells_per_module > 64 || o->abi_version != CKEY_ABI_VERSION ||
+        o->policy > CKEY_RASTER_HYBRID || o->format > CKEY_PIXELS_GRAY8 || o->supersample < 1 || o->supersample > 8 ||
+        !(o->min_feature_px > 0) || !std::isfinite(o->min_feature_px) || (o->transparent && o->format == CKEY_PIXELS_GRAY8)) return CKEY_INVALID_ARGUMENT;
+    ckey_style st{};
+    const ScalableLayout *L = scene_layout(s, style, st);
+    if (!L) return CKEY_INVALID_ARGUMENT;
+    const uint32_t modules = static_cast<uint32_t>(L->grid), field = cells_per_module * modules;
+    const uint32_t side = field + 2 * ((field + 28) / 29);
+    if (side > 16384) return CKEY_INVALID_ARGUMENT;
+    *out_side = side;
+    *required = static_cast<size_t>(side) * side * (o->format == CKEY_PIXELS_RGBA8 ? 4 : 1);
+    if (!out || cap < *required) return CKEY_INSUFFICIENT_BUFFER;
+    ckey_raster_options aligned = *o; aligned.size_px = side;
+    try { return render_raster(*L, *s, st, aligned, out, cells_per_module); } catch (...) { return CKEY_INTERNAL_ERROR; }
+}
+
 ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ckey_style *style, uint32_t cells_per_module,
                                          uint8_t *out, size_t cap, uint32_t *out_side, size_t *required) {
     if (!required || !out_side || cells_per_module > 32) return CKEY_INVALID_ARGUMENT;
@@ -700,8 +746,7 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
         // Pixel 2 of 3 and 3 of 4; otherwise centred (same parity as c) and
         // about 0.68 of the module, the drawn mark's size: 1 of 3, 2 of 4,
         // 3 of 5, 4 of 6, ... 8 of 12, 12 of 18.
-        const uint32_t gap = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(0.16 * c)));
-        const uint32_t dot = c <= 2 ? c : (L->family && c <= 4) ? c - 1 : c - 2 * gap, off = (c - dot) / 2;
+        const uint32_t dot = lattice_dot(*L, c), off = (c - dot) / 2;
         if (pixel) {
             // Each data ray: the cells its centreline passes through, from the
             // dial's inner radius to the ray's end (long or short).

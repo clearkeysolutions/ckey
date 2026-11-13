@@ -291,11 +291,50 @@ public final class CKeySymbol: @unchecked Sendable {
         return (c, px, side(c))
     }
 
-    /// Pixel-perfect RGBA8: each cell exactly `pxPerCell` x `pxPerCell` pixels.
+    /// Pixel-perfect RGBA8 (`ckey_render_scalable_aligned_raster`): every grid
+    /// module an exact whole-pixel dot, curves antialiased, the style's
+    /// materials drawn; `pxPerCell` > 1 repeats each pixel.
     public func pixelPerfectPixels(pxPerCell: Int = 1, cellsPerModule: Int = 0, transparent: Bool = false,
                                    style: CKeyStyle = .plain) throws -> CKeyPixels {
         guard (1...64).contains(pxPerCell) else { throw CKeyError(.invalidArgument, "pxPerCell must be 1...64") }
-        return try lattice(cellsPerModule: cellsPerModule, style: style).pixels(pxPerCell: pxPerCell, transparent: transparent)
+        guard (0...32).contains(cellsPerModule) else { throw CKeyError(.invalidArgument, "cellsPerModule must be 0...32") }
+        let cells = cellsPerModule > 0 ? cellsPerModule : try pixelPerfectFit(pixels: 0).cellsPerModule
+        var options = ckey_raster_options()
+        ckey_raster_options_default(&options)
+        options.format = CKEY_PIXELS_RGBA8.rawValue
+        options.transparent = transparent ? 1 : 0
+        let symbol = UnsafePointer(storage)
+        let (side, data): (Int, Data) = try style.withCStyle { cStyle in
+            var side: UInt32 = 0
+            var required = 0
+            let probe = ckey_render_scalable_aligned_raster(symbol, cStyle, &options, UInt32(cells), nil, 0, &side, &required)
+            guard probe == CKEY_INSUFFICIENT_BUFFER, required > 0 else {
+                throw refusal(probe, symbol, cStyle, "the style was refused or the size is invalid")
+            }
+            var buffer = Data(count: required)
+            let status = buffer.withUnsafeMutableBytes { raw in
+                ckey_render_scalable_aligned_raster(symbol, cStyle, &options, UInt32(cells),
+                                                    raw.bindMemory(to: UInt8.self).baseAddress, raw.count, &side, &required)
+            }
+            guard status == CKEY_OK else { throw CKeyError.core(status, nil, "pixel-perfect rendering failed") }
+            return (Int(side), buffer)
+        }
+        guard pxPerCell > 1 else { return CKeyPixels(width: side, height: side, rgba: data, hasAlpha: transparent) }
+        let width = side * pxPerCell
+        var scaled = Data(count: width * width * 4)
+        data.withUnsafeBytes { src in
+            scaled.withUnsafeMutableBytes { dst in
+                let s = src.bindMemory(to: UInt8.self), d = dst.bindMemory(to: UInt8.self)
+                for y in 0..<width {
+                    let row = (y / pxPerCell) * side
+                    for x in 0..<width {
+                        let from = (row + x / pxPerCell) * 4, to = (y * width + x) * 4
+                        d[to] = s[from]; d[to + 1] = s[from + 1]; d[to + 2] = s[from + 2]; d[to + 3] = s[from + 3]
+                    }
+                }
+            }
+        }
+        return CKeyPixels(width: width, height: width, rgba: scaled, hasAlpha: transparent)
     }
 
     /// Pixel-perfect `CGImage` (sRGB, no interpolation). On screen, size it
