@@ -69,6 +69,11 @@ public enum CKeyLayout: Int, Sendable, CaseIterable {
     case standardGrouped = 2
     /// Format 0.30: the print geometry with byte-grouped placement.
     case printGrouped = 3
+    /// Format 0.31 (experimental): the pixel geometry. The ring zone's data
+    /// sits on grid modules, so drawn pixel-perfect at one or two screen
+    /// pixels per module every data site is a distinct pixel. Readers before
+    /// 0.1.0-build.98 cannot read it.
+    case pixel = 4
 
     /// True for the print geometry ("P0.1"), grouped or not.
     public var isPrint: Bool { self == .print || self == .printGrouped }
@@ -131,6 +136,7 @@ public struct CKeyResult: Equatable, Sendable {
             case .print: return "Profile 0.1 · print · v\(version)"
             case .standardGrouped: return "Profile 0 · grouped · v\(version)"
             case .printGrouped: return "Profile 0.1 · print · grouped · v\(version)"
+            case .pixel: return "Profile 0 · pixel · v\(version)"
             }
         case .locator: return "Profile 1 · Locator"
         case .text: return "Profile 2 · Text"

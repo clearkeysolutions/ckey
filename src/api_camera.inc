@@ -30,7 +30,7 @@ bool canonical_scalable_order(const uint8_t *gray, size_t width, size_t height, 
         double h[8]; bool ok; orientation_homography(quad, reverse, start, h, ok); if (!ok) continue;
         double score = 0;
         for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
-            const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
+            const KeyFit keys = scalable_version_fit(scalable_family_layout(v, f), gray, width, height, stride, h);
             if (keys.valid) score = std::max(score, keys.contrast * keys.evidence * keys.evidence);
         }
         if (score > best) { second = best; best = score; best_reverse = reverse; best_start = start; }
@@ -375,7 +375,7 @@ ckey_status ckey_ml_rectify_gray8(const uint8_t *gray, size_t width, size_t heig
 }
 
 ckey_status ckey_ml_site_map(const ckey_scalable_symbol *symbol, float *out_xy, uint8_t *out_kind, uint8_t *out_printed, size_t capacity, size_t *out_count) {
-    if (!symbol || !out_count || symbol->version < 1 || symbol->version > static_cast<uint32_t>(kScalableVersions) || symbol->layout > 3) return CKEY_INVALID_ARGUMENT;
+    if (!symbol || !out_count || symbol->version < 1 || symbol->version > static_cast<uint32_t>(kScalableVersions) || symbol->layout >= static_cast<uint32_t>(kScalableLayouts)) return CKEY_INVALID_ARGUMENT;
     const ScalableLayout &L = scalable_layout(static_cast<int>(symbol->version), static_cast<int>(symbol->layout));
     if (symbol->codeword_length != L.codeword_bytes) return CKEY_INVALID_ARGUMENT;
     const size_t sites = L.nodes.size();

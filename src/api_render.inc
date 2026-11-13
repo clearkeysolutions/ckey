@@ -236,7 +236,7 @@ ckey_status ckey_render_scalable_styled_svg(const ckey_scalable_symbol *s, const
     const std::string ink = sheen ? "url(#ckey-ink)" : hex_colour(st->ink);
     std::ostringstream o; o << std::fixed << std::setprecision(4);
     std::ostringstream c; c << std::fixed << std::setprecision(4);
-    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0" << (L.family ? ".1" : "") << " version " << s->version << "\">";
+    o << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << 31 * scale << "\" height=\"" << 31 * scale << "\" viewBox=\"-1 -1 31 31\" role=\"img\" aria-label=\"CKey scalable symbol profile 0" << (L.family == 1 ? ".1" : L.family == 2 ? ".2" : "") << " version " << s->version << "\">";
     // ---- Materials ----
     if (sheen || vignette || depth || st->texture > 0 || (st->logo_href && *st->logo_href)) {
         o << "<defs>";

@@ -12,9 +12,11 @@ export type Level = 'L' | 'M' | 'Q' | 'H' | 'U' | 'X';
  * 'standard' (Format 0.27) and 'print' (Format 0.28, Profile 0.1), or their
  * byte-grouped forms 'standard-grouped' (Format 0.29) and 'print-grouped'
  * (Format 0.30): same geometry and capacity, different codeword-bit placement.
- * Readers before 0.1.0-build.86 cannot read the grouped layouts.
+ * Readers before 0.1.0-build.86 cannot read the grouped layouts. 'pixel'
+ * (Format 0.31, experimental, from 0.1.0-build.98) puts the ring zone's data on
+ * grid modules so it can be drawn pixel-perfect at one or two pixels per module.
  */
-export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped';
+export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped' | 'pixel';
 export type RasterPolicy = 'coverage' | 'binary' | 'hybrid';
 export type Preset = 'plain' | 'concept';
 /** Optical-safety policy carried by a style: strict refuses, adaptive repairs, override draws as given. */

@@ -23,6 +23,7 @@ Build **0.1.0-build.86**, C ABI **4**.
 | Profile 0.1 (scalable, print layout) | [0.28.0](../spec/CKey-Format-v0.28.0.md) | `1C` | 31 versions | none |
 | Profile 0, byte-grouped placement (opt-in) | [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | as 0.27 | none |
 | Profile 0.1, byte-grouped placement (opt-in) | [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | as 0.28 | none |
+| Profile 0, pixel layout (experimental, opt-in) | 0.31.0 (no specification yet; defined by the reference core) | `1F` | as 0.28 | none |
 | Profile 1 (locator) | [0.14.0](../spec/CKey-Format-v0.14.0.md) | `0E` | exactly 16 bytes | 0.8, 0.11, 0.12, 0.13 |
 | Profile 2 (text) | [0.25.0](../spec/CKey-Format-v0.25.0.md) | `19` | 0–200 bytes | 0.9, 0.15, 0.18, 0.19, 0.22, 0.23 |
 | Profile 3 (extended) | [0.26.0](../spec/CKey-Format-v0.26.0.md) | `1A` | 1–2,048 bytes in seven tiers | 0.10, 0.16, 0.17, 0.20, 0.21, 0.24 |
@@ -69,6 +70,7 @@ The encoders emit only the current formats. The image decoders read only the cur
 | [0.28.0](../spec/CKey-Format-v0.28.0.md) | `1C` | 0 (print layout) | dev.58 | **current** | Profile 0.1: equal-arc rings and heavier marks for small prints. |
 | [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | 0 | build.86 | **current** (opt-in) | Format 0.27 with byte-grouped placement; defines levels U and X for 0.27 to 0.30. |
 | [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | 0 (print layout) | build.86 | **current** (opt-in) | Format 0.28 with byte-grouped placement. |
+| 0.31.0 | `1F` | 0 (pixel layout) | build.98 | **experimental** (opt-in) | The Print family's frame, finders, grid, dial and keys; the ring zone's data on grid modules; one ring carrying only the Ring Key; rays two modules apart, short rays 0.6 module. Drawn pixel-perfect, every data site is a distinct cell at one cell per module. |
 
 The "Introduced" column is the build whose changelog entry first describes the format. Some format specifications were committed to `spec/` a few builds later.
 

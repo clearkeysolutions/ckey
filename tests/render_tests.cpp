@@ -299,6 +299,32 @@ int main() {
                 CKEY_CHECK(r.payload_length == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
             }
         }
+        // Pixel layout: decodes from its lattice at 2 cells per module (one and
+        // two pixels per cell) and from the antialiased raster; the default is
+        // 1 cell per module.
+        for (const uint32_t version : {3u, 12u, 26u}) {
+            const size_t bytes = std::min<size_t>(60, ckey_scalable_capacity(version, CKEY_ECC_M, CKEY_LAYOUT_PIXEL));
+            const auto s = encode(version, CKEY_LAYOUT_PIXEL, bytes, version * 5);
+            const auto payload = pseudo(bytes, version * 5);
+            uint32_t side = 0; size_t need = 0;
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 0, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
+            const uint32_t modules = ckey_scalable_modules_across(version);
+            CKEY_CHECK(side == modules + 2 * ((modules + 28) / 29));
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 2, nullptr, 0, &side, &need) == CKEY_INSUFFICIENT_BUFFER);
+            std::vector<uint8_t> cells(need);
+            CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 2, cells.data(), cells.size(), &side, &need) == CKEY_OK);
+            for (const uint32_t px : {1u, 2u}) {
+                const uint32_t w = side * px + 80;
+                std::vector<uint8_t> frame(static_cast<size_t>(w) * w, 255);
+                for (uint32_t y = 0; y < side * px; ++y) for (uint32_t x = 0; x < side * px; ++x)
+                    frame[static_cast<size_t>(y + 40) * w + x + 40] = cells[(y / px) * side + x / px] ? 0 : 255;
+                ckey_scan_options so{}; so.abi_version = CKEY_ABI_VERSION;
+                ckey_scan_result r{}; r.abi_version = CKEY_ABI_VERSION;
+                std::vector<uint8_t> out(4096);
+                CKEY_CHECK(ckey_scan_frame_gray8(frame.data(), w, w, w, &so, out.data(), out.size(), &r) == CKEY_OK);
+                CKEY_CHECK(r.layout == CKEY_LAYOUT_PIXEL && r.payload_length == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
+            }
+        }
         const auto s = encode(5, CKEY_LAYOUT_STANDARD, 10, 7);
         uint32_t side = 0; size_t need = 0;
         CKEY_CHECK(ckey_render_scalable_lattice(&s, nullptr, 7, nullptr, 0, &side, &need) == CKEY_INVALID_ARGUMENT);

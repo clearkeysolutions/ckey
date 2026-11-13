@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.97"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.98"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -462,6 +462,8 @@ CKEY_API ckey_status ckey_camera_advise_gray8(const uint8_t *gray, size_t width,
 #define CKEY_SCALABLE_PRINT_FORMAT_VERSION 28u
 #define CKEY_SCALABLE_GROUPED_FORMAT_VERSION 29u
 #define CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION 30u
+#define CKEY_SCALABLE_PIXEL_FORMAT_VERSION 31u
+#define CKEY_HAS_PIXEL_LAYOUT 1
 /* Profile 0 layout families. STANDARD is Format 0.27. PRINT (Format 0.28,
  * "P0.1") keeps every mark and gap at least about one module (equal-arc ring
  * slots, larger dots, wider and fewer rays) so symbols survive small prints:
@@ -478,7 +480,10 @@ typedef enum ckey_scalable_layout {
     CKEY_LAYOUT_STANDARD = 0,          /* Format 0.27 */
     CKEY_LAYOUT_PRINT = 1,             /* Format 0.28 */
     CKEY_LAYOUT_STANDARD_GROUPED = 2,  /* Format 0.29: STANDARD geometry, byte-grouped */
-    CKEY_LAYOUT_PRINT_GROUPED = 3      /* Format 0.30: PRINT geometry, byte-grouped */
+    CKEY_LAYOUT_PRINT_GROUPED = 3,     /* Format 0.30: PRINT geometry, byte-grouped */
+    CKEY_LAYOUT_PIXEL = 4              /* Format 0.31 (experimental): PIXEL geometry. The ring zone's
+                                          data sites are grid modules, so every data site is a distinct
+                                          cell at one cell per module (see ckey_render_scalable_lattice). */
 } ckey_scalable_layout;
 #define CKEY_SCALABLE_VERSION_COUNT 31u
 #define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u

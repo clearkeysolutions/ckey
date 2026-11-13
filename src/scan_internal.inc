@@ -301,7 +301,7 @@ const SiteNeighbours &site_neighbours(int v, int family) {
     static std::array<std::unique_ptr<SiteNeighbours>, kScalableVersions * kScalableFamilies> cache;
     const size_t slot = static_cast<size_t>(family * kScalableVersions + v - 1);
     std::call_once(once[slot], [&] {
-        const ScalableLayout &L = scalable_layout(v, family);
+        const ScalableLayout &L = scalable_family_layout(v, family);
         auto n = std::make_unique<SiteNeighbours>();
         std::array<int32_t, 8> none; none.fill(-1);
         n->of.assign(L.nodes.size(), none);

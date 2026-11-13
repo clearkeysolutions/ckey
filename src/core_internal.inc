@@ -467,6 +467,10 @@ struct DenseGeometry {
     double key_ray_dir[3][2];   // unit (sin, -cos) for each Ray Key slot
     double key_ray_fraction[3];
     double module_half;         // half side of a square Cartesian module
+    // Pixel family only: grid modules are also allowed in the annulus between
+    // the ring zone's outer edge and the dial (both radii from polar_center);
+    // 0, 0 disables it.
+    double annulus_inner = 0, annulus_outer = 0;
 };
 
 double rounded_square_sd(double x, double y, double center, double half, double radius) {
@@ -506,8 +510,10 @@ double dense_site_margin(const DenseGeometry &g, double x, double y) {
     m = std::min(m, finder_centerline_distance(x, y, far, far, g.finder_radius, true, true) - finder_need);
     const double gx = std::max({g.grid_x0 - x, 0.0, x - g.grid_x1}), gy = std::max({g.grid_y0 - y, 0.0, y - g.grid_y1});
     m = std::min(m, std::sqrt(gx * gx + gy * gy) - e - g.grid_clear);
-    const double dx = x - g.polar_center, dy = y - g.polar_center;
-    m = std::min(m, std::sqrt(dx * dx + dy * dy) - g.ray_ink_outer - e - g.polar_clear);
+    const double dx = x - g.polar_center, dy = y - g.polar_center, d = std::sqrt(dx * dx + dy * dy);
+    double polar = d - g.ray_ink_outer;
+    if (g.annulus_outer > g.annulus_inner) polar = std::max(polar, std::min(d - g.annulus_inner, g.annulus_outer - d));
+    m = std::min(m, polar - e - g.polar_clear);
     for (int k = 0; k < 3; ++k) {
         const double r1 = g.key_ray_r0 + g.key_ray_length * g.key_ray_fraction[k];
         const double ux = g.key_ray_dir[k][0], uy = g.key_ray_dir[k][1];
@@ -1172,8 +1178,17 @@ struct ScalableNode { uint8_t kind; double x, y; int ring, slot; uint32_t id; };
 // Formats 0.29/0.30). Both placements of a family share every site, mark and
 // key, so a symbol looks the same and a reader samples it the same way; only
 // the site-to-codeword-bit assignment differs.
-constexpr int kScalableFamilies = 2;
-constexpr int kScalableLayouts = 4;
+constexpr int kScalableFamilies = 3;
+constexpr int kScalableLayouts = 5;
+// Pixel family (layout 4, Format 0.31, experimental): the Print family's frame,
+// finders, grid pitch, dial and keys, with a single ring at the ring zone's
+// inner radius that carries only the Ring Key; the annulus out to the dial
+// holds grid modules instead of rings, and short rays are 0.6 module. At one cell per module every
+// grid and ring data site is a distinct cell. No byte-grouped placement yet.
+constexpr int scalable_family(int layout) { return layout == 4 ? 2 : (layout & 1); }
+constexpr bool scalable_grouped(int layout) { return layout < 4 && (layout >> 1) != 0; }
+// The layout of a family and placement, or -1 when that pair does not exist.
+constexpr int scalable_layout_of(int family, bool grouped) { return family == 2 ? (grouped ? -1 : 4) : family + (grouped ? 2 : 0); }
 constexpr std::array<int, kScalableVersions> kScalablePrintRings = {2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 7, 7, 8, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 22, 24, 25, 27, 29, 32};
 
 struct ScalableLayout {
@@ -1286,9 +1301,9 @@ const ScalableLayout &scalable_layout(int v, int layout = 0);
 
 std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
     auto L = std::make_unique<ScalableLayout>();
-    const int family = layout & 1;
+    const int family = scalable_family(layout);
     const size_t i = static_cast<size_t>(v - 1);
-    L->version = v; L->family = family; L->grouped = (layout >> 1) != 0; L->grid = kScalableGrid[i];
+    L->version = v; L->family = family; L->grouped = scalable_grouped(layout); L->grid = kScalableGrid[i];
     L->col0 = kScalableGridCol[i]; L->row0 = kScalableGridRow[i]; L->pitch = 29.0 / L->grid;
     const double p = L->pitch;
     if (family == 0) {
@@ -1297,6 +1312,18 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
         L->ring_pitch = 0.86 * p; L->dot = 0.2 * p; L->ray_width = 0.2 * p; L->long_len = 2.2 * p; L->short_len = 1.0 * p;
         L->dial_sample = 1.6 * p; L->ring_key_span = 16;
         L->format = L->grouped ? CKEY_SCALABLE_GROUPED_FORMAT_VERSION : CKEY_SCALABLE_FORMAT_VERSION;
+    } else if (family == 2) {
+        L->rings = 1; L->ring_pitch = 1.0 * p;
+        // Rays two modules apart at the dial, so at one cell per module a
+        // slanted ray never crosses its neighbour's sampled cell.
+        L->dial_slots = equal_arc_slots(kScalableDialInner, 2 * p);
+        L->ring_slots.push_back(equal_arc_slots(kScalableRingInner, p));
+        // Short rays end 1.1 modules short of the sample point, so at one
+        // cell per module a short ray never reaches the sampled cell.
+        L->dot = 0.3 * p; L->ray_width = 0.35 * p; L->long_len = 2.4 * p; L->short_len = 0.6 * p;
+        L->dial_sample = 1.7 * p; L->ring_key_span = 8;
+        L->format = CKEY_SCALABLE_PIXEL_FORMAT_VERSION;
+        if (v == 1) L->row0 = 9;
     } else {
         L->rings = kScalablePrintRings[i]; L->ring_pitch = 1.0 * p;
         L->dial_slots = equal_arc_slots(kScalableDialInner, p);
@@ -1308,6 +1335,7 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
     }
     L->ring_stride = *std::max_element(L->ring_slots.begin(), L->ring_slots.end());
     L->geom = scalable_geometry(L->col0, L->row0, p, L->dial_slots, kScalableDialInner + L->long_len + L->ray_width / 2);
+    if (family == 2) { L->geom.annulus_inner = L->ring_radius(0) + L->dot; L->geom.annulus_outer = kScalableDialInner; }
     for (int row = 0; row < L->grid; ++row) for (int col = 0; col < L->grid; ++col) {
         const double x = (col + .5) * p, y = (row + .5) * p;
         if (dense_site_margin(L->geom, x, y) <= 0.0) continue;
@@ -1321,12 +1349,13 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
         for (int slot = 0; slot < S; ++slot) {
             // Standard family: ring slots are also cleared on the Ray Key bearings (inherited from Profile 2).
             if ((family == 0 && L->reserved_ray(slot)) || (ring == L->rings - 1 && slot >= key && slot < key + L->ring_key_span)) continue;
+            if (family == 2) continue;  // Pixel: the ring carries only the Ring Key; its data is on the grid
             const double r = L->ring_radius(ring), a = kTau * slot / S;
             L->nodes.push_back({2, kCenter + r * std::sin(a), kCenter - r * std::cos(a), ring, slot,
                                 site_identity(2, static_cast<uint32_t>(ring), static_cast<uint32_t>(slot))});
         }
     }
-    const uint32_t whitening = family == 0 ? 0x434b5730u : 0x434b5731u;  // "CKW0" / "CKW1"
+    const uint32_t whitening = 0x434b5730u + static_cast<uint32_t>(family);  // "CKW0" / "CKW1" / "CKW2"
     if (L->grouped) {
         const uint32_t placement = family == 0 ? 0x434b4730u : 0x434b4731u;  // "CKG0" / "CKG1"
         order_sites_grouped(L->nodes, L->grid, site_hash(placement ^ static_cast<uint32_t>(v)));
@@ -1338,7 +1367,7 @@ std::unique_ptr<ScalableLayout> build_scalable_layout(int v, int layout) {
         for (size_t n = 0; n < L->nodes.size(); ++n)
             L->base_index[n] = std::lower_bound(ids.begin(), ids.end(), std::pair<uint32_t, uint32_t>{L->nodes[n].id, 0u})->second;
     } else {
-        const uint32_t placement = family == 0 ? 0x434b5030u : 0x434b5031u;  // "CKP0" / "CKP1"
+        const uint32_t placement = 0x434b5030u + static_cast<uint32_t>(family);  // "CKP0" / "CKP1" / "CKP2"
         order_sites(L->nodes, site_hash(placement ^ static_cast<uint32_t>(v)));
     }
     L->white = whitening_bits(whitening + static_cast<uint32_t>(v), L->nodes.size());
@@ -1356,6 +1385,9 @@ const ScalableLayout &scalable_layout(int v, int layout) {
     std::call_once(once[i], [&] { cache[i] = build_scalable_layout(v, layout); });
     return *cache[i];
 }
+
+// The bit-scattered layout of a geometry family (0 standard, 1 print, 2 pixel).
+const ScalableLayout &scalable_family_layout(int v, int family) { return scalable_layout(v, scalable_layout_of(family, false)); }
 
 struct RsBlock { size_t n, k; };
 
@@ -1513,7 +1545,7 @@ double scalable_version_score(const ScalableLayout &L, const uint8_t *gray, size
 int best_scalable_version(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad[8], double &score, int *family = nullptr) {
     int best_v = 0, best_f = 0; score = 0;
     for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
-        const double s = scalable_version_score(scalable_layout(v, f), gray, width, height, stride, quad);
+        const double s = scalable_version_score(scalable_family_layout(v, f), gray, width, height, stride, quad);
         if (s > score) { score = s; best_v = v; best_f = f; }
     }
     if (family) *family = best_f;

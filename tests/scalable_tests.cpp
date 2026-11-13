@@ -69,12 +69,24 @@ uint32_t image_round_trip(const ckey_scalable_symbol &s, const std::vector<uint8
 int main() {
     // ---- Table invariants (both layout families) ----
     for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
-        const ScalableLayout &L = scalable_layout(v, f); const double p = L.pitch;
+        const ScalableLayout &L = scalable_family_layout(v, f); const double p = L.pitch;
         const double ring_limit = kScalableDialInner - (f == 0 ? 2.38 : 2.4) * p;
         CKEY_CHECK(L.dial_slots % 8 == 0);
         for (int S : L.ring_slots) CKEY_CHECK(S % 8 == 0);
-        CKEY_CHECK(L.ring_radius(L.rings - 1) <= ring_limit + 1e-9);   // ring band clears the dial
-        CKEY_CHECK(L.ring_radius(L.rings) > ring_limit - 1e-9);         // and uses all the room it has
+        if (f != 2) {
+            CKEY_CHECK(L.ring_radius(L.rings - 1) <= ring_limit + 1e-9);   // ring band clears the dial
+            CKEY_CHECK(L.ring_radius(L.rings) > ring_limit - 1e-9);         // and uses all the room it has
+        } else {
+            // Pixel family: one ring (the Ring Key, no data); rays two modules
+            // apart; a short ray ends at least a module before the ray sample.
+            CKEY_CHECK(L.rings == 1 && L.format == CKEY_SCALABLE_PIXEL_FORMAT_VERSION);
+            for (const auto &n : L.nodes) CKEY_CHECK(n.kind != 2);
+            CKEY_CHECK(kTau * kScalableDialInner / L.dial_slots >= 2 * p - 1e-9);
+            CKEY_CHECK(L.dial_sample - L.short_ray() >= p - 1e-9);
+            size_t annulus = 0;
+            for (const auto &n : L.nodes) if (n.kind == 0 && std::hypot(n.x - kCenter, n.y - kCenter) < kScalableDialInner) ++annulus;
+            CKEY_CHECK(annulus > 0);  // the ring zone holds grid modules
+        }
         CKEY_CHECK(L.ring_key_slot() + L.ring_key_span <= L.ring_slots.back());
         CKEY_CHECK(L.codeword_bytes <= CKEY_SCALABLE_MAX_CODEWORD_BYTES);
         if (f == 1) {

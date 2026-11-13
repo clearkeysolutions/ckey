@@ -413,7 +413,7 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
             const KeyFit skeleton = scalable_skeleton_fit(gray, width, height, stride, h);
             if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < kMinKeyContrast) continue;
             for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
-                const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
+                const KeyFit keys = scalable_version_fit(scalable_family_layout(v, f), gray, width, height, stride, h);
                 if (!keys.valid || keys.evidence < 0.85) continue;
                 const double score = keys.contrast * keys.evidence * keys.evidence;
                 if (score > best_score) { best_score = score; best_v = v; best_f = f; best_reverse = reverse; best_start = start; }
@@ -422,7 +422,7 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
         if (best_v > 0) {
             double oriented[8];
             for (int i = 0; i < 4; ++i) { const int q = (best_start + (best_reverse ? -i : i) + 8) % 4; oriented[2 * i] = quad_xy[2 * q]; oriented[2 * i + 1] = quad_xy[2 * q + 1]; }
-            from_rings = lens_from_rings(scalable_layout(best_v, best_f), gray, width, height, stride, oriented);
+            from_rings = lens_from_rings(scalable_family_layout(best_v, best_f), gray, width, height, stride, oriented);
         }
     }
     std::vector<LensModel> lenses;
@@ -531,7 +531,7 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
         if (!skeleton.valid || skeleton.evidence < kDenseKeyGate || skeleton.contrast < kMinKeyContrast) continue;
         for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
             if (geometry.version != 0 && v != geometry.version) continue;
-            const KeyFit keys = scalable_version_fit(scalable_layout(v, f), gray, width, height, stride, h);
+            const KeyFit keys = scalable_version_fit(scalable_family_layout(v, f), gray, width, height, stride, h);
             const int hint = version_hint().version;
             const bool hinted = hint && std::abs(v - hint) <= version_hint().window;
             if (!keys.valid || keys.evidence < (hinted ? kHintedKeyGate : 0.85)) continue;
@@ -545,7 +545,7 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
     SiteRead read; SiteSamples samples;
     for (const auto &attempt : attempts) {
         if (work_exhausted()) break;
-        const ScalableLayout &L = scalable_layout(attempt.version, attempt.family);
+        const ScalableLayout &L = scalable_family_layout(attempt.version, attempt.family);
         const SurfaceScope surface_scope(attempt.surface);
         if (!scalable_sample_sites(L, gray, width, height, stride, attempt.h, samples)) continue;
         samples.edge_blur = edge_blur;
@@ -570,10 +570,13 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
         // Both placements share the sites. Try the one whose raw header reads
         // better first; the other gets the full soft decode only if its own
         // header is plausible.
-        const ScalableLayout &G = scalable_layout(attempt.version, attempt.family + 2);
+        // A family without a byte-grouped placement (Pixel) tries only its own.
+        const int grouped_layout = scalable_layout_of(attempt.family, true);
+        const ScalableLayout &G = grouped_layout >= 0 ? scalable_layout(attempt.version, grouped_layout) : L;
         std::vector<uint8_t> cw[2], rel[2];
-        scalable_assemble(L, read, cw[0], rel[0]); scalable_assemble(G, read, cw[1], rel[1]);
-        const int match[2] = {scalable_header_matches(L, cw[0]), scalable_header_matches(G, cw[1])};
+        scalable_assemble(L, read, cw[0], rel[0]);
+        if (grouped_layout >= 0) scalable_assemble(G, read, cw[1], rel[1]);
+        const int match[2] = {scalable_header_matches(L, cw[0]), grouped_layout >= 0 ? scalable_header_matches(G, cw[1]) : -1};
         capture_evidence(L, read, std::max(match[0], match[1]), attempt.h);
         const int first = match[1] > match[0] ? 1 : 0;
         // The header reads before any correction (the code is systematic).
@@ -588,12 +591,12 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
             const bool soft = match[which] >= 3;
             size_t length = 0; ckey_diagnostics local{};
             if (ckey_decode_scalable_soft(cw[which].data(), soft ? rel[which].data() : nullptr, cw[which].size(), static_cast<uint32_t>(attempt.version),
-                                          static_cast<ckey_scalable_layout>(attempt.family + 2 * which), candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
+                                          static_cast<ckey_scalable_layout>(scalable_layout_of(attempt.family, which == 1)), candidate.data(), candidate.size(), &length, &local) != CKEY_OK) continue;
             (void)layout;
             if (out_capacity < length) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 output buffer is too small"); return CKEY_INSUFFICIENT_BUFFER; }
             std::memcpy(out_payload, candidate.data(), length); *out_payload_len = length;
             if (out_version) *out_version = static_cast<uint32_t>(attempt.version);
-            if (out_layout) *out_layout = static_cast<uint32_t>(attempt.family + 2 * which);
+            if (out_layout) *out_layout = static_cast<uint32_t>(scalable_layout_of(attempt.family, which == 1));
             if (mode == kReadMl) { char m[96]; std::snprintf(m, sizeof m, "%.70s (ML site reading)", local.message); set_status(diag, CKEY_OK, m); }
             else set_status(diag, CKEY_OK, local.message);
             if (diag) { diag->corrected_symbols = local.corrected_symbols; diag->erasures_used = local.erasures_used; }
@@ -842,7 +845,7 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
         if (v > 0) {
             // The keys named the version; register on its module lattice,
             // within half a module of the frame fit.
-            const ScalableLayout &L = scalable_layout(v, family);
+            const ScalableLayout &L = scalable_family_layout(v, family);
             // Fine-tune against the version's keys (they sit at its own module
             // and slot pitch), each corner held within two modules of the
             // frame fit and the passes capped, so this can neither wander

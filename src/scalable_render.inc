@@ -665,7 +665,7 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
     if (modules == 0) return CKEY_INVALID_ARGUMENT;
     // 0: the smallest size that decodes at every version on clean output:
     // Print family 3 (its ring dots are 0.3 of a module), Standard 6 (0.2).
-    const uint32_t c = cells_per_module ? cells_per_module : (L->family ? 3u : 6u);
+    const uint32_t c = cells_per_module ? cells_per_module : (L->family == 2 ? 1u : L->family ? 3u : 6u);
     // The field [0, 29] is exactly c cells per module, so every grid module
     // is a whole c x c block; the quiet margin is at least the canvas's one
     // unit, rounded up to whole cells.
@@ -679,7 +679,11 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
         // Key) is traced from the geometry: a cell is ink at 10% coverage,
         // which keeps marks thinner than a cell.
         auto scene = build_scalable_scene(*L, *s, st);
-        scene.erase(std::remove_if(scene.begin(), scene.end(), [](const ckey_shape &x) { return x.layer == CKEY_LAYER_DATA_CARTESIAN; }), scene.end());
+        // Pixel: data rays are drawn along their centrelines below, not traced.
+        const bool pixel = L->family == 2;
+        scene.erase(std::remove_if(scene.begin(), scene.end(), [pixel](const ckey_shape &x) {
+            return x.layer == CKEY_LAYER_DATA_CARTESIAN || (pixel && x.layer == CKEY_LAYER_DATA_POLAR && x.kind == CKEY_SHAPE_LINE);
+        }), scene.end());
         constexpr int kSamples = 5;
         const Coverage cov = rasterize_scene(scene, static_cast<int>(side), kSamples, 0.0, -static_cast<double>(margin) * unit, unit);
         for (size_t i = 0; i < *required; ++i) {
@@ -692,6 +696,32 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
         // there and survives a display's sub-pixel structure (a lone one-cell
         // dot does not).
         const uint32_t dot = c <= 2 ? c : L->family ? c - 1 : c - 2, off = (c - dot) / 2;
+        if (pixel) {
+            // Each data ray: the cells its centreline passes through, from the
+            // dial's inner radius to the ray's end (long or short).
+            for (size_t i = 0; i < L->nodes.size(); ++i) {
+                const auto &n = L->nodes[i];
+                if (n.kind != 1) continue;
+                const double len = scalable_site_value(*L, s, i) ? L->long_ray() : L->short_ray();
+                const double a = kTau * n.slot / L->dial_slots, ux = std::sin(a), uy = -std::cos(a);
+                const int accent = accent_of(n.id, st);
+                const uint8_t v = accent >= 0 ? static_cast<uint8_t>(2 + accent) : 1;
+                for (double t = 0; t <= len + 1e-9; t += 0.2 * unit) {
+                    const double r = kScalableDialInner + t;
+                    const long cx = static_cast<long>(std::floor((kCenter + r * ux) / unit)) + margin, cy = static_cast<long>(std::floor((kCenter + r * uy) / unit)) + margin;
+                    if (cx >= 0 && cy >= 0 && cx < static_cast<long>(side) && cy < static_cast<long>(side)) out[static_cast<size_t>(cy) * side + static_cast<size_t>(cx)] = v;
+                }
+            }
+        }
+        // A grid module's block belongs to its data alone: clear what the
+        // traced marks (rays, rings, frame) spilled into it, then draw the dot.
+        for (const auto &n : L->nodes) {
+            if (n.kind != 0) continue;
+            const uint32_t mx = static_cast<uint32_t>(std::floor(n.x / L->pitch)), my = static_cast<uint32_t>(std::floor(n.y / L->pitch));
+            if (mx >= modules || my >= modules) return CKEY_INTERNAL_ERROR;
+            for (uint32_t y = 0; y < c; ++y) for (uint32_t x = 0; x < c; ++x)
+                out[static_cast<size_t>(margin + my * c + y) * side + margin + mx * c + x] = 0;
+        }
         for (size_t i = 0; i < L->nodes.size(); ++i) {
             const auto &n = L->nodes[i];
             if (n.kind != 0 || !scalable_site_value(*L, s, i)) continue;

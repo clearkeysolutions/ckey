@@ -10,6 +10,34 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.98 — 2026-11-13
+
+**Experimental Pixel layout** (`CKEY_LAYOUT_PIXEL` = 4, Format 0.31, format byte `1F`, opt-in): a Profile 0 geometry family designed to be drawn pixel-perfect at QR-like density.
+
+* **Geometry.** The Print family's frame, finders, grid pitch, dial and keys, with three changes:
+  * the ring zone's data sits on grid modules filling the annulus out to the dial;
+  * a single ring at the ring zone's inner radius carries only the Ring Key;
+  * rays are two modules apart, with short rays 0.6 module, so a short ray ends 1.1 modules before the ray sample.
+
+  At one cell per module every data site is then a distinct cell. Capacity is within 5% of Print's at small versions and under 1% below it at large ones: level M, version 26, 1,659 bytes against 1,677.
+* **Lattice.** `ckey_render_scalable_lattice` defaults to 1 cell per module for Pixel and draws its data rays along their centrelines. For every layout, a grid module's block now belongs to its data alone: traced marks that spill into it are cleared.
+* **Measured on clean renders** (8 versions from 1 to 31, one payload each, at 1, 2 and 3 pixels per cell):
+  * the antialiased raster decodes 8/8;
+  * the lattice at **2 cells per module decodes 24/24**, comparable to a QR code at 2 pixels per module;
+  * at 3 cells per module it decodes 24/24;
+  * at **1 cell per module it decodes 17/24**.
+  * At one cell per module the drawing is exact (every data site's cell matches its bit). The failures are in the reader:
+    * corner registration lands 1 to 9 pixels off;
+    * version 31's keys are not found at 1 to 2 pixels per module.
+
+  Reader work for one cell per module continues.
+* **The reader** tries the Pixel family in its version search. It has no byte-grouped placement, so the grouped retry is skipped. Calls that indexed layouts by family number now go through `scalable_family_layout`.
+* **SDKs:**
+  * Web: `layout: 'pixel'`; a decode reports profile `'0'` and layout `'pixel'`.
+  * Swift: `CKeyLayout.pixel`.
+  * Telemetry counts Pixel as Profile 0.
+* **Readers before build 98 cannot read Pixel symbols.**
+
 ## 0.1.0-build.97 — 2026-11-12
 
 * **Pixel-perfect lattice, Print family:** grid modules are drawn as a dot one cell smaller than the module (2 of 3, 3 of 4 cells across) instead of Standard's `c − 2`.

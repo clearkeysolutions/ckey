@@ -255,3 +255,22 @@ test('pixel-perfect: whole cells, decodes, and canvas/PNG/SVG agree', { skip }, 
     sym.free();
   }
 });
+
+test('pixel layout: encodes, reads back as pixel, and its lattice decodes at 2 cells per module', { skip }, async () => {
+  const { ckey } = await fresh();
+  const text = 'pixel layout '.padEnd(400, 'p');
+  const sym = ckey.encode(text, { layout: 'pixel' });
+  assert.equal(sym.layout, 'pixel');
+  const lat = ckey.renderLattice(sym, { cellsPerModule: 2 });
+  const img = ckey.renderPixelPerfect(sym, { cellsPerModule: 2, pxPerCell: 1 });
+  assert.equal(img.width, lat.side);
+  const pad = 40, w = img.width + 2 * pad;
+  const frame = new Uint8ClampedArray(w * w * 4).fill(255);
+  for (let y = 0; y < img.height; y++) frame.set(img.data.subarray(y * img.width * 4, (y + 1) * img.width * 4), ((y + pad) * w + pad) * 4);
+  const r = ckey.decodeImageData({ width: w, height: w, data: frame });
+  assert.ok(r, 'the pixel layout decodes at 2 pixels per module');
+  assert.equal(r.text, text);
+  assert.equal(r.layout, 'pixel');
+  assert.equal(r.profile, '0');
+  sym.free();
+});
