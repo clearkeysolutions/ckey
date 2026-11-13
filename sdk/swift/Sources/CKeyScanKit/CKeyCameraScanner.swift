@@ -392,6 +392,11 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         output.setSampleBufferDelegate(self, queue: frameQueue)
         guard session.canAddOutput(output) else { return false }
         session.addOutput(output)
+        // No video stabilization: it delays frames and crops them, and a
+        // scanner needs the newest, widest frame.
+        if let connection = output.connection(with: .video), connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = .off
+        }
         return true
     }
 

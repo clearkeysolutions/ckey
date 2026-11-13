@@ -38,6 +38,8 @@ import QuartzCore
 /// at once and may be called from any thread. On macOS only the focus and
 /// exposure points apply.
 public final class CKeyCameraControl {
+    /// The longest exposure the control allows, as 1/n s (with `exposureControl`).
+    public static let maxExposureTimescale: Int32 = 120
     /// The device this control drives.
     public let device: AVCaptureDevice
 
@@ -221,6 +223,16 @@ public final class CKeyCameraControl {
         if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
         if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
         #if os(iOS)
+        // Short exposures: auto-exposure may otherwise pick 1/30 s indoors,
+        // which smears a handheld code across several pixels. The cap trades
+        // a little noise (higher ISO) for sharp frames.
+        if flags.exposureControl {
+            let cap = CMTime(value: 1, timescale: Self.maxExposureTimescale)
+            let format = device.activeFormat
+            if CMTimeCompare(format.maxExposureDuration, cap) > 0 {
+                device.activeMaxExposureDuration = CMTimeMaximum(format.minExposureDuration, cap)
+            }
+        }
         if flags.focusOnCode, device.isAutoFocusRangeRestrictionSupported {
             device.autoFocusRangeRestriction = .near
         }

@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.100"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.101"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -231,6 +231,12 @@ CKEY_API double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t
 #define CKEY_SCAN_OPTION_ML 1u         /* try ML locator proposals before the border search */
 #define CKEY_SCAN_OPTION_ML_GATE 2u    /* with ML: skip the border search when the locator sees no symbol */
 #define CKEY_SCAN_OPTION_ML_AFTER 4u   /* try ML locator proposals only after the border search found nothing that decodes */
+/* Live frames: the classical reader only for this call (no ML locator, corner
+ * refiner retry, site-model reading or multi-frame averaging). A camera loop
+ * can scan most frames with it and the full ladder now and then, so a frame
+ * that will not read gives up in milliseconds, not seconds. Acceptance is
+ * unchanged. */
+#define CKEY_SCAN_OPTION_FAST 8u
 /* Bits 8..15 of flags: a Profile 0 version hint (1..31; 0 = none). Versions
  * within one of it are tried first and pass their key fit more easily, which
  * helps on noisy frames whose keys are hard to read. With CKEY_SCAN_OPTION_ML

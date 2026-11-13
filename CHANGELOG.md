@@ -10,6 +10,23 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.101 — 2026-11-13
+
+**Live scanning: frames that will not read give up fast, and frames come out sharper.**
+* **Why live scanning was slow when a photo reads at once.**
+  * The camera loop analyses one frame at a time. Every frame that failed (motion blur, refocus) ran the whole reader ladder at 4K: the ML locator, the corner-refiner retry, the site model, multi-frame averaging, 6 candidates and 8 version hypotheses each.
+  * Measured here, a 4K frame smeared by 9 to 12 pixels took **1.6 to 1.8 s** to fail, against 45 to 90 ms for a frame that reads. While the hand moved, the scanner looked at about one frame a second.
+* **`CKEY_SCAN_OPTION_FAST`** (8): the classical reader only for that call, with no locator, refiner retry, site-model reading or averaging, two version hypotheses and two reading strategies. Acceptance is unchanged.
+  * On 48 live-like 4K frames (versions 4 to 27, 2.5 to 7.5 pixels per module, 0 to 10 pixels of motion blur), with 2 candidates against 6:
+    * the full ladder decoded 23/48, at 630 ms per frame on average and 1,125 ms per failing frame;
+    * the fast scan decoded 18/48, at 197 ms on average and 293 ms per failing frame.
+  * A smeared frame in the core test fails in 225 ms fast against 1,244 ms full.
+* **Swift SDK.**
+  * `CKeyFrameProcessor` scans three of every four analysed frames fast and runs the full ladder on the fourth (`fullLadderEvery`).
+  * `CKeyCameraControl` caps auto-exposure at 1/120 s (`maxExposureTimescale`) when it controls exposure. The camera raises ISO rather than smearing a handheld code.
+  * `CKeyCameraScanner` turns video stabilization off on its output, since stabilization delays and crops frames.
+  * Not compiled here.
+
 ## 0.1.0-build.100 — 2026-11-13
 
 **Pixel-perfect drawing uses the pixels it has for detail.** In build 96 to 99 the renderers drew the lattice at its minimum size (6 cells per module for Standard, 3 for Print) and repeated each cell over several screen pixels. On a typical preview that made blocky rays and blob-like ring marks.

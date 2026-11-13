@@ -205,14 +205,18 @@ public enum CKeyDecoder {
     /// With an `accumulator` (`ckey_accumulator_create`), a frame that does not
     /// decode is averaged with the previous ones of the same symbol and the
     /// average is decoded (`ckey_scan_frame_accumulate_gray8`).
+    /// With `fast` (live camera frames), the classical reader only, two
+    /// candidates and two version hypotheses (`CKEY_SCAN_OPTION_FAST`): a frame
+    /// that will not read gives up quickly so the next one is looked at.
     static func scan(gray: UnsafePointer<UInt8>, width: Int, height: Int, stride: Int, region: CGRect?,
-                     payload: inout [UInt8], accumulator: OpaquePointer? = nil) -> CKeyScanOutcome {
+                     payload: inout [UInt8], accumulator: OpaquePointer? = nil, fast: Bool = false) -> CKeyScanOutcome {
         guard width >= 16, height >= 16, stride >= width, !payload.isEmpty else {
             return .nothing(width: width, height: height)
         }
         var options = ckey_scan_options()
         ckey_scan_options_init(&options)
-        options.max_candidates = UInt32(maxCandidates)
+        options.max_candidates = UInt32(fast ? 2 : maxCandidates)
+        if fast { options.flags |= CKEY_SCAN_OPTION_FAST }
         // The ML locator's proposals only after the border search found nothing
         // that decodes, so frames the classical reader reads pay nothing for it.
         // Without a model (see `setMachineLearning(enabled:)`) this is a no-op.

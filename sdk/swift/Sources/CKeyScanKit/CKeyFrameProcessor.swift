@@ -43,6 +43,11 @@ public final class CKeyFrameProcessor {
     public static let defaultScanRegion = CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
     /// Of every `wholeFrameEvery` analysed frames, one is searched whole.
     public static let wholeFrameEvery = 3
+    /// Of every `fullLadderEvery` analysed frames, one runs the full reader
+    /// (ML locator, corner refiner, site model, multi-frame averaging); the
+    /// rest use the fast classical scan, so a blurred frame costs tens of
+    /// milliseconds instead of a second and the camera keeps up.
+    public static let fullLadderEvery = 4
 
     // MARK: Settings
 
@@ -487,9 +492,10 @@ public final class CKeyFrameProcessor {
         if useRegion, let region, index % Self.wholeFrameEvery != 0 {
             pixelRegion = CKeyDecoder.pixelRegion(normalized: region, width: width, height: height)
         }
+        let fast = index % Self.fullLadderEvery != 0
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
                                        region: pixelRegion, payload: &payload,
-                                       accumulator: multiFrame ? accumulator : nil)
+                                       accumulator: multiFrame ? accumulator : nil, fast: fast)
 
         // Advice on the scan's candidate, or on the tracked symbol between scans.
         var quad: [Double]?

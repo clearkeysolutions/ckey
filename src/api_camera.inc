@@ -278,6 +278,9 @@ ckey_status ckey_scan_frame_gray8(const uint8_t *gray, size_t width, size_t heig
     }
     FrameScan scan;
     const VersionHintScope caller_hint(static_cast<int>(CKEY_SCAN_VERSION_HINT_OF(o.flags)));
+    const bool fast = (o.flags & CKEY_SCAN_OPTION_FAST) != 0;
+    const FastScanScope fast_scope(fast);
+    if (fast) o.flags &= ~(CKEY_SCAN_OPTION_ML | CKEY_SCAN_OPTION_ML_GATE | CKEY_SCAN_OPTION_ML_AFTER);
     if (o.k1 != 0.0 && std::abs(o.k1) <= 1.0) {
         const double f = o.focal_px > 0 ? o.focal_px : static_cast<double>(std::max(width, height));
         const bool centred = o.center_x == 0 && o.center_y == 0;
@@ -405,6 +408,7 @@ ckey_status ckey_scan_frame_accumulate_gray8(const uint8_t *gray, size_t width, 
     capture = EvidenceCapture{};
     if (!acc || !result || st == CKEY_INVALID_ARGUMENT) return st;
     if (st == CKEY_OK || st == CKEY_INSUFFICIENT_BUFFER) { ckey_accumulator_reset(acc); return st; }
+    if (options && (options->flags & CKEY_SCAN_OPTION_FAST)) return st;  // fast frames are not averaged
     // The capture's geometry is in the image the scan searched: the region of
     // interest (same clamping as ckey_scan_frame_gray8), or the whole frame.
     // Undistorted scans search a resampled copy, so they are not accumulated.

@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <random>
+#include <chrono>
 
 namespace {
 
@@ -292,6 +293,35 @@ int main() {
     CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W - 1, 0.3, det, 8) == 0);
     CKEY_CHECK(ckey_ml_locate_gray8(frame.data(), W, H, W, std::nan(""), det, 8) == 0);
     CKEY_CHECK(ckey_ml_load_model(nullptr, 0) == CKEY_OK);
+    // CKEY_SCAN_OPTION_FAST: a readable frame still decodes, without the
+    // locator, and a frame that will not read is not slower than the full ladder.
+    {
+        std::vector<uint8_t> payload(300); for (size_t k = 0; k < payload.size(); ++k) payload[k] = static_cast<uint8_t>('a' + k % 23);
+        ckey_scalable_symbol sym{}; ckey_diagnostics diag{};
+        CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 0, CKEY_ECC_M, CKEY_LAYOUT_STANDARD, &sym, &diag) == CKEY_OK);
+        ckey_raster_options ro; ckey_raster_options_default(&ro); ro.size_px = 600; ro.format = CKEY_PIXELS_GRAY8;
+        std::vector<uint8_t> img(600 * 600); size_t need = 0;
+        CKEY_CHECK(ckey_render_scalable_raster(&sym, nullptr, &ro, img.data(), img.size(), &need) == CKEY_OK);
+        const size_t W = 900; std::vector<uint8_t> frame(W * W, 230);
+        for (size_t y = 0; y < 600; ++y) std::copy_n(&img[y * 600], 600, &frame[(y + 150) * W + 150]);
+        ckey_scan_options so; ckey_scan_options_init(&so); so.flags = CKEY_SCAN_OPTION_ML_AFTER | CKEY_SCAN_OPTION_FAST; so.max_candidates = 2;
+        std::vector<uint8_t> out(4096); ckey_scan_result r{}; r.abi_version = CKEY_ABI_VERSION;
+        CKEY_CHECK(ckey_scan_frame_gray8(frame.data(), W, W, W, &so, out.data(), out.size(), &r) == CKEY_OK && r.payload_length == payload.size());
+        CKEY_CHECK((r.flags & CKEY_SCAN_FLAG_ML) == 0);
+        std::vector<uint8_t> smeared(frame);
+        for (size_t y = 0; y < W; ++y) for (size_t x = 0; x + 14 < W; ++x) { unsigned acc = 0; for (int k = 0; k < 14; ++k) acc += frame[y * W + x + k]; smeared[y * W + x] = static_cast<uint8_t>(acc / 14); }
+        const auto timed = [&](uint32_t flags, size_t cands) {
+            ckey_scan_options o; ckey_scan_options_init(&o); o.flags = flags; o.max_candidates = static_cast<uint32_t>(cands);
+            ckey_scan_result rr{}; rr.abi_version = CKEY_ABI_VERSION;
+            const auto t0 = std::chrono::steady_clock::now();
+            const ckey_status st = ckey_scan_frame_gray8(smeared.data(), W, W, W, &o, out.data(), out.size(), &rr);
+            CKEY_CHECK(st != CKEY_OK || rr.payload_length == payload.size());
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        };
+        const double full = timed(CKEY_SCAN_OPTION_ML_AFTER, 6), fast = timed(CKEY_SCAN_OPTION_ML_AFTER | CKEY_SCAN_OPTION_FAST, 2);
+        std::printf("fast scan of a smeared frame: %.0f ms (full ladder %.0f ms)\n", fast, full);
+        CKEY_CHECK(fast <= full * 1.1 + 5);
+    }
     std::puts("ml tests passed");
     return 0;
 }

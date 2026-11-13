@@ -367,6 +367,14 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
 }  // namespace
 extern "C" {
 
+// CKEY_SCAN_OPTION_FAST for the current thread's scan: no ML retries.
+inline bool &scan_fast() { static thread_local bool fast = false; return fast; }
+struct FastScanScope {
+    bool previous;
+    explicit FastScanScope(bool on) : previous(scan_fast()) { scan_fast() = on; }
+    ~FastScanScope() { scan_fast() = previous; }
+};
+
 // With a corner refiner loaded, a failed decode is retried once from the
 // refined corners (the refiner only moves corners; the decoder decides).
 ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t height, size_t stride, const double quad_xy[8],
@@ -374,6 +382,7 @@ ckey_status ckey_decode_scalable_gray8(const uint8_t *gray, size_t width, size_t
                                        uint32_t *out_layout, ckey_diagnostics *diag) {
     const ckey_status st = decode_scalable_at(gray, width, height, stride, quad_xy, out_payload, out_capacity, out_payload_len, out_version, out_layout, diag);
     if (st == CKEY_OK || st == CKEY_INVALID_ARGUMENT || st == CKEY_INSUFFICIENT_BUFFER) return st;
+    if (scan_fast()) return st;
     double refined[8];
     {
         const WorkScope work(kFindWorkBudget);
@@ -540,7 +549,10 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
         }
     }
     std::sort(attempts.begin(), attempts.end(), [](const Attempt &a, const Attempt &b) { return a.score > b.score; });
-    if (attempts.size() > kMaxDecodeAttempts) attempts.resize(kMaxDecodeAttempts);
+    // Fast (live) scans try the two best version hypotheses; the next frame
+    // gets another chance in tens of milliseconds.
+    const size_t max_attempts = scan_fast() ? 2 : kMaxDecodeAttempts;
+    if (attempts.size() > max_attempts) attempts.resize(max_attempts);
     std::vector<uint8_t> candidate(65535), codeword, reliability;
     SiteRead read; SiteSamples samples;
     for (const auto &attempt : attempts) {
@@ -553,10 +565,13 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
       const bool leading = &attempt - attempts.data() < 2;  // sequence detection is costly: only for the two best hypotheses
       // With a site model loaded, its reading is tried right after the plain
       // one (it is built for the frames the plain reading loses).
-      const bool ml_sites = ml_sites_current() != nullptr;
+      const bool ml_sites = !scan_fast() && ml_sites_current() != nullptr;
       std::vector<float> ml_logits, ml_doubt; bool ml_done = false;
+      int modes_tried = 0;
       for (const unsigned mode : kReadModesWithMl) {
         if (work_exhausted()) break;
+        // Fast scans: the plain reading and the local-levels ring-sequence one.
+        if (scan_fast() && mode != kReadMl && ++modes_tried > 2) break;
         if (mode == kReadMl) {
             if (!ml_sites || !leading) continue;
             if (!ml_done) { ml_logits = ml_site_logits(L, gray, width, height, stride, attempt.h, &ml_doubt); ml_done = true; }
