@@ -200,6 +200,26 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         set { processor.onTrack = newValue }
     }
 
+    /// Diagnostics: a report on every analysed frame with the camera's state,
+    /// on the main queue. Leave nil in production (it costs a histogram and a
+    /// main-queue hop per frame).
+    public var onFrameReport: ((CKeyFrameReport, CameraState) -> Void)? {
+        didSet {
+            guard let handler = onFrameReport else { processor.onFrameReport = nil; return }
+            let device = cameraControl?.device
+            processor.onFrameReport = { report in
+                #if os(iOS)
+                let state = CameraState(exposureSeconds: device.map { CMTimeGetSeconds($0.exposureDuration) }, iso: device?.iso,
+                                        lensPosition: device?.lensPosition, zoomFactor: device.map { Double($0.videoZoomFactor) },
+                                        deviceName: device?.localizedName)
+                #else
+                let state = CameraState(exposureSeconds: nil, iso: nil, lensPosition: nil, zoomFactor: nil, deviceName: device?.localizedName)
+                #endif
+                DispatchQueue.main.async { handler(report, state) }
+            }
+        }
+    }
+
     /// The queue `onTrack` is called on (default main).
     public var trackQueue: DispatchQueue {
         get { processor.trackQueue }

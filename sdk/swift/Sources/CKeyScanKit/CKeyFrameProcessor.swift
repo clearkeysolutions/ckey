@@ -137,6 +137,14 @@ public final class CKeyFrameProcessor {
         set { sync { settings.onAdvice = newValue } }
     }
 
+    /// Diagnostics: called on the analysis queue with a report on every
+    /// analysed frame (return quickly). Costs a histogram per frame; leave it
+    /// nil in production.
+    public var onFrameReport: ((CKeyFrameReport) -> Void)? {
+        get { sync { settings.onFrameReport } }
+        set { sync { settings.onFrameReport = newValue } }
+    }
+
     /// Called on `callbackQueue` when what the user should be told changes
     /// (an empty set clears the hint). Flags are steadied over a few frames
     /// so a hint does not flicker.
@@ -161,6 +169,7 @@ public final class CKeyFrameProcessor {
         var onTrack: ((CKeyTrack?) -> Void)?
         var trackQueue = DispatchQueue.main
         var onAdvice: ((CKeyCameraAdvice) -> Void)?
+        var onFrameReport: ((CKeyFrameReport) -> Void)?
         var onGuidance: ((CKeyGuidance) -> Void)?
         var callbackQueue = DispatchQueue.main
     }
@@ -569,8 +578,9 @@ public final class CKeyFrameProcessor {
                                        region: pixelRegion, payload: &payload,
                                        accumulator: multiFrame ? accumulator : nil, fast: fast)
         if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
+        let scanMilliseconds = (CACurrentMediaTime() - scanStarted) * 1000
         keepDiagnostic(gray, width, height, stride, region: pixelRegion, outcome: outcome, held: held, fast: fast,
-                       milliseconds: (CACurrentMediaTime() - scanStarted) * 1000, index: index)
+                       milliseconds: scanMilliseconds, index: index)
 
         // Advice on the scan's candidate, or on the tracked symbol between scans.
         var quad: [Double]?
@@ -605,6 +615,11 @@ public final class CKeyFrameProcessor {
                     CGPoint(x: $0.x / CGFloat(width), y: $0.y / CGFloat(height))
                 })
         }
+        if let report = sync({ settings.onFrameReport }) {
+            report(Self.frameReport(gray, width, height, stride, index: index, fast: fast, region: pixelRegion,
+                                    outcome: outcome, quad: quad, tracked: tracked, advice: swiftAdvice,
+                                    milliseconds: scanMilliseconds))
+        }
         return Analysis(outcome: outcome, advice: swiftAdvice, usedRegion: pixelRegion != nil)
     }
 
@@ -619,6 +634,36 @@ public final class CKeyFrameProcessor {
         let x1 = min(width, Int((maxX + pad).rounded(.up))), y1 = min(height, Int((maxY + pad).rounded(.up)))
         guard x1 - x0 >= 64, y1 - y0 >= 64 else { return nil }
         return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// One frame's report: the scan, the advice, and a 32-bin luma histogram
+    /// of the code's bounding box (or the scanned area), sampled on a grid.
+    private static func frameReport(_ gray: UnsafePointer<UInt8>, _ width: Int, _ height: Int, _ stride: Int,
+                                    index: Int, fast: Bool, region: CGRect?, outcome: CKeyScanOutcome, quad: [Double]?,
+                                    tracked: Bool, advice: CKeyCameraAdvice?, milliseconds: Double) -> CKeyFrameReport {
+        var box = region ?? CGRect(x: 0, y: 0, width: width, height: height)
+        if let quad, quad.count == 8 {
+            let xs = Swift.stride(from: 0, to: 8, by: 2).map { quad[$0] }, ys = Swift.stride(from: 1, to: 8, by: 2).map { quad[$0] }
+            box = CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+                .intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        var histogram = [UInt32](repeating: 0, count: 32)
+        if !box.isNull, box.width >= 2, box.height >= 2 {
+            let step = max(1, Int(max(box.width, box.height)) / 160)
+            var y = Int(box.minY)
+            while y < Int(box.maxY) {
+                var x = Int(box.minX)
+                while x < Int(box.maxX) { histogram[Int(gray[y * stride + x]) >> 3] += 1; x += step }
+                y += step
+            }
+        }
+        return CKeyFrameReport(time: CACurrentMediaTime(), index: index, fast: fast,
+                               regionWidth: Int(region?.width ?? CGFloat(width)), regionHeight: Int(region?.height ?? CGFloat(height)),
+                               milliseconds: milliseconds, located: outcome.located, tracked: tracked, decoded: outcome.result != nil,
+                               score: outcome.score, codeSize: advice?.size ?? 0, sharpness: advice?.sharpness ?? 0,
+                               contrast: advice?.contrast ?? 0, clippedFraction: advice?.clippedFraction ?? 0,
+                               zoomAdvice: advice?.zoomFactor ?? 1, histogram: histogram,
+                               version: outcome.result?.version ?? 0)
     }
 
     private func finish(_ analysis: Analysis, started: CFTimeInterval) {
@@ -690,4 +735,34 @@ public struct CKeyDiagnosticFrame: Sendable {
     public let fast: Bool
     public let milliseconds: Double
     public let index: Int
+}
+
+/// Diagnostics: what one analysed frame looked like to the scanner
+/// (`CKeyFrameProcessor.onFrameReport`).
+public struct CKeyFrameReport: Sendable {
+    /// Host clock, seconds (CACurrentMediaTime).
+    public let time: Double
+    public let index: Int
+    /// A fast (classical-only) scan, or the full reader.
+    public let fast: Bool
+    /// The area scanned, in pixels.
+    public let regionWidth: Int
+    public let regionHeight: Int
+    public let milliseconds: Double
+    public let located: Bool
+    public let tracked: Bool
+    public let decoded: Bool
+    /// The candidate's fit score (0 when none).
+    public let score: Double
+    /// The code's size from the advice (frame pixels across), 0 when none.
+    public let codeSize: Double
+    /// Advice sharpness and contrast (0...1 scales from the core), 0 when none.
+    public let sharpness: Double
+    public let contrast: Double
+    public let clippedFraction: Double
+    public let zoomAdvice: Double
+    /// 32-bin luma histogram of the code's box (or the scanned area).
+    public let histogram: [UInt32]
+    /// The decoded version, 0 unless decoded.
+    public let version: Int
 }

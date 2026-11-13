@@ -10,6 +10,18 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.105 — 2026-11-13
+
+* **Per-frame diagnostic reports** (Swift SDK), for charting a scan from the first candidate to the read.
+  * `CKeyFrameProcessor.onFrameReport` reports every analysed frame (`CKeyFrameReport`):
+    * time, fast or full scan, the area scanned and the scan time;
+    * located, tracked and decoded, the candidate score and the decoded version;
+    * the advice's code size, sharpness, contrast, clipping and zoom;
+    * a 32-bin luma histogram of the code's box.
+  * `CKeyCameraScanner.onFrameReport` adds the camera's exposure, ISO, lens position and zoom, on the main queue.
+  * Nil by default, and meant for debug builds only.
+  * Not compiled here.
+
 ## 0.1.0-build.104 — 2026-11-13
 
 * **Diagnostic frame capture** (Swift SDK), so the reader can be measured on real camera frames instead of simulated ones.
