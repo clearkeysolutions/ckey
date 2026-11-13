@@ -301,6 +301,33 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
 
     /// Starts a new scan session after a decode, keeping the camera running.
     /// The track is dropped and the zoom and exposure return to rest.
+    /// The camera's state when asked, for diagnostics (all optional).
+    public struct CameraState: Sendable {
+        public let exposureSeconds: Double?
+        public let iso: Float?
+        public let lensPosition: Float?
+        public let zoomFactor: Double?
+        public let deviceName: String?
+    }
+
+    /// Keeps the next `count` analysed frames for diagnosis
+    /// (`CKeyFrameProcessor.captureDiagnostics`), with the camera's state.
+    public func captureDiagnostics(count: Int = 12,
+                                   completion: @escaping @Sendable ([CKeyDiagnosticFrame], CameraState) -> Void) {
+        // The camera's state when the capture starts (read here: the device
+        // is not Sendable, so the completion does not capture it).
+        let device = cameraControl?.device
+        #if os(iOS)
+        let state = CameraState(exposureSeconds: device.map { CMTimeGetSeconds($0.exposureDuration) }, iso: device?.iso,
+                                lensPosition: device?.lensPosition, zoomFactor: device.map { Double($0.videoZoomFactor) },
+                                deviceName: device?.localizedName)
+        #else
+        let state = CameraState(exposureSeconds: device.map { CMTimeGetSeconds($0.exposureDuration) }, iso: nil,
+                                lensPosition: nil, zoomFactor: nil, deviceName: device?.localizedName)
+        #endif
+        processor.captureDiagnostics(count: count) { frames in completion(frames, state) }
+    }
+
     public func scanAgain() {
         endSession()
         beginSession()

@@ -202,6 +202,10 @@ public final class CKeyFrameProcessor {
     // Analysis queue only.
     private var policy = ckey_camera_policy()
     private var payload = [UInt8](repeating: 0, count: CKeyDecoder.payloadCapacity)
+    /// Analysis queue only: a pending diagnostic capture.
+    private var diagnosticWanted = 0
+    private var diagnosticFrames: [CKeyDiagnosticFrame] = []
+    private var diagnosticDone: (@Sendable ([CKeyDiagnosticFrame]) -> Void)?
     // Analysis-queue state: the multi-frame accumulator (core-owned).
     private let accumulator: OpaquePointer? = ckey_accumulator_create()
     // Guarded by lock: restart the accumulator before the next analysis.
@@ -238,6 +242,54 @@ public final class CKeyFrameProcessor {
         lock.lock()
         defer { lock.unlock() }
         return body()
+    }
+
+    // MARK: Diagnostics
+
+    /// Keeps the next `count` analysed frames (luma cropped to the area each
+    /// scan read, at full resolution, with the corners found) and hands them
+    /// to `completion` on the main queue. For diagnosing frames that do not
+    /// read; nothing leaves the device unless the host shares the result.
+    public func captureDiagnostics(count: Int = 12, completion: @escaping @Sendable ([CKeyDiagnosticFrame]) -> Void) {
+        analysisQueue.async {
+            self.diagnosticFrames = []
+            self.diagnosticWanted = max(1, min(60, count))
+            self.diagnosticDone = completion
+        }
+    }
+
+    private func keepDiagnostic(_ gray: UnsafePointer<UInt8>, _ width: Int, _ height: Int, _ stride: Int,
+                                region: CGRect?, outcome: CKeyScanOutcome, held: Seed?, fast: Bool,
+                                milliseconds: Double, index: Int) {
+        guard diagnosticWanted > 0 else { return }
+        var crop = region ?? CGRect(x: 0, y: 0, width: width, height: height)
+        // Whole frames are kept at most 2,048 pixels on a side, centred.
+        if region == nil, max(width, height) > 2048 {
+            let w = min(width, 2048), h = min(height, 2048)
+            crop = CGRect(x: (width - w) / 2, y: (height - h) / 2, width: w, height: h)
+        }
+        let x0 = Int(crop.minX), y0 = Int(crop.minY), w = Int(crop.width), h = Int(crop.height)
+        guard w > 0, h > 0, x0 >= 0, y0 >= 0, x0 + w <= width, y0 + h <= height else { return }
+        var bytes = Data(count: w * h)
+        bytes.withUnsafeMutableBytes { raw in
+            let out = raw.bindMemory(to: UInt8.self)
+            for y in 0..<h { for x in 0..<w { out[y * w + x] = gray[(y0 + y) * stride + x0 + x] } }
+        }
+        func local(_ q: [Double]) -> [Double] { q.enumerated().map { $0.offset % 2 == 0 ? $0.element - Double(x0) : $0.element - Double(y0) } }
+        let found = outcome.located && outcome.quad.count == 4 ? local(CKeyCorners.flat(outcome.quad)) : []
+        let tracked = held.map { $0.width == width && $0.height == height ? local($0.quad) : [] } ?? []
+        diagnosticFrames.append(CKeyDiagnosticFrame(gray: bytes, width: w, height: h, cropX: x0, cropY: y0,
+                                                    frameWidth: width, frameHeight: height, quad: found, trackedQuad: tracked,
+                                                    decoded: outcome.result != nil, fast: fast, milliseconds: milliseconds, index: index))
+        diagnosticWanted -= 1
+        // A decode stops analysis: hand over what was kept up to it.
+        if outcome.result != nil { diagnosticWanted = 0 }
+        if diagnosticWanted == 0, let done = diagnosticDone {
+            let frames = diagnosticFrames
+            diagnosticFrames = []
+            diagnosticDone = nil
+            DispatchQueue.main.async { done(frames) }
+        }
     }
 
     // MARK: Feeding frames
@@ -512,10 +564,13 @@ public final class CKeyFrameProcessor {
         let tracked = held != nil && held?.width == width && held?.height == height
         if !tracked { trackedFailures = 0 }
         let fast = !(tracked && trackedFailures >= Self.fullLadderAfterFailures && index % Self.fullLadderEvery == 0)
+        let scanStarted = CACurrentMediaTime()
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
                                        region: pixelRegion, payload: &payload,
                                        accumulator: multiFrame ? accumulator : nil, fast: fast)
         if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
+        keepDiagnostic(gray, width, height, stride, region: pixelRegion, outcome: outcome, held: held, fast: fast,
+                       milliseconds: (CACurrentMediaTime() - scanStarted) * 1000, index: index)
 
         // Advice on the scan's candidate, or on the tracked symbol between scans.
         var quad: [Double]?
@@ -611,4 +666,28 @@ public final class CKeyFrameProcessor {
         let (handler, queue) = sync { (settings.onGuidance, settings.callbackQueue) }
         if let handler { queue.async { handler([]) } }
     }
+}
+
+/// One analysed camera frame kept for diagnosis (`CKeyFrameProcessor.captureDiagnostics`):
+/// the 8-bit luma the scanner read, cropped to the area it scanned, and what it found.
+public struct CKeyDiagnosticFrame: Sendable {
+    /// Row-major luma, `width` x `height`, one byte per pixel.
+    public let gray: Data
+    public let width: Int
+    public let height: Int
+    /// Where the crop sits in the full frame, in pixels.
+    public let cropX: Int
+    public let cropY: Int
+    /// The full frame's size, in pixels.
+    public let frameWidth: Int
+    public let frameHeight: Int
+    /// The candidate's four corners (x, y pairs) in crop pixels, when the scan located one.
+    public let quad: [Double]
+    /// The tracked corners in crop pixels, when the tracker held the code.
+    public let trackedQuad: [Double]
+    public let decoded: Bool
+    /// True for a fast (classical-only) scan, false for the full reader.
+    public let fast: Bool
+    public let milliseconds: Double
+    public let index: Int
 }

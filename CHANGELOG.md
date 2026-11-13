@@ -10,6 +10,17 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.104 — 2026-11-13
+
+* **Diagnostic frame capture** (Swift SDK), so the reader can be measured on real camera frames instead of simulated ones.
+  * `CKeyFrameProcessor.captureDiagnostics(count:completion:)` keeps the next analysed frames. Each is the 8-bit luma cropped to the area that scan read, at full resolution (whole frames centred and capped at 2,048 pixels on a side), with:
+    * the candidate's corners and the tracked corners, in crop pixels;
+    * whether it decoded, whether it was a fast scan, and its time.
+  * `CKeyCameraScanner.captureDiagnostics` adds the camera's exposure, ISO, lens position and zoom.
+  * A decode ends the capture early.
+  * Nothing leaves the device unless the host shares it.
+  * Not compiled here.
+
 ## 0.1.0-build.103 — 2026-11-13
 
 * **Smooth pixel-perfect drawing:** new `ckey_render_scalable_aligned_raster` (`CKEY_HAS_ALIGNED_RASTER`).
