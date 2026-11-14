@@ -10,6 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.114 — 2026-11-14
+
+* **Automatic layout, the new default for encoding** (`CKEY_LAYOUT_AUTO` = 255, `CKEY_HAS_AUTO_LAYOUT`, `CKEY_AUTO_LAYOUT_ARC_FROM_VERSION` 8). Standard (Format 0.27) for versions 1–7, Standard arc grouped (Format 0.33) for 8–31; with version 0, the smallest version that fits under that rule. `ckey_scalable_capacity` accepts it too. A symbol never carries it: its layout is the one chosen. Naming a layout still gives exactly that layout.
+  * **Why:** in the owner's side-by-side field run (same payload, same reader, build 113), Arc v22 at 392–438 px and Standard v21 at 442–465 px both read in a median of about 120 ms. In the frames that read, though, Arc had about a third of Standard's wrong sites (median 43 against 96) and a fifth of its inner-ring errors (0.3–1.9% against 3–9%), at a smaller size. Small versions keep Standard because Arc costs them the most capacity (v1: 21 against 27 bytes at M).
+  * **Defaults:** the C API (callers name the layout; `CKEY_LAYOUT_AUTO` is opt-in there), Swift `encode(layout: nil)` and `capacity(layout: nil)` (the new default; `CKeyLayout?`), web `layout: 'auto'` (the new default when omitted; `LayoutChoice`), Android `Layout.AUTO` (the new default), CLI `--layout auto` (the new default).
+  * Codes made by default from v8 up need readers from 0.1.0-build.110.
+  * Tested in `scalable_tests` (every version, version 0 and explicit, one byte past Standard v7 goes to Arc v8) and `options.test.mjs`. All 17 core suites pass. Swift and Android are not compiled here.
+
 ## 0.1.0-build.113 — 2026-11-14
 
 * **The site heatmap keeps only freshly located frames** (`CKeyFrameProcessor.onSiteHeatmap`). It used to keep frames read at a held track's corners too. Those lag a moving code, and in the owner's scan reports their sites read about half wrong (random): v1 frames with 128–162 of about 300 sites wrong, between located frames with 17, 11 and 0. That set the reports' "wrong sites" at 20–40% across every zone, which measured the tracker, not the code.

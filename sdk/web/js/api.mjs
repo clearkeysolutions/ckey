@@ -588,7 +588,7 @@ export function createCKey(M, options = {}) {
         M._ckw_free(p);
       }
     },
-    capacity(version, level = 'M', layout = 'standard') {
+    capacity(version, level = 'M', layout = 'auto') {
       const o = encodeOptions({ version, level, layout });
       return M._ckw_scalable_capacity(o.version, o.level, o.layout);
     },

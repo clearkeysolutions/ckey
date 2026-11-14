@@ -149,17 +149,19 @@ public final class CKeySymbol: @unchecked Sendable {
     ///   - version: 1...31, or 0 (default) for the smallest version that fits.
     ///   - level: correction level (default `.m`); `.u` and `.x` trade most
     ///     of the capacity for parity.
-    ///   - layout: `.standard` (default), `.print` (P0.1, for small prints), or
-    ///     their byte-grouped forms `.standardGrouped` and `.printGrouped`.
+    ///   - layout: `nil` (default) chooses automatically: `.standard` for
+    ///     versions 1-7 and `.standardArcGrouped` (Format 0.33) for 8-31
+    ///     (`CKEY_LAYOUT_AUTO`). Or name one: `.standard`, `.print` (P0.1, for
+    ///     small prints), `.pixel`, `.standardArc`, or a byte-grouped form.
     /// - Throws: `CKeyError` when the payload does not fit or an argument is invalid.
     public static func encode(_ text: String, version: Int = 0, level: CKeyErrorCorrection = .m,
-                              layout: CKeyLayout = .standard) throws -> CKeySymbol {
+                              layout: CKeyLayout? = nil) throws -> CKeySymbol {
         try encode(Data(text.utf8), version: version, level: level, layout: layout)
     }
 
     /// Encodes bytes. See `encode(_:version:level:layout:)` for the parameters.
     public static func encode(_ data: Data, version: Int = 0, level: CKeyErrorCorrection = .m,
-                              layout: CKeyLayout = .standard) throws -> CKeySymbol {
+                              layout: CKeyLayout? = nil) throws -> CKeySymbol {
         guard (0...Int(CKEY_SCALABLE_VERSION_COUNT)).contains(version) else {
             throw CKeyError(.invalidArgument, "version must be 0 (auto) or 1...\(CKEY_SCALABLE_VERSION_COUNT)")
         }
@@ -169,7 +171,7 @@ public final class CKeySymbol: @unchecked Sendable {
         let bytes = [UInt8](data)
         let status = bytes.withUnsafeBufferPointer { payload in
             ckey_encode_scalable(payload.baseAddress, payload.count, UInt32(version), level.c,
-                                 ckey_scalable_layout(rawValue: UInt32(layout.rawValue)), storage, &diagnostics)
+                                 Self.coreLayout(layout), storage, &diagnostics)
         }
         guard status == CKEY_OK else {
             storage.deinitialize(count: 1)
@@ -179,10 +181,16 @@ public final class CKeySymbol: @unchecked Sendable {
         return CKeySymbol(storage: storage)
     }
 
-    /// Maximum payload bytes for a version (1...31), level and layout; 0 if invalid.
-    public static func capacity(version: Int, level: CKeyErrorCorrection = .m, layout: CKeyLayout = .standard) -> Int {
+    /// Maximum payload bytes for a version (1...31), level and layout (`nil`:
+    /// the automatic choice for that version); 0 if invalid.
+    public static func capacity(version: Int, level: CKeyErrorCorrection = .m, layout: CKeyLayout? = nil) -> Int {
         guard (1...Int(CKEY_SCALABLE_VERSION_COUNT)).contains(version) else { return 0 }
-        return ckey_scalable_capacity(UInt32(version), level.c, ckey_scalable_layout(rawValue: UInt32(layout.rawValue)))
+        return ckey_scalable_capacity(UInt32(version), level.c, coreLayout(layout))
+    }
+
+    /// The core's layout code; `nil` is `CKEY_LAYOUT_AUTO`.
+    static func coreLayout(_ layout: CKeyLayout?) -> ckey_scalable_layout {
+        layout.map { ckey_scalable_layout(rawValue: UInt32($0.rawValue)) } ?? CKEY_LAYOUT_AUTO
     }
 
     // MARK: - Native pixels

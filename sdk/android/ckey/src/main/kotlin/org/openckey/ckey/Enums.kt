@@ -51,7 +51,12 @@ enum class Layout(val code: Int) {
      */
     STANDARD_ARC(5),
     /** Format 0.33: [STANDARD_ARC]'s geometry, byte-grouped. Opt-in. */
-    STANDARD_ARC_GROUPED(6);
+    STANDARD_ARC_GROUPED(6),
+    /**
+     * Encoding only (the default): [STANDARD] for versions 1-7, [STANDARD_ARC_GROUPED] from v8
+     * (the core's CKEY_LAYOUT_AUTO). A symbol and a decoder report the layout actually used.
+     */
+    AUTO(255);
 
     /** True for the print geometry ("P0.1"): [PRINT] and [PRINT_GROUPED]. */
     val isPrint: Boolean get() = this == PRINT || this == PRINT_GROUPED

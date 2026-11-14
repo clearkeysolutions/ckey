@@ -164,13 +164,13 @@ class CKeySymbol private constructor(private val blob: ByteArray) {
          */
         @JvmStatic
         @JvmOverloads
-        fun encode(text: String, version: Int = 0, level: EccLevel = EccLevel.M, layout: Layout = Layout.STANDARD): CKeySymbol =
+        fun encode(text: String, version: Int = 0, level: EccLevel = EccLevel.M, layout: Layout = Layout.AUTO): CKeySymbol =
             encode(text.toByteArray(Charsets.UTF_8), version, level, layout)
 
         /** Encodes raw payload bytes. */
         @JvmStatic
         @JvmOverloads
-        fun encode(bytes: ByteArray, version: Int = 0, level: EccLevel = EccLevel.M, layout: Layout = Layout.STANDARD): CKeySymbol {
+        fun encode(bytes: ByteArray, version: Int = 0, level: EccLevel = EccLevel.M, layout: Layout = Layout.AUTO): CKeySymbol {
             require(version in 0..31) { "version must be 0 (auto) or 1..31" }
             return CKeySymbol(CKeyNative.nativeEncode(bytes, version, level.code, layout.code))
         }
@@ -178,7 +178,7 @@ class CKeySymbol private constructor(private val blob: ByteArray) {
         /** Maximum payload bytes for a version, level and layout; 0 if invalid. */
         @JvmStatic
         @JvmOverloads
-        fun capacity(version: Int, level: EccLevel = EccLevel.M, layout: Layout = Layout.STANDARD): Int =
+        fun capacity(version: Int, level: EccLevel = EccLevel.M, layout: Layout = Layout.AUTO): Int =
             CKeyNative.nativeCapacity(version, level.code, layout.code)
     }
 }

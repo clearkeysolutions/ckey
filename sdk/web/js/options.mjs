@@ -63,13 +63,16 @@ export function payloadBytes(input) {
   throw new TypeError('payload must be a string, ArrayBuffer or typed array');
 }
 
-/** { version 0..31 (0 = auto), level 'L'|'M'|'Q'|'H'|'U'|'X', layout 'standard'|'print'|'standard-grouped'|'print-grouped'|'pixel'|'arc'|'arc-grouped' } -> numeric codes. */
+/** The core's CKEY_LAYOUT_AUTO: Standard for versions 1-7, 'arc-grouped' (Format 0.33) from v8. */
+export const AUTO_LAYOUT = 255;
+
+/** { version 0..31 (0 = auto), level 'L'|'M'|'Q'|'H'|'U'|'X', layout 'auto' (default)|'standard'|'print'|'standard-grouped'|'print-grouped'|'pixel'|'arc'|'arc-grouped' } -> numeric codes. */
 export function encodeOptions(o) {
   o = opts(o, 'encode');
   return {
     version: int(o, 'version', 0, 0, 31),
     level: oneOf(o, 'level', LEVELS, 1),
-    layout: oneOf(o, 'layout', LAYOUTS, 0),
+    layout: o.layout === undefined || o.layout === 'auto' ? AUTO_LAYOUT : oneOf(o, 'layout', LAYOUTS, 0),
   };
 }
 

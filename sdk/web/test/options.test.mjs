@@ -7,7 +7,9 @@ import {
 } from '../js/options.mjs';
 
 test('encode options', () => {
-  assert.deepEqual(encodeOptions(), { version: 0, level: 1, layout: 0 });
+  assert.deepEqual(encodeOptions(), { version: 0, level: 1, layout: 255 });  // CKEY_LAYOUT_AUTO
+  assert.deepEqual(encodeOptions({ layout: 'auto' }), { version: 0, level: 1, layout: 255 });
+  assert.deepEqual(encodeOptions({ layout: 'standard' }), { version: 0, level: 1, layout: 0 });
   assert.deepEqual(encodeOptions({ version: 31, level: 'H', layout: 'print' }), { version: 31, level: 3, layout: 1 });
   assert.equal(encodeOptions({ level: 'q' }).level, 2);
   assert.throws(() => encodeOptions({ version: 32 }), RangeError);

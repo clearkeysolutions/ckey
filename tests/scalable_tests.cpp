@@ -191,6 +191,21 @@ int main() {
             CKEY_CHECK(st == CKEY_OK && version == v && layout == static_cast<uint32_t>(arc) && len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
         }
         std::printf("Standard arc: all 31 versions decode at 6 px/module in both placements and are told apart from Standard\n");
+        // CKEY_LAYOUT_AUTO: Standard for v1-v7, Standard arc grouped from v8,
+        // with version 0 the smallest version that fits under that rule.
+        for (uint32_t v = 1; v <= kScalableVersions; ++v) {
+            const ckey_scalable_layout expect = v < 8 ? CKEY_LAYOUT_STANDARD : CKEY_LAYOUT_STANDARD_ARC_GROUPED;
+            CKEY_CHECK(ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_AUTO) == ckey_scalable_capacity(v, CKEY_ECC_M, expect));
+            const auto payload = pseudo(ckey_scalable_capacity(v, CKEY_ECC_M, expect), 7000u + v);
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), v, CKEY_ECC_M, CKEY_LAYOUT_AUTO, &ps, &pd) == CKEY_OK && ps.version == v && ps.layout == static_cast<uint32_t>(expect));
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 0, CKEY_ECC_M, CKEY_LAYOUT_AUTO, &ps, &pd) == CKEY_OK && ps.version == v && ps.layout == static_cast<uint32_t>(expect));
+        }
+        {
+            // One byte past Standard v7's capacity goes to Arc v8.
+            const auto payload = pseudo(ckey_scalable_capacity(7, CKEY_ECC_M, CKEY_LAYOUT_STANDARD) + 1, 7100u);
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), 0, CKEY_ECC_M, CKEY_LAYOUT_AUTO, &ps, &pd) == CKEY_OK && ps.version == 8 && ps.layout == CKEY_LAYOUT_STANDARD_ARC_GROUPED);
+        }
+        std::printf("CKEY_LAYOUT_AUTO: Standard for v1-v7, Standard arc grouped for v8-v31\n");
         // Conformance vectors (same method as Profile 0's), payload "CKey renderer test" at level M.
         const std::string kat = "CKey renderer test";
         const std::array<std::array<uint64_t, 2>, 2> expected_arc = {{{kArcKatV3, kArcKatV31}, {kArcGroupedKatV3, kArcGroupedKatV31}}};

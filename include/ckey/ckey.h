@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.113"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.114"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -498,8 +498,18 @@ typedef enum ckey_scalable_layout {
                                           twice as close as the outermost ring's and blur first; here each
                                           ring's slots scale with its radius (the outermost keeps the dial's
                                           count). About 10% less capacity. The Ring Key is at 6:00. */
-    CKEY_LAYOUT_STANDARD_ARC_GROUPED = 6 /* Format 0.33: STANDARD_ARC geometry, byte-grouped */
+    CKEY_LAYOUT_STANDARD_ARC_GROUPED = 6, /* Format 0.33: STANDARD_ARC geometry, byte-grouped */
+    /* Encoder and capacity only: STANDARD for versions 1-7, STANDARD_ARC_GROUPED
+       for 8-31 (with version 0, the smallest version that fits under that rule).
+       Field scans of v21/v22 codes at the same size: Arc read with about a
+       third of Standard's wrong sites and a fifth of its inner-ring errors.
+       Small versions keep Standard, whose capacity loss under Arc is largest.
+       A symbol never carries this value: its layout is the one chosen.
+       Readers before 0.1.0-build.110 cannot read the Arc versions. */
+    CKEY_LAYOUT_AUTO = 255
 } ckey_scalable_layout;
+#define CKEY_HAS_AUTO_LAYOUT 1
+#define CKEY_AUTO_LAYOUT_ARC_FROM_VERSION 8u
 #define CKEY_SCALABLE_VERSION_COUNT 31u
 #define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u
 /* Parity is 14/28/44/60/80/95% of each Reed-Solomon block. A level corrects

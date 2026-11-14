@@ -227,19 +227,29 @@ uint32_t ckey_scalable_modules_across(uint32_t version) {
     return version >= 1 && version <= CKEY_SCALABLE_VERSION_COUNT ? static_cast<uint32_t>(kScalableGrid[version - 1]) : 0u;
 }
 
+// CKEY_LAYOUT_AUTO: Standard for small versions, Standard arc (grouped) from v8.
+int scalable_auto_layout(int v) { return v < static_cast<int>(CKEY_AUTO_LAYOUT_ARC_FROM_VERSION) ? CKEY_LAYOUT_STANDARD : CKEY_LAYOUT_STANDARD_ARC_GROUPED; }
+
 size_t ckey_scalable_capacity(uint32_t version, ckey_ecc_level level, ckey_scalable_layout layout) {
-    return scalable_capacity(static_cast<int>(version), static_cast<int>(level), static_cast<int>(layout));
+    const int l = layout == CKEY_LAYOUT_AUTO ? scalable_auto_layout(static_cast<int>(version)) : static_cast<int>(layout);
+    return scalable_capacity(static_cast<int>(version), static_cast<int>(level), l);
 }
 
 ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uint32_t version, ckey_ecc_level level,
                                  ckey_scalable_layout layout, ckey_scalable_symbol *out, ckey_diagnostics *diag) {
-    const int family = static_cast<int>(layout);
+    const bool automatic = layout == CKEY_LAYOUT_AUTO;
+    int family = automatic ? scalable_auto_layout(static_cast<int>(version)) : static_cast<int>(layout);
     if ((!payload && payload_len) || !out || static_cast<int>(level) < 0 || static_cast<int>(level) >= kScalableLevels || version > CKEY_SCALABLE_VERSION_COUNT ||
         family < 0 || family >= kScalableLayouts) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "invalid Profile 0 payload, version, level, or output"); return CKEY_INVALID_ARGUMENT;
     }
     int v = static_cast<int>(version);
-    if (v == 0) { for (v = 1; v <= kScalableVersions && scalable_capacity(v, level, family) < payload_len; ++v) {} }
+    if (v == 0) {
+        for (v = 1; v <= kScalableVersions; ++v) {
+            if (automatic) family = scalable_auto_layout(v);
+            if (scalable_capacity(v, level, family) >= payload_len) break;
+        }
+    }
     if (v > kScalableVersions || scalable_capacity(v, level, family) < payload_len) {
         set_status(diag, CKEY_INVALID_ARGUMENT, "payload exceeds the selected Profile 0 version and level"); return CKEY_INVALID_ARGUMENT;
     }

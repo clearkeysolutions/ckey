@@ -20,6 +20,8 @@ export type Level = 'L' | 'M' | 'Q' | 'H' | 'U' | 'X';
  * inner-ring marks are as far apart as the outermost ring's; about 10% less
  * capacity. Readers before 0.1.0-build.110 cannot read them. */
 export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped' | 'pixel' | 'arc' | 'arc-grouped';
+/** 'auto' (the default when encoding): 'standard' for versions 1-7, 'arc-grouped' from v8. Never reported by a symbol or decoder. */
+export type LayoutChoice = Layout | 'auto';
 export type RasterPolicy = 'coverage' | 'binary' | 'hybrid';
 export type Preset = 'plain' | 'concept';
 /** Optical-safety policy carried by a style: strict refuses, adaptive repairs, override draws as given. */
@@ -35,7 +37,7 @@ export interface EncodeOptions {
   /** Error correction level, default 'M'. */
   level?: Level;
   /** Default 'standard'; 'print' is Profile 0.1; the '-grouped' forms are opt-in (build 86+ readers). */
-  layout?: Layout;
+  layout?: LayoutChoice;
 }
 
 export interface CKeySymbol {
@@ -202,7 +204,7 @@ export interface CKey {
   readonly version: string;
   readonly abiVersion: number;
   encode(payload: string | ArrayBuffer | ArrayBufferView, options?: EncodeOptions): CKeySymbol;
-  capacity(version: number, level?: Level, layout?: Layout): number;
+  capacity(version: number, level?: Level, layout?: LayoutChoice): number;
   /** The pixel-perfect lattice: side x side cells (0 background, 1 ink, 2 + i accent i) and the palette. */
   renderLattice(symbol: CKeySymbol, options?: PixelPerfectOptions): { side: number; palette: [number, number, number][]; cells: Uint8Array };
   /** Pixel-perfect RGBA pixels, (side * pxPerCell) square; every cell is whole pixels. */

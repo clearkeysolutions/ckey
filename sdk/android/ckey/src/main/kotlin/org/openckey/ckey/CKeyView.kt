@@ -28,7 +28,7 @@ class CKeyView @JvmOverloads constructor(
         set(value) { field = value; rerender() }
     var level: EccLevel = EccLevel.M
         set(value) { field = value; rerender() }
-    var layout: Layout = Layout.STANDARD
+    var layout: Layout = Layout.AUTO
         set(value) { field = value; rerender() }
     var policy: RasterPolicy = RasterPolicy.COVERAGE
         set(value) { field = value; rerender() }
