@@ -599,8 +599,11 @@ public final class CKeyFrameProcessor {
         let outcome = CKeyDecoder.scan(gray: gray, width: width, height: height, stride: stride,
                                        region: pixelRegion, payload: &payload, accumulator: nil, fast: true)
         if tracked { trackedFailures = outcome.result == nil ? trackedFailures + 1 : 0 }
+        // Only freshly located corners: a held track lags a moving code, and
+        // sites read at stale corners came out about half wrong (random) in
+        // field reports, which says nothing about how the code reads.
         keepHeatFrame(gray, width, height, stride,
-                      quad: outcome.located && outcome.quad.count == 4 ? CKeyCorners.flat(outcome.quad) : (tracked ? held?.quad : nil),
+                      quad: outcome.located && outcome.quad.count == 4 ? CKeyCorners.flat(outcome.quad) : nil,
                       fast: true)
         if tracked, outcome.result == nil, trackedFailures >= Self.fullLadderAfterFailures {
             startFullReader(gray, width, height, stride, region: pixelRegion, multiFrame: multiFrame, index: index)
