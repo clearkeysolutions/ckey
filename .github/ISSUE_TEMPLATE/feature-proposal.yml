@@ -1,0 +1,53 @@
+name: Feature proposal
+description: Propose a specific improvement to CKey or its developer tools.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for an actionable change to the project. Open-ended design ideas and research belong in [Discussions](https://github.com/clearkeysolutions/ckey/discussions). Changes to code geometry, framing, error correction, or decoding may require a format-version and specification update.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case and who is affected.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the desired behavior or interface. A sketch or example is welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Format or specification
+        - Encoder or renderer
+        - Scanner or decoder
+        - Swift SDK
+        - Web or Node SDK
+        - Android SDK
+        - .NET SDK
+        - Command-line tool
+        - Developer experience or packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What have you tried, and why does it fall short?
+    validations:
+      required: false
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and evidence
+      description: Note effects on existing codes/readers or public APIs. Link measurements or fixtures for speed, robustness, capacity, or interoperability claims.
+    validations:
+      required: false

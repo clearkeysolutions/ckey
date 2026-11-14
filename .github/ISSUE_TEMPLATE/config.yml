@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: General questions and help
+    url: https://github.com/clearkeysolutions/ckey/discussions
+    about: Ask how to use CKey, share ideas, and get help from the community.
+  - name: Research and design discussions
+    url: https://github.com/clearkeysolutions/ckey/discussions
+    about: Discuss scanner research, format tradeoffs, experiments, and early proposals.
+  - name: Report a security vulnerability privately
+    url: https://github.com/clearkeysolutions/ckey/security/advisories/new
+    about: Use private vulnerability reporting for suspected security issues.

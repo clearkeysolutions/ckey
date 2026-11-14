@@ -1,0 +1,37 @@
+name: Documentation issue
+description: Report missing, unclear, or incorrect CKey documentation.
+title: "[Docs] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a specific documentation improvement. For usage questions, start in [Discussions](https://github.com/clearkeysolutions/ckey/discussions).
+  - type: input
+    id: location
+    attributes:
+      label: Page or section
+      description: Link the page or give its repository path and heading.
+      placeholder: https://github.com/clearkeysolutions/ckey/blob/Stable-Release/README.md
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or incorrect?
+      description: Quote only the short passage needed to identify the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: Explain what the documentation should say, or link an authoritative source.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Relevant version or format
+      description: Include a software build, SDK version, or format version if the issue depends on one.
+    validations:
+      required: false
