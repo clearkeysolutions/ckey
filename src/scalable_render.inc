@@ -353,7 +353,7 @@ void draw_logo(std::vector<Rgbaf> &px, int side, const ckey_logo_image &logo, do
 // other mark is antialiased as usual.
 uint32_t lattice_dot(const ScalableLayout &L, uint32_t c) {
     const uint32_t gap = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(0.16 * c)));
-    return c <= 2 ? c : (L.family && c <= 4) ? c - 1 : c - 2 * gap;
+    return c <= 2 ? c : (!scalable_fine(L.family) && c <= 4) ? c - 1 : c - 2 * gap;
 }
 
 ckey_status render_raster(const ScalableLayout &L, const ckey_scalable_symbol &sym, const ckey_style &st,
@@ -711,7 +711,7 @@ ckey_status ckey_render_scalable_lattice(const ckey_scalable_symbol *s, const ck
     if (modules == 0) return CKEY_INVALID_ARGUMENT;
     // 0: the smallest size that decodes at every version on clean output:
     // Print family 3 (its ring dots are 0.3 of a module), Standard 6 (0.2).
-    const uint32_t c = cells_per_module ? cells_per_module : (L->family == 2 ? 2u : L->family ? 3u : 6u);
+    const uint32_t c = cells_per_module ? cells_per_module : (L->family == 2 ? 2u : scalable_fine(L->family) ? 6u : 3u);
     // The field [0, 29] is exactly c cells per module, so every grid module
     // is a whole c x c block; the quiet margin is at least the canvas's one
     // unit, rounded up to whole cells.

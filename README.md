@@ -134,6 +134,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 | [Profile 0 Format 0.27.0](spec/CKey-Format-v0.27.0.md) | The scalable family |
 | [Profile 0.1 Format 0.28.0](spec/CKey-Format-v0.28.0.md) | The print layout |
 | [Format 0.29.0](spec/CKey-Format-v0.29.0.md) and [0.30.0](spec/CKey-Format-v0.30.0.md) | Byte-grouped placement for both layouts (opt-in), and correction levels U and X |
+| [Format 0.32.0](spec/CKey-Format-v0.32.0.md) and [0.33.0](spec/CKey-Format-v0.33.0.md) | Standard with equal-arc rings, scattered and byte-grouped (opt-in): inner-ring marks as far apart as the outermost ring's, about 10% less capacity |
 | [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) | The locator, text and extended profiles |
 | [`.ckey` interchange](spec/CKey-Interchange-v1.md) | The optional `.ckey` file |
 | [Payload conventions](spec/CKey-Payload-Conventions.md) | What a reader shows and offers for each kind of payload |

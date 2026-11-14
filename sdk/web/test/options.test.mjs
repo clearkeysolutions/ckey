@@ -15,7 +15,7 @@ test('encode options', () => {
   assert.deepEqual(encodeOptions({ level: 'U', layout: 'standard-grouped' }), { version: 0, level: 4, layout: 2 });
   assert.deepEqual(encodeOptions({ version: 20, level: 'x', layout: 'Print-Grouped' }), { version: 20, level: 5, layout: 3 });
   assert.deepEqual([...LEVELS], ['L', 'M', 'Q', 'H', 'U', 'X']);
-  assert.deepEqual([...LAYOUTS], ['standard', 'print', 'standard-grouped', 'print-grouped', 'pixel']);
+  assert.deepEqual([...LAYOUTS], ['standard', 'print', 'standard-grouped', 'print-grouped', 'pixel', 'arc', 'arc-grouped']);
   assert.throws(() => encodeOptions({ level: 'Z' }), RangeError);
   assert.throws(() => encodeOptions({ layout: 'grouped' }), RangeError);
   assert.throws(() => encodeOptions({ layout: 'poster' }), RangeError);

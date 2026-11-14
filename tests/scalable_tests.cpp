@@ -10,6 +10,8 @@
 namespace {
 
 constexpr uint64_t kPrintKatV3 = 0x1908543413f369b8ull, kPrintKatV31 = 0x684c56624d3558a8ull;  // stated in spec/CKey-Format-v0.28.0.md
+constexpr uint64_t kArcKatV3 = 0x9a0d790928793db3ull, kArcKatV31 = 0x296ac7423c01b6b4ull;  // stated in spec/CKey-Format-v0.32.0.md
+constexpr uint64_t kArcGroupedKatV3 = 0xbf5acc916edc47b1ull, kArcGroupedKatV31 = 0xbd3d8d6f9c7eeadeull;  // stated in spec/CKey-Format-v0.33.0.md
 constexpr uint64_t kScalableKatV2 = 0xb97ef7acabd3c8d7ull, kScalableKatV31 = 0xc7df4dfd1c36458bull;  // stated in spec/CKey-Format-v0.27.0.md
 
 std::vector<uint8_t> pseudo(size_t n, uint32_t seed) {
@@ -70,7 +72,7 @@ int main() {
     // ---- Table invariants (both layout families) ----
     for (int f = 0; f < kScalableFamilies; ++f) for (int v = 1; v <= kScalableVersions; ++v) {
         const ScalableLayout &L = scalable_family_layout(v, f); const double p = L.pitch;
-        const double ring_limit = kScalableDialInner - (f == 0 ? 2.38 : 2.4) * p;
+        const double ring_limit = kScalableDialInner - (scalable_fine(f) ? 2.38 : 2.4) * p;
         CKEY_CHECK(L.dial_slots % 8 == 0);
         for (int S : L.ring_slots) CKEY_CHECK(S % 8 == 0);
         if (f != 2) {
@@ -88,6 +90,30 @@ int main() {
             CKEY_CHECK(annulus > 0);  // the ring zone holds grid modules
         }
         CKEY_CHECK(L.ring_key_slot() + L.ring_key_span <= L.ring_slots.back());
+        if (f == 3) {
+            // Standard arc: Standard's rings and keys, but no ring's marks are
+            // closer together than the outermost ring's, which keeps the dial's
+            // slots; the Ring Key is at 6:00; formats 0.32 and 0.33.
+            const ScalableLayout &S0 = scalable_family_layout(v, 0);
+            CKEY_CHECK(L.rings == S0.rings && L.ring_pitch == S0.ring_pitch && L.dot == S0.dot && L.dial_slots == S0.dial_slots);
+            CKEY_CHECK(L.ring_slots.back() == L.dial_slots && L.ring_key_slot() == L.dial_slots / 2);
+            const double outer = kTau * L.ring_radius(L.rings - 1) / L.ring_slots.back();
+            for (int k = 0; k < L.rings; ++k) {
+                CKEY_CHECK(kTau * L.ring_radius(k) / L.ring_slots[static_cast<size_t>(k)] >= outer - 1e-9);
+                if (k + 1 < L.rings) CKEY_CHECK(L.ring_slots[static_cast<size_t>(k)] <= L.ring_slots[static_cast<size_t>(k + 1)]);
+            }
+            CKEY_CHECK(L.format == CKEY_SCALABLE_ARC_FORMAT_VERSION && scalable_layout(v, 6).format == CKEY_SCALABLE_ARC_GROUPED_FORMAT_VERSION);
+            CKEY_CHECK(L.codeword_bytes < S0.codeword_bytes);
+            // No ring site sits on a Ray Key bearing.
+            for (const auto &n : L.nodes) if (n.kind == 2) {
+                const int S = L.ring_slots[static_cast<size_t>(n.ring)];
+                for (const int ray : {0, L.ray_key_half(), L.ray_key_three()}) {
+                    double d = std::fabs(static_cast<double>(n.slot) / S - static_cast<double>(ray) / L.dial_slots);
+                    d = std::min(d, 1 - d);
+                    CKEY_CHECK(d * S >= 0.5 - 1e-9);
+                }
+            }
+        }
         CKEY_CHECK(L.codeword_bytes <= CKEY_SCALABLE_MAX_CODEWORD_BYTES);
         if (f == 1) {
             // Print family: every mark and gap is at least about one module.
@@ -141,6 +167,43 @@ int main() {
             CKEY_CHECK(st == CKEY_OK && version == v && layout == CKEY_LAYOUT_PRINT && len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
         }
         std::printf("P0.1: all 31 versions decode at 6 px/module and are told apart from P0 by their keys\n");
+        // Standard arc (Formats 0.32 and 0.33): every version, both
+        // placements, decodes and is told apart from Standard; capacity is
+        // a little below Standard's.
+        std::printf("Standard arc payload bytes at level M (Standard):");
+        for (uint32_t v = 1; v <= kScalableVersions; ++v) {
+            const size_t a = ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD_ARC), b = ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD);
+            std::printf(" %zu(%zu)", a, b);
+            CKEY_CHECK(a <= b && a == ckey_scalable_capacity(v, CKEY_ECC_M, CKEY_LAYOUT_STANDARD_ARC_GROUPED));
+        }
+        std::printf("\n");
+        for (const ckey_scalable_layout arc : {CKEY_LAYOUT_STANDARD_ARC, CKEY_LAYOUT_STANDARD_ARC_GROUPED})
+        for (uint32_t v = 1; v <= kScalableVersions; ++v) {
+            const auto payload = pseudo(ckey_scalable_capacity(v, CKEY_ECC_M, arc), 5000u + v + 100u * arc);
+            CKEY_CHECK(ckey_encode_scalable(payload.data(), payload.size(), v, CKEY_ECC_M, arc, &ps, &pd) == CKEY_OK && ps.layout == static_cast<uint32_t>(arc));
+            const ScalableLayout &L = scalable_layout(static_cast<int>(v), arc);
+            const double unit = 6.0 / L.pitch; const int side = static_cast<int>(std::ceil(31 * unit));
+            const auto px = svgtest::rasterize(svgtest::parse(render(ps)), side, side, 3);
+            const double k = static_cast<double>(side) / 31.0, q[8] = {k, k, 30 * k, k, 30 * k, 30 * k, k, 30 * k};
+            std::vector<uint8_t> out(65535); size_t len = 0; uint32_t version = 0, layout = 9;
+            const ckey_status st = ckey_decode_scalable_gray8(px.data(), side, side, side, q, out.data(), out.size(), &len, &version, &layout, &pd);
+            if (st != CKEY_OK || version != v || layout != static_cast<uint32_t>(arc)) std::printf("arc %d v%u: status %d version %u layout %u (%s)\n", arc, v, st, version, layout, pd.message);
+            CKEY_CHECK(st == CKEY_OK && version == v && layout == static_cast<uint32_t>(arc) && len == payload.size() && std::equal(payload.begin(), payload.end(), out.begin()));
+        }
+        std::printf("Standard arc: all 31 versions decode at 6 px/module in both placements and are told apart from Standard\n");
+        // Conformance vectors (same method as Profile 0's), payload "CKey renderer test" at level M.
+        const std::string kat = "CKey renderer test";
+        const std::array<std::array<uint64_t, 2>, 2> expected_arc = {{{kArcKatV3, kArcKatV31}, {kArcGroupedKatV3, kArcGroupedKatV31}}};
+        for (int g = 0; g < 2; ++g) for (int j = 0; j < 2; ++j) {
+            const uint32_t version = j ? 31u : 3u; const ckey_scalable_layout arc = g ? CKEY_LAYOUT_STANDARD_ARC_GROUPED : CKEY_LAYOUT_STANDARD_ARC;
+            CKEY_CHECK(ckey_encode_scalable(reinterpret_cast<const uint8_t *>(kat.data()), kat.size(), version, CKEY_ECC_M, arc, &ps, &pd) == CKEY_OK);
+            const ScalableLayout &L = scalable_layout(static_cast<int>(version), arc);
+            uint64_t hash = 0xcbf29ce484222325ull;
+            const auto fnv = [&](uint8_t b) { hash = (hash ^ b) * 0x100000001b3ull; };
+            for (size_t i = 0; i < L.nodes.size(); ++i) { for (int k = 0; k < 4; ++k) fnv(static_cast<uint8_t>(L.nodes[i].id >> (8 * k))); fnv(scalable_site_value(L, &ps, i) ? 1 : 0); }
+            std::printf("Format 0.%u v%u conformance hash %016llx\n", L.format, version, static_cast<unsigned long long>(hash));
+            CKEY_CHECK(hash == expected_arc[static_cast<size_t>(g)][static_cast<size_t>(j)]);
+        }
     }
 
     // ---- Capacity grows smoothly ----

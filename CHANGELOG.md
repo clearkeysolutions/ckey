@@ -10,6 +10,19 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.110 — 2026-11-14
+
+* **Formats 0.32 and 0.33: Standard with equal-arc rings** ([spec](spec/CKey-Format-v0.32.0.md), [grouped](spec/CKey-Format-v0.33.0.md); `CKEY_LAYOUT_STANDARD_ARC` 5, `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6; `CKEY_HAS_ARC_LAYOUT`). Opt-in: the default layout is still Format 0.27.
+  * **Why.** Standard gives every ring the dial's slot count at equal angles, so inner-ring marks sit up to twice as close as the outermost ring's (v21: 0.074 units apart against 0.149, module pitch 0.25). The owner's scan reports showed ring errors falling steadily with radius, from about 21% inside r = 4.3 to about 1% on the outermost rings, while the grid read at 0.1–0.4%. Because each codeword byte's 8 sites are scattered, 4% wrong sites spoiled 26–30% of bytes. The worst Reed–Solomon block had 77–86 bad bytes against 35 correctable, and more than half of the bad bytes were bad only because of the inner rings. Replaying those frames with the inner rings reading as well as the rest, the code reads at 3.2 s instead of 8.1 s.
+  * **Geometry.** New family 3 ("Standard arc"). Grid, dial, marks and keys are Standard's. Ring k has 8·⌊D·r_k/r_outer/8⌋ slots; the outermost keeps the dial's D. Ring slots on the Ray Key bearings are the nearest by angle. The Ring Key moves to 6:00 so the version fit tells the family from Standard. Placement and whitening keys are "CKP3", "CKG3" and "CKW3".
+  * **Capacity** at level M is 11–12% below Standard for large versions (v21: 959 against 1,085 bytes; v31: 4,100 against 4,619) and more for small ones (v1: 21 against 27).
+  * **Reader.** Tries the family beside Formats 0.27–0.31 and reports layouts 5 and 6. All 31 versions in both placements decode from rendered images at 6 px/module, with the right layout reported (`scalable_tests`).
+  * **Renderer** draws the family with Standard's marks; the lattice minimum is 6 cells per module as for Standard.
+  * **Fixed:** a byte-grouped layout found its scattered base by family number instead of layout number. This was harmless until a family's number differed from its layout's. Decode and encode messages name the family ("Profile 0 (arc)", "(pixel)") instead of calling every odd layout "print".
+  * **SDKs and CLI:** web `'arc'` and `'arc-grouped'`, Swift `.standardArc` and `.standardArcGrouped` (`isArc`), Android `STANDARD_ARC`, `STANDARD_ARC_GROUPED` and the missing `PIXEL`, and CLI `--layout pixel|arc|arc-grouped`.
+  * **Measured so far** (synthetic camera with a smooth renderer: Gaussian blur σ 1 px, 3% noise, fast scan, smallest width where 4 of 5 trials read). At 300 bytes: Standard v13 246 px, arc v14 281 px, arc grouped 270 px. At 900 bytes: Standard v20 483 px, arc v21 495 px, arc grouped 507 px. In this smooth model the rings are not the bottleneck, so arc's higher version costs a little. The field codes were drawn pixel-perfect on a screen, where Standard's innermost ring slots fall 1.8 screen pixels apart at 6 cells per module (arc: 3.6); that model is being measured next. Not the default until it, and a field test, show a gain.
+  * Swift not compiled here (parsed only); the web wasm was not rebuilt here.
+
 ## 0.1.0-build.109 — 2026-11-13
 
 * **Previews can be drawn below the scannable minimum** instead of growing past their space. A dense code (3,001 bytes, Standard) needs 6 cells per module, about 1,300 device pixels; its preview overflowed the box on the owner's screen.

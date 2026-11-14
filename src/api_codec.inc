@@ -268,7 +268,7 @@ ckey_status ckey_encode_scalable(const uint8_t *payload, size_t payload_len, uin
     // Byte-interleave the blocks so local damage spreads across all of them.
     size_t pos = 0;
     for (size_t j = 0; j < blocks.front().n; ++j) for (size_t b = 0; b < blocks.size(); ++b) if (j < blocks[b].n) out->codeword[pos++] = coded[b][j];
-    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0%s v%d level %c; %zu RS blocks%s", (family & 1) ? ".1 (print)" : "", v, kScalableLevelNames[level], blocks.size(), L.grouped ? ", grouped" : "");
+    char message[96]; std::snprintf(message, sizeof(message), "encoded Profile 0%s v%d level %c; %zu RS blocks%s", scalable_family_label(L.family), v, kScalableLevelNames[level], blocks.size(), L.grouped ? ", grouped" : "");
     set_status(diag, CKEY_OK, message);
     return CKEY_OK;
 }
@@ -311,7 +311,7 @@ ckey_status ckey_decode_scalable_soft(const uint8_t *codeword, const uint8_t *re
         if (out_capacity < length || (!out_payload && length)) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "Profile 0 payload exceeds output capacity"); return CKEY_INSUFFICIENT_BUFFER; }
         if (length) std::memcpy(out_payload, framed.data() + kScalableHeaderBytes, length);
         *out_payload_len = length;
-        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0%s v%u level %c%s", (family & 1) ? ".1 (print)" : "", version, kScalableLevelNames[level], L.grouped ? ", grouped" : "");
+        char message[96]; std::snprintf(message, sizeof(message), "decoded Profile 0%s v%u level %c%s", scalable_family_label(L.family), version, kScalableLevelNames[level], L.grouped ? ", grouped" : "");
         set_status(diag, CKEY_OK, message); if (diag) { diag->corrected_symbols = corrections; diag->erasures_used = erased; }
         return CKEY_OK;
     };

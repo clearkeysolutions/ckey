@@ -74,11 +74,21 @@ public enum CKeyLayout: Int, Sendable, CaseIterable {
     /// pixels per module every data site is a distinct pixel. Readers before
     /// 0.1.0-build.98 cannot read it.
     case pixel = 4
+    /// Format 0.32: the standard geometry with equal-arc rings. Standard
+    /// gives every ring the dial's slot count, so inner-ring marks sit up to
+    /// twice as close together and blur first; here each ring's slot count
+    /// scales with its radius. About 10% less capacity. Readers before
+    /// 0.1.0-build.110 cannot read it.
+    case standardArc = 5
+    /// Format 0.33: the equal-arc geometry with byte-grouped placement.
+    case standardArcGrouped = 6
 
     /// True for the print geometry ("P0.1"), grouped or not.
     public var isPrint: Bool { self == .print || self == .printGrouped }
     /// True for byte-grouped placement (Formats 0.29 and 0.30).
-    public var isGrouped: Bool { self == .standardGrouped || self == .printGrouped }
+    public var isGrouped: Bool { self == .standardGrouped || self == .printGrouped || self == .standardArcGrouped }
+    /// True for the equal-arc ring geometry (Formats 0.32 and 0.33).
+    public var isArc: Bool { self == .standardArc || self == .standardArcGrouped }
 }
 
 /// The optical profile a symbol was read as.

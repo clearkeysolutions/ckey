@@ -16,7 +16,10 @@ export type Level = 'L' | 'M' | 'Q' | 'H' | 'U' | 'X';
  * (Format 0.31, experimental, from 0.1.0-build.98) puts the ring zone's data on
  * grid modules so it can be drawn pixel-perfect at one or two pixels per module.
  */
-export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped' | 'pixel';
+/** 'arc' (Format 0.32) and 'arc-grouped' (0.33): Standard with equal-arc rings, so
+ * inner-ring marks are as far apart as the outermost ring's; about 10% less
+ * capacity. Readers before 0.1.0-build.110 cannot read them. */
+export type Layout = 'standard' | 'print' | 'standard-grouped' | 'print-grouped' | 'pixel' | 'arc' | 'arc-grouped';
 export type RasterPolicy = 'coverage' | 'binary' | 'hybrid';
 export type Preset = 'plain' | 'concept';
 /** Optical-safety policy carried by a style: strict refuses, adaptive repairs, override draws as given. */

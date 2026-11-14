@@ -5,7 +5,7 @@
 // Indexed by the core's codes (ckey_ecc_level, ckey_scalable_layout). U, X and
 // the grouped layouts need readers from 0.1.0-build.86 on, so they are opt-in.
 export const LEVELS = Object.freeze(['L', 'M', 'Q', 'H', 'U', 'X']);
-export const LAYOUTS = Object.freeze(['standard', 'print', 'standard-grouped', 'print-grouped', 'pixel']);
+export const LAYOUTS = Object.freeze(['standard', 'print', 'standard-grouped', 'print-grouped', 'pixel', 'arc', 'arc-grouped']);
 export const RASTER_POLICIES = Object.freeze(['coverage', 'binary', 'hybrid']);
 export const PRESETS = Object.freeze(['plain', 'concept']);
 export const STYLE_POLICIES = Object.freeze(['strict', 'adaptive', 'override']);
@@ -63,7 +63,7 @@ export function payloadBytes(input) {
   throw new TypeError('payload must be a string, ArrayBuffer or typed array');
 }
 
-/** { version 0..31 (0 = auto), level 'L'|'M'|'Q'|'H'|'U'|'X', layout 'standard'|'print'|'standard-grouped'|'print-grouped'|'pixel' } -> numeric codes. */
+/** { version 0..31 (0 = auto), level 'L'|'M'|'Q'|'H'|'U'|'X', layout 'standard'|'print'|'standard-grouped'|'print-grouped'|'pixel'|'arc'|'arc-grouped' } -> numeric codes. */
 export function encodeOptions(o) {
   o = opts(o, 'encode');
   return {

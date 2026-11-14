@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.109"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.110"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -470,6 +470,9 @@ CKEY_API ckey_status ckey_camera_advise_gray8(const uint8_t *gray, size_t width,
 #define CKEY_SCALABLE_PRINT_GROUPED_FORMAT_VERSION 30u
 #define CKEY_SCALABLE_PIXEL_FORMAT_VERSION 31u
 #define CKEY_HAS_PIXEL_LAYOUT 1
+#define CKEY_SCALABLE_ARC_FORMAT_VERSION 32u
+#define CKEY_SCALABLE_ARC_GROUPED_FORMAT_VERSION 33u
+#define CKEY_HAS_ARC_LAYOUT 1
 /* Profile 0 layout families. STANDARD is Format 0.27. PRINT (Format 0.28,
  * "P0.1") keeps every mark and gap at least about one module (equal-arc ring
  * slots, larger dots, wider and fewer rays) so symbols survive small prints:
@@ -487,9 +490,15 @@ typedef enum ckey_scalable_layout {
     CKEY_LAYOUT_PRINT = 1,             /* Format 0.28 */
     CKEY_LAYOUT_STANDARD_GROUPED = 2,  /* Format 0.29: STANDARD geometry, byte-grouped */
     CKEY_LAYOUT_PRINT_GROUPED = 3,     /* Format 0.30: PRINT geometry, byte-grouped */
-    CKEY_LAYOUT_PIXEL = 4              /* Format 0.31 (experimental): PIXEL geometry. The ring zone's
+    CKEY_LAYOUT_PIXEL = 4,             /* Format 0.31 (experimental): PIXEL geometry. The ring zone's
                                           data sites are grid modules, so every data site is a distinct
                                           cell at one cell per module (see ckey_render_scalable_lattice). */
+    CKEY_LAYOUT_STANDARD_ARC = 5,      /* Format 0.32: STANDARD geometry with equal-arc rings. STANDARD gives
+                                          every ring the dial's slot count, so inner-ring marks sit up to
+                                          twice as close as the outermost ring's and blur first; here each
+                                          ring's slots scale with its radius (the outermost keeps the dial's
+                                          count). About 10% less capacity. The Ring Key is at 6:00. */
+    CKEY_LAYOUT_STANDARD_ARC_GROUPED = 6 /* Format 0.33: STANDARD_ARC geometry, byte-grouped */
 } ckey_scalable_layout;
 #define CKEY_SCALABLE_VERSION_COUNT 31u
 #define CKEY_SCALABLE_MAX_CODEWORD_BYTES 8192u

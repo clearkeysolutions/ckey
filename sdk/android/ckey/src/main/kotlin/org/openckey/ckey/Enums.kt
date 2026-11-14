@@ -42,12 +42,23 @@ enum class Layout(val code: Int) {
      */
     STANDARD_GROUPED(2),
     /** Format 0.30: [PRINT]'s geometry and capacity, byte-grouped. Readers before 0.1.0-build.86 cannot read it; opt-in. */
-    PRINT_GROUPED(3);
+    PRINT_GROUPED(3),
+    /** Format 0.31 (experimental): the pixel geometry. Readers before 0.1.0-build.98 cannot read it. */
+    PIXEL(4),
+    /**
+     * Format 0.32: [STANDARD]'s geometry with equal-arc rings (inner-ring marks as far apart as the
+     * outermost ring's), about 10% less capacity. Readers before 0.1.0-build.110 cannot read it; opt-in.
+     */
+    STANDARD_ARC(5),
+    /** Format 0.33: [STANDARD_ARC]'s geometry, byte-grouped. Opt-in. */
+    STANDARD_ARC_GROUPED(6);
 
     /** True for the print geometry ("P0.1"): [PRINT] and [PRINT_GROUPED]. */
     val isPrint: Boolean get() = this == PRINT || this == PRINT_GROUPED
     /** True for byte-grouped placement: [STANDARD_GROUPED] and [PRINT_GROUPED]. */
-    val isGrouped: Boolean get() = this == STANDARD_GROUPED || this == PRINT_GROUPED
+    val isGrouped: Boolean get() = this == STANDARD_GROUPED || this == PRINT_GROUPED || this == STANDARD_ARC_GROUPED
+    /** True for the equal-arc ring geometry: [STANDARD_ARC] and [STANDARD_ARC_GROUPED]. */
+    val isArc: Boolean get() = this == STANDARD_ARC || this == STANDARD_ARC_GROUPED
 
     companion object {
         @JvmStatic fun fromCode(code: Int): Layout = entries.firstOrNull { it.code == code }
