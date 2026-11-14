@@ -18,7 +18,7 @@ With scattered placement a weak zone (the inner rings, a glare spot) spoils a fe
 
 ## Compatibility
 
-As Format 0.32: readers before 0.1.0-build.110 cannot read this format, so encoders emit it only when asked.
+Readers before 0.1.0-build.110 cannot read this format. From 0.1.0-build.114 it is what the SDKs' automatic layout (`CKEY_LAYOUT_AUTO`, their default) emits for versions 8 to 31; the C API emits it when asked or when given `CKEY_LAYOUT_AUTO`.
 
 ## Conformance vectors
 

@@ -47,7 +47,8 @@ enum class Layout(val code: Int) {
     PIXEL(4),
     /**
      * Format 0.32: [STANDARD]'s geometry with equal-arc rings (inner-ring marks as far apart as the
-     * outermost ring's), about 10% less capacity. Readers before 0.1.0-build.110 cannot read it; opt-in.
+     * outermost ring's), about 10% less capacity. Readers before 0.1.0-build.110 cannot read it. [AUTO], the
+     * default, uses [STANDARD_ARC_GROUPED] from v8; this scattered form only when asked.
      */
     STANDARD_ARC(5),
     /** Format 0.33: [STANDARD_ARC]'s geometry, byte-grouped. Opt-in. */

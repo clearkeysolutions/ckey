@@ -10,6 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.117 — 2026-11-14
+
+* **Spec and comment corrections.**
+  * Format 0.32: at v21 the innermost ring has 136 slots, not 144 (0.157 units apart).
+  * Formats 0.32 and 0.33 describe the automatic default (build 114) instead of "only when asked".
+  * Swift `CKeyLayout.standard` and Android `STANDARD_ARC` doc comments match the Auto default.
+  * Finding F-000004 (findings.openckey.org) reports the scan heatmaps, the inner-ring failure, the equal-arc formats and the two reader fixes.
+
 ## 0.1.0-build.116 — 2026-11-14
 
 * **Documentation for Arc and the automatic layout; no code change.** README, `docs/OVERVIEW.md` (a layout table with every name per SDK), the release and versioning map (Formats 0.32/0.33 at build 110, the automatic default at build 114, and the pixel layout at build 98), implementation status, `CONTEXT.md`, and the Swift, web, Android and .NET READMEs now describe Formats 0.32/0.33, `CKEY_LAYOUT_AUTO` as the default in Swift, web, Android and the CLI, Arc's capacity, and that readers before build 110 cannot read Arc. The .NET README says plainly that .NET has neither Pixel, Arc nor Auto (default Standard) and reports decoded Pixel and Arc codes as `Standard`; it also named ABI 5 where the assembly checks ABI 4.

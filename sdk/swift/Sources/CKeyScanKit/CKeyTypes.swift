@@ -57,7 +57,8 @@ public struct CKeyError: Error, Equatable, CustomStringConvertible {
 
 /// Profile 0 layout family.
 public enum CKeyLayout: Int, Sendable, CaseIterable {
-    /// Format 0.27: the default screen and print layout.
+    /// Format 0.27: the Standard layout, which the automatic default uses
+    /// for versions 1-7 (`CKeySymbol.encode(layout: nil)`).
     case standard = 0
     /// Format 0.28 ("P0.1"): larger marks and gaps for small prints, at a
     /// lower capacity per version.

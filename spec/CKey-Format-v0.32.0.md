@@ -45,11 +45,11 @@ About 10% below Format 0.27 for large versions, more for small ones. Payload byt
 
 ## Appearance
 
-The frame, finders, grid, dial and mark shapes are Format 0.27's. Inner rings carry fewer, longer marks (at v21 the innermost ring has 144 slots instead of 288), so the ring band has one grain from the inside out.
+The frame, finders, grid, dial and mark shapes are Format 0.27's. Inner rings carry fewer, longer marks (at v21 the innermost ring has 136 slots instead of 288, 0.157 units apart), so the ring band has one grain from the inside out.
 
 ## Compatibility
 
-Readers before 0.1.0-build.110 cannot read this format, so encoders emit it only when asked. A reader that supports it tries this family beside Formats 0.27 to 0.31 and reports layout 5.
+Readers before 0.1.0-build.110 cannot read this format. From 0.1.0-build.114 the SDKs' automatic layout (`CKEY_LAYOUT_AUTO`, their default) emits Format 0.33 for versions 8 to 31 and Format 0.27 below; Format 0.32 itself is emitted only when asked. A reader that supports it tries this family beside Formats 0.27 to 0.31 and reports layout 5.
 
 ## Conformance vectors
 
