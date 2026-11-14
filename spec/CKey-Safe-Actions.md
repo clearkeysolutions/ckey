@@ -12,7 +12,7 @@ The format, the verification rules and the official SDKs make sure an action is 
 
 ## Terms
 
-- **Issuer:** the site that creates and signs Safe Actions, named by its DNS name, for example `citeory.com`. It holds an Ed25519 private key on its own server and never shares it.
+- **Issuer:** the site that creates and signs Safe Actions, named by its DNS name, for example `citeory.com`. It holds a signing key, Ed25519 on its own server or ES256 (ECDSA P-256) in a key service, and never shares it.
 - **Receiving app:** the app that runs the action, named by an app ID such as `com.viadere`. It registers which actions it accepts, from which issuers, and with which scope.
 - **Scope:**
   - **same-device:** the result stays on the device that scanned, inside the receiving app. Examples: open a screen, look up an item, add something to a list.
@@ -44,9 +44,12 @@ All integers are big-endian.
 | issued_at | u64 | Unix seconds |
 | expires_at | u64 | Unix seconds, later than `issued_at` |
 | params | u16 length + bytes | at most 1024 bytes; UTF-8 JSON is recommended |
-| signature | 64 bytes | Ed25519 (RFC 8032) |
+| signature | 64 bytes | Ed25519 (RFC 8032), or ES256: ECDSA P-256 raw `r ‖ s` (see [issuer keys](#issuer-keys)) |
 
-The signature covers the ASCII text `CKey Safe Action v1`, one zero byte, then every envelope byte before the signature. Verifiers reject a signature whose scalar S is not below the group order (RFC 8032 section 5.1.7). Nothing may follow the signature.
+The signature covers the **signing input**: the ASCII text `CKey Safe Action v1`, one zero byte, then every envelope byte before the signature. Nothing may follow the signature. The envelope does not name the algorithm; the signing key does (its `alg` in the issuer's key file, or in the receiving app's pinned keys):
+
+- **Ed25519** (RFC 8032) over the signing input. Verifiers reject a signature whose scalar S is not below the group order (RFC 8032 section 5.1.7).
+- **ES256**: ECDSA over the NIST P-256 curve (FIPS 186-5) with SHA-256 of the signing input. The 64 bytes are `r ‖ s`, each a 32-byte big-endian integer with 1 ≤ r, s < n. **s must be in the low half (s ≤ n/2)**; verifiers reject a high-S signature, so each envelope has exactly one valid signature value. Issuers whose key service returns a DER signature, or a high-S one, convert it (`ckey_es256_signature_from_der` does both).
 
 ## Issuer keys
 
@@ -60,12 +63,14 @@ https://<issuer>/.well-known/ckey-safe-actions.json
 {
   "issuer": "citeory.com",
   "keys": [
-    { "id": "2026-11", "alg": "Ed25519", "public_key": "<64 hex digits>", "not_after": "2027-11-01T00:00:00Z" }
+    { "id": "2026-11", "alg": "Ed25519", "public_key": "<64 hex digits>", "not_after": "2027-11-01T00:00:00Z" },
+    { "id": "vault-p256-1", "alg": "ES256", "public_key": "<66 or 130 hex digits>", "not_after": "2027-11-01T00:00:00Z" }
   ],
   "request_info": "https://citeory.com/api/ckey/requests/{request_id}"
 }
 ```
 
+- `alg` is `Ed25519` (`public_key`: the 32-byte key, 64 hex digits) or `ES256` (`public_key`: the SEC 1 encoding of the P-256 point, 33 bytes compressed (`02`/`03` prefix, 66 hex digits) or 65 bytes uncompressed (`04` prefix, 130 hex digits)). A reader ignores keys with any other `alg`, and a key whose point is not on P-256 is invalid. An issuer may publish keys of both algorithms; each Safe Action is verified with the key its `key_id` names.
 - A key is bound to the issuer by where it is published: only whoever controls `citeory.com` can publish keys for it.
 - A receiving app may instead **pin** keys in its own code. Pinned keys are preferred for sign-in and payments.
 - To rotate a key, publish the new one beside the old, start signing with it, then remove the old one. To revoke a compromised key, remove it at once. Readers cache the file for at most one hour.
@@ -107,7 +112,8 @@ A reader built on an official CKey SDK does exactly this; any other reader claim
 
 ## What an issuer must do
 
-- Keep the private key on the server. Never put it in a page, an app, or a code.
+- Keep the private key on the server, or in a key service that never releases it (ES256). Never put it in a page, an app, or a code.
+- **Signing with a key service (ES256).** Build the signing input (`ckey_safe_action_signing_input`, or `ckey action signing-input`), ask the service for an ECDSA P-256 SHA-256 signature over it (or over its SHA-256 digest, if the service takes digests), convert the returned signature to low-S `r ‖ s` (`ckey_es256_signature_from_der` takes the DER most services return), then build the payload (`ckey_safe_action_assemble`, or `ckey action assemble`) and verify it once with the public key before publishing it.
 - Give every Safe Action a fresh `request_id`, and accept each one once.
 - Keep lifetimes short: a minute or two for sign-in, at most an hour for anything.
 - For cross-device actions, serve `request_info` and accept an approval only from the receiving app's backend, for a pending request, once.
@@ -126,7 +132,7 @@ A reader built on an official CKey SDK does exactly this; any other reader claim
 
 ## Conformance
 
-`tests/vectors/safe-actions-v1.json` holds envelopes made by an implementation independent of the C core (`tools/safe_actions_vectors.mjs`), each with the verdict a conforming verifier must reach: `ok`, `integrity` (bad signature), `expired` (out of time or too long-lived), or `invalid` (malformed). The core's tests check every one. A reader may describe itself as supporting CKey Safe Actions only if it reaches every verdict, and follows [what a reader must do](#what-a-reader-must-do).
+`tests/vectors/safe-actions-v1.json` (Ed25519) and `tests/vectors/safe-actions-es256-v1.json` (ES256, including a high-S signature, a compressed key and a point off the curve) hold envelopes made by an implementation independent of the C core (`tools/safe_actions_vectors.mjs`, with Node's own Ed25519 and P-256), each with the verdict a conforming verifier must reach: `ok`, `integrity` (bad signature), `expired` (out of time or too long-lived), or `invalid` (malformed). The core's tests check every one. A reader may describe itself as supporting CKey Safe Actions only if it reaches every verdict, and follows [what a reader must do](#what-a-reader-must-do).
 
 ## Tools
 
@@ -135,7 +141,13 @@ ckey action keygen --out issuer.key
 ckey action public-key --key issuer.key
 ckey action sign --key issuer.key --issuer citeory.com --app com.viadere --action signin.request \
      --key-id 2026-11 --request sess-41fd0a9be2c74 --scope cross-device --ttl 120
-ckey action verify --payload 'ckey-action:1:…' --public-key <hex>
+ckey action verify --payload 'ckey-action:1:…' --public-key <hex>   # Ed25519 (64 hex) or ES256 (66/130 hex)
+
+# ES256 with a key service that never releases the key:
+ckey action signing-input --issuer viadere.com --app com.viadere --action signin.request \
+     --key-id vault-p256-1 --request sess-0123456789ab --scope cross-device --ttl 120 --now 1794000000 > input.hex
+#   ... the key service signs the bytes in input.hex (ECDSA P-256, SHA-256) and returns DER ...
+ckey action assemble <the same fields and --now> --der-signature <hex> --public-key <66 hex>
 ```
 
-The C ABI: `ckey_is_safe_action`, `ckey_safe_action_parse`, `ckey_safe_action_verify`, `ckey_safe_action_sign`, `ckey_ed25519_public_key` ([`ckey.h`](../include/ckey/ckey.h)).
+The C ABI: `ckey_is_safe_action`, `ckey_safe_action_parse`, `ckey_safe_action_verify` (Ed25519), `ckey_safe_action_verify_key` (Ed25519 or ES256), `ckey_safe_action_sign` (Ed25519 from a seed), `ckey_safe_action_signing_input` and `ckey_safe_action_assemble` (signing elsewhere), `ckey_es256_signature_from_der`, `ckey_ed25519_public_key` ([`ckey.h`](../include/ckey/ckey.h); ES256 from 0.1.0-build.118, `CKEY_HAS_ES256`).

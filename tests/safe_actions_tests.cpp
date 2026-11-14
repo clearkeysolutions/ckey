@@ -95,8 +95,12 @@ void test_vectors(const char *path) {
         const std::vector<uint8_t> key = hex(v["public_key"].str);
         auto out = std::make_unique<ckey_safe_action>();
         ckey_diagnostics diag{};
-        const ckey_status st = ckey_safe_action_verify(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), key.data(),
-                                                       static_cast<uint64_t>(v["now"].num), static_cast<uint32_t>(v["max_lifetime"].num), out.get(), &diag);
+        const bool es = v["alg"].str == "ES256";
+        const ckey_status st = es ? ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), CKEY_SAFE_ACTION_ES256,
+                                                                key.data(), key.size(), static_cast<uint64_t>(v["now"].num),
+                                                                static_cast<uint32_t>(v["max_lifetime"].num), out.get(), &diag)
+                                  : ckey_safe_action_verify(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), key.data(),
+                                                            static_cast<uint64_t>(v["now"].num), static_cast<uint32_t>(v["max_lifetime"].num), out.get(), &diag);
         const std::string &expect = v["expect"].str;
         const bool ok = (expect == "ok" && st == CKEY_OK) || (expect == "integrity" && st == CKEY_INTEGRITY_FAILURE) ||
                         (expect == "expired" && st == CKEY_EXPIRED) || (expect == "invalid" && st == CKEY_INVALID_ARGUMENT) ||
@@ -113,8 +117,86 @@ void test_vectors(const char *path) {
         }
         ++checked;
     }
-    CKEY_CHECK(checked >= 20);
-    std::printf("safe actions: %d vectors\n", checked);
+    CKEY_CHECK(checked >= 9);
+    std::printf("safe actions: %d vectors in %s\n", checked, path);
+}
+
+// ES256 issuing without the private key: the signing input and assembly
+// rebuild a payload signed elsewhere byte for byte, and DER signatures (as key
+// services return) convert to raw r || s with s made low.
+void test_es256_issuing(const char *path) {
+    std::ifstream f(path);
+    CKEY_CHECK(f.good());
+    std::stringstream ss; ss << f.rdbuf();
+    const std::string text = ss.str();
+    Reader r{text};
+    const Json root = r.value();
+    const Json *valid = nullptr;
+    for (const Json &v : root["vectors"].arr) if (v["expect"].str == "ok") { valid = &v; break; }
+    CKEY_CHECK(valid != nullptr);
+    const std::string &payload = (*valid)["payload"].str;
+    const std::vector<uint8_t> key = hex((*valid)["public_key"].str);
+    auto fields = std::make_unique<ckey_safe_action>();
+    ckey_diagnostics diag{};
+    CKEY_CHECK(ckey_safe_action_parse(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), fields.get(), &diag) == CKEY_OK);
+    // The signature is the envelope's last 64 bytes.
+    std::vector<uint8_t> env;
+    {
+        const std::string b64 = payload.substr(std::strlen("ckey-action:1:"));
+        uint32_t acc = 0; int bits = 0;
+        for (char c : b64) {
+            const int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 : c == '-' ? 62 : 63;
+            acc = (acc << 6) | static_cast<uint32_t>(v); bits += 6;
+            if (bits >= 8) { bits -= 8; env.push_back(static_cast<uint8_t>(acc >> bits)); }
+        }
+    }
+    const uint8_t *sig = env.data() + env.size() - 64;
+    size_t need = 0;
+    CKEY_CHECK(ckey_safe_action_signing_input(fields.get(), nullptr, 0, &need, &diag) == CKEY_INSUFFICIENT_BUFFER);
+    std::vector<uint8_t> input(need);
+    CKEY_CHECK(ckey_safe_action_signing_input(fields.get(), input.data(), input.size(), &need, &diag) == CKEY_OK);
+    const char context[] = "CKey Safe Action v1";
+    CKEY_CHECK(need == sizeof(context) + env.size() - 64 && std::memcmp(input.data(), context, sizeof(context)) == 0 &&
+               std::memcmp(input.data() + sizeof(context), env.data(), env.size() - 64) == 0);
+    std::vector<char> rebuilt(payload.size() + 1);
+    CKEY_CHECK(ckey_safe_action_assemble(fields.get(), sig, rebuilt.data(), rebuilt.size(), &need, &diag) == CKEY_OK);
+    CKEY_CHECK(need == payload.size() && payload == rebuilt.data());
+    // DER round trip, including a high-S signature normalised to the same raw form.
+    const auto der_of = [](const uint8_t *rs) {
+        std::vector<uint8_t> out = {0x30, 0};
+        for (int part = 0; part < 2; ++part) {
+            const uint8_t *v = rs + 32 * part; size_t i = 0;
+            while (i < 31 && v[i] == 0) ++i;
+            std::vector<uint8_t> n(v + i, v + 32);
+            if (n[0] & 0x80) n.insert(n.begin(), 0);
+            out.push_back(0x02); out.push_back(static_cast<uint8_t>(n.size())); out.insert(out.end(), n.begin(), n.end());
+        }
+        out[1] = static_cast<uint8_t>(out.size() - 2);
+        return out;
+    };
+    uint8_t raw[64];
+    const std::vector<uint8_t> der = der_of(sig);
+    CKEY_CHECK(ckey_es256_signature_from_der(der.data(), der.size(), raw) == CKEY_OK && std::memcmp(raw, sig, 64) == 0);
+    // n - s (high-S) as DER converts back to the low-S signature.
+    static const uint8_t n[32] = {0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xbc,0xe6,0xfa,0xad,0xa7,0x17,0x9e,0x84,0xf3,0xb9,0xca,0xc2,0xfc,0x63,0x25,0x51};
+    uint8_t high[64]; std::memcpy(high, sig, 32);
+    int borrow = 0;
+    for (int i = 31; i >= 0; --i) { int d = n[i] - sig[32 + i] - borrow; borrow = d < 0; high[32 + i] = static_cast<uint8_t>(d + (borrow ? 256 : 0)); }
+    const std::vector<uint8_t> high_der = der_of(high);
+    CKEY_CHECK(ckey_es256_signature_from_der(high_der.data(), high_der.size(), raw) == CKEY_OK && std::memcmp(raw, sig, 64) == 0);
+    // ... while the raw high-S signature itself is refused.
+    CKEY_CHECK(ckey_safe_action_assemble(fields.get(), high, rebuilt.data(), rebuilt.size(), &need, &diag) == CKEY_OK);
+    auto out = std::make_unique<ckey_safe_action>();
+    CKEY_CHECK(ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(rebuilt.data()), need, CKEY_SAFE_ACTION_ES256, key.data(), key.size(),
+                                           static_cast<uint64_t>((*valid)["now"].num), 600, out.get(), &diag) == CKEY_INTEGRITY_FAILURE);
+    // Malformed DER and wrong key lengths are refused.
+    const uint8_t junk[] = {0x30, 0x06, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01};
+    CKEY_CHECK(ckey_es256_signature_from_der(junk, sizeof junk, raw) == CKEY_INVALID_ARGUMENT);
+    CKEY_CHECK(ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), CKEY_SAFE_ACTION_ES256, key.data(), 32,
+                                           0, 600, out.get(), &diag) == CKEY_INVALID_ARGUMENT);
+    CKEY_CHECK(ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), static_cast<ckey_safe_action_alg>(9), key.data(), key.size(),
+                                           0, 600, out.get(), &diag) == CKEY_INVALID_ARGUMENT);
+    std::puts("safe actions: ES256 signing input, assembly, DER conversion and low-S");
 }
 
 void test_round_trip() {
@@ -173,5 +255,7 @@ int main(int argc, char **argv) {
     test_rfc8032();
     test_round_trip();
     test_vectors(argc > 1 ? argv[1] : "tests/vectors/safe-actions-v1.json");
+    test_vectors(argc > 2 ? argv[2] : "tests/vectors/safe-actions-es256-v1.json");
+    test_es256_issuing(argc > 2 ? argv[2] : "tests/vectors/safe-actions-es256-v1.json");
     return 0;
 }

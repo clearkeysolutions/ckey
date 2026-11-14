@@ -11,12 +11,15 @@
 //   request  u8 len + bytes   single-use request ID, 8..64 characters
 //   issued_at u64 BE, expires_at u64 BE   Unix seconds
 //   params   u16 BE len + bytes   at most 1024; UTF-8 JSON is recommended
-//   signature 64 bytes   Ed25519 over "CKey Safe Action v1\0" + every byte above
+//   signature 64 bytes   Ed25519, or ES256 raw r||s (low-S) over SHA-256 of
+//                        "CKey Safe Action v1\0" + every byte above; the
+//                        issuer's key (its "alg") says which
 //
 // The core parses, signs and verifies. Whether an action may run is decided by
 // the SDKs from the verified result and what the receiving app registered.
 
 #include "ed25519.inc"
+#include "p256.inc"
 
 namespace {
 
@@ -171,18 +174,39 @@ ckey_status ckey_safe_action_parse(const uint8_t *payload, size_t len, ckey_safe
     return st;
 }
 
-ckey_status ckey_safe_action_verify(const uint8_t *payload, size_t len, const uint8_t public_key[32], uint64_t now,
-                                    uint32_t max_lifetime_seconds, ckey_safe_action *out, ckey_diagnostics *diag) {
+ckey_status ckey_safe_action_verify_key(const uint8_t *payload, size_t len, ckey_safe_action_alg alg, const uint8_t *public_key,
+                                        size_t key_len, uint64_t now, uint32_t max_lifetime_seconds, ckey_safe_action *out,
+                                        ckey_diagnostics *diag) {
     if (!public_key) { set_status(diag, CKEY_INVALID_ARGUMENT, "a public key is required"); return CKEY_INVALID_ARGUMENT; }
+    if (alg == CKEY_SAFE_ACTION_ED25519 ? key_len != 32 : alg == CKEY_SAFE_ACTION_ES256 ? (key_len != 33 && key_len != 65) : true) {
+        set_status(diag, CKEY_INVALID_ARGUMENT, alg == CKEY_SAFE_ACTION_ED25519 ? "an Ed25519 public key is 32 bytes"
+                                              : alg == CKEY_SAFE_ACTION_ES256 ? "an ES256 public key is 33 or 65 bytes (SEC 1)" : "unknown key algorithm");
+        return CKEY_INVALID_ARGUMENT;
+    }
     std::vector<uint8_t> bytes;
     size_t sig_at = 0;
     ckey_status st = sa_decode(payload, len, bytes, out, &sig_at, diag);
     if (st != CKEY_OK) return st;
     std::vector<uint8_t> message(kSafeActionContext, kSafeActionContext + sizeof(kSafeActionContext));
     message.insert(message.end(), bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(sig_at));
-    if (!ckey_crypto::ed25519_verify(bytes.data() + sig_at, message.data(), message.size(), public_key)) {
+    const char *bad = nullptr;
+    if (alg == CKEY_SAFE_ACTION_ED25519) {
+        if (!ckey_crypto::ed25519_verify(bytes.data() + sig_at, message.data(), message.size(), public_key)) bad = "the signature does not match this key";
+    } else {
+        switch (ckey_crypto::es256_verify(bytes.data() + sig_at, message.data(), message.size(), public_key, key_len)) {
+        case ckey_crypto::Es256::ok: break;
+        case ckey_crypto::Es256::bad_key:
+            std::memset(out, 0, sizeof(*out));
+            set_status(diag, CKEY_INVALID_ARGUMENT, "the ES256 public key is not a point on P-256");
+            return CKEY_INVALID_ARGUMENT;
+        case ckey_crypto::Es256::high_s: bad = "the ES256 signature is not low-S (s > n/2)"; break;
+        case ckey_crypto::Es256::bad_signature: bad = "the ES256 signature is out of range"; break;
+        case ckey_crypto::Es256::mismatch: bad = "the signature does not match this key"; break;
+        }
+    }
+    if (bad) {
         std::memset(out, 0, sizeof(*out));
-        set_status(diag, CKEY_INTEGRITY_FAILURE, "the signature does not match this key");
+        set_status(diag, CKEY_INTEGRITY_FAILURE, bad);
         return CKEY_INTEGRITY_FAILURE;
     }
     const uint64_t lifetime = max_lifetime_seconds ? max_lifetime_seconds : 600;
@@ -200,11 +224,18 @@ ckey_status ckey_safe_action_verify(const uint8_t *payload, size_t len, const ui
     return CKEY_OK;
 }
 
-ckey_status ckey_safe_action_sign(const ckey_safe_action *fields, const uint8_t seed[32], char *out, size_t out_capacity,
-                                  size_t *out_len, ckey_diagnostics *diag) {
-    if (!fields || !seed) { set_status(diag, CKEY_INVALID_ARGUMENT, "fields and a signing seed are required"); return CKEY_INVALID_ARGUMENT; }
+ckey_status ckey_safe_action_verify(const uint8_t *payload, size_t len, const uint8_t public_key[32], uint64_t now,
+                                    uint32_t max_lifetime_seconds, ckey_safe_action *out, ckey_diagnostics *diag) {
+    return ckey_safe_action_verify_key(payload, len, CKEY_SAFE_ACTION_ED25519, public_key, 32, now, max_lifetime_seconds, out, diag);
+}
+
+}  // extern "C"
+namespace {
+// The envelope without its signature, validated with the readers' parser.
+ckey_status sa_body(const ckey_safe_action *fields, std::vector<uint8_t> &b, ckey_diagnostics *diag) {
+    if (!fields) { set_status(diag, CKEY_INVALID_ARGUMENT, "fields are required"); return CKEY_INVALID_ARGUMENT; }
     if (fields->scope > 1) { set_status(diag, CKEY_INVALID_ARGUMENT, "unknown scope"); return CKEY_INVALID_ARGUMENT; }
-    std::vector<uint8_t> b = {1, static_cast<uint8_t>(fields->scope)};
+    b = {1, static_cast<uint8_t>(fields->scope)};
     const char *strings[] = {fields->issuer, fields->app, fields->action, fields->key_id, fields->request_id};
     const size_t caps[] = {sizeof(fields->issuer), sizeof(fields->app), sizeof(fields->action), sizeof(fields->key_id), sizeof(fields->request_id)};
     for (int i = 0; i < 5; ++i) {
@@ -220,25 +251,66 @@ ckey_status ckey_safe_action_sign(const ckey_safe_action *fields, const uint8_t 
     b.push_back(static_cast<uint8_t>(fields->params_len));
     b.insert(b.end(), fields->params, fields->params + fields->params_len);
     // Validate with the same parser readers use, so a signed envelope always parses.
-    {
-        std::vector<uint8_t> probe = b;
-        probe.resize(probe.size() + 64);
-        ckey_safe_action check;
-        const char *why = "malformed";
-        if (!sa_parse_bytes(probe, &check, &why)) { set_status(diag, CKEY_INVALID_ARGUMENT, (std::string("invalid Safe Action: ") + why).c_str()); return CKEY_INVALID_ARGUMENT; }
-    }
-    std::vector<uint8_t> message(kSafeActionContext, kSafeActionContext + sizeof(kSafeActionContext));
-    message.insert(message.end(), b.begin(), b.end());
-    uint8_t sig[64];
-    ckey_crypto::ed25519_sign(sig, message.data(), message.size(), seed);
-    b.insert(b.end(), sig, sig + 64);
+    std::vector<uint8_t> probe = b;
+    probe.resize(probe.size() + 64);
+    ckey_safe_action check;
+    const char *why = "malformed";
+    if (!sa_parse_bytes(probe, &check, &why)) { set_status(diag, CKEY_INVALID_ARGUMENT, (std::string("invalid Safe Action: ") + why).c_str()); return CKEY_INVALID_ARGUMENT; }
+    return CKEY_OK;
+}
+
+ckey_status sa_text(std::vector<uint8_t> b, const uint8_t signature[64], char *out, size_t out_capacity, size_t *out_len, ckey_diagnostics *diag, const char *done) {
+    b.insert(b.end(), signature, signature + 64);
     std::string text(kSafeActionPrefix);
     b64url_encode(b, text);
     if (out_len) *out_len = text.size();
     if (!out || out_capacity < text.size() + 1) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "output buffer too small"); return CKEY_INSUFFICIENT_BUFFER; }
     std::memcpy(out, text.data(), text.size());
     out[text.size()] = '\0';
-    set_status(diag, CKEY_OK, "signed");
+    set_status(diag, CKEY_OK, done);
+    return CKEY_OK;
+}
+}  // namespace
+extern "C" {
+
+ckey_status ckey_safe_action_sign(const ckey_safe_action *fields, const uint8_t seed[32], char *out, size_t out_capacity,
+                                  size_t *out_len, ckey_diagnostics *diag) {
+    if (!fields || !seed) { set_status(diag, CKEY_INVALID_ARGUMENT, "fields and a signing seed are required"); return CKEY_INVALID_ARGUMENT; }
+    std::vector<uint8_t> b;
+    const ckey_status st = sa_body(fields, b, diag);
+    if (st != CKEY_OK) return st;
+    std::vector<uint8_t> message(kSafeActionContext, kSafeActionContext + sizeof(kSafeActionContext));
+    message.insert(message.end(), b.begin(), b.end());
+    uint8_t sig[64];
+    ckey_crypto::ed25519_sign(sig, message.data(), message.size(), seed);
+    return sa_text(std::move(b), sig, out, out_capacity, out_len, diag, "signed");
+}
+
+ckey_status ckey_safe_action_signing_input(const ckey_safe_action *fields, uint8_t *out, size_t out_capacity,
+                                           size_t *out_len, ckey_diagnostics *diag) {
+    std::vector<uint8_t> b;
+    const ckey_status st = sa_body(fields, b, diag);
+    if (st != CKEY_OK) return st;
+    std::vector<uint8_t> message(kSafeActionContext, kSafeActionContext + sizeof(kSafeActionContext));
+    message.insert(message.end(), b.begin(), b.end());
+    if (out_len) *out_len = message.size();
+    if (!out || out_capacity < message.size()) { set_status(diag, CKEY_INSUFFICIENT_BUFFER, "output buffer too small"); return CKEY_INSUFFICIENT_BUFFER; }
+    std::memcpy(out, message.data(), message.size());
+    set_status(diag, CKEY_OK, "signing input");
+    return CKEY_OK;
+}
+
+ckey_status ckey_safe_action_assemble(const ckey_safe_action *fields, const uint8_t signature[64], char *out, size_t out_capacity,
+                                      size_t *out_len, ckey_diagnostics *diag) {
+    if (!signature) { set_status(diag, CKEY_INVALID_ARGUMENT, "a signature is required"); return CKEY_INVALID_ARGUMENT; }
+    std::vector<uint8_t> b;
+    const ckey_status st = sa_body(fields, b, diag);
+    if (st != CKEY_OK) return st;
+    return sa_text(std::move(b), signature, out, out_capacity, out_len, diag, "assembled; verify it before publishing");
+}
+
+ckey_status ckey_es256_signature_from_der(const uint8_t *der, size_t der_len, uint8_t out_signature[64]) {
+    if (!out_signature || !ckey_crypto::es256_from_der(der, der_len, out_signature)) return CKEY_INVALID_ARGUMENT;
     return CKEY_OK;
 }
 

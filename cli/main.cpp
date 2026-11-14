@@ -278,31 +278,36 @@ static int safe_action(int argc, char **argv) {
         std::cout << to_hex(pk, 32) << "\n";
         return 0;
     }
-    if (sub == "sign") {
-        std::vector<uint8_t> seed;
-        auto fields = std::make_unique<ckey_safe_action>();
+    // The envelope fields from the command line (sign, signing-input, assemble).
+    auto read_fields = [&](ckey_safe_action &fields) -> bool {
         const std::string issuer = opt("--issuer"), app = opt("--app"), action = opt("--action"), key_id = opt("--key-id"),
                           request = opt("--request"), scope = opt("--scope", "same-device"), params = opt("--params"),
                           ttl = opt("--ttl", "120"), now = opt("--now");
-        if (!read_seed(opt("--key"), seed) || issuer.empty() || app.empty() || action.empty() || key_id.empty() || request.empty() ||
-            (scope != "same-device" && scope != "cross-device")) {
-            std::cerr << "usage: ckey action sign --key issuer.key --issuer citeory.com --app com.viadere --action signin.request\n"
-                         "                        --key-id 2026-11 --request <single-use id> [--scope same-device|cross-device]\n"
-                         "                        [--params '{\"json\":true}'] [--ttl 120] [--now <unix seconds>]\n";
-            return 2;
-        }
+        if (issuer.empty() || app.empty() || action.empty() || key_id.empty() || request.empty() || (scope != "same-device" && scope != "cross-device")) return false;
         auto copy = [](char *dst, size_t cap, const std::string &v) { if (v.size() >= cap) return false; std::memcpy(dst, v.data(), v.size()); dst[v.size()] = 0; return true; };
-        if (!copy(fields->issuer, sizeof(fields->issuer), issuer) || !copy(fields->app, sizeof(fields->app), app) ||
-            !copy(fields->action, sizeof(fields->action), action) || !copy(fields->key_id, sizeof(fields->key_id), key_id) ||
-            !copy(fields->request_id, sizeof(fields->request_id), request) || params.size() > sizeof(fields->params)) {
+        if (!copy(fields.issuer, sizeof(fields.issuer), issuer) || !copy(fields.app, sizeof(fields.app), app) ||
+            !copy(fields.action, sizeof(fields.action), action) || !copy(fields.key_id, sizeof(fields.key_id), key_id) ||
+            !copy(fields.request_id, sizeof(fields.request_id), request) || params.size() > sizeof(fields.params)) {
             std::cerr << "a field is too long\n";
+            return false;
+        }
+        fields.scope = scope == "cross-device" ? CKEY_SCOPE_CROSS_DEVICE : CKEY_SCOPE_SAME_DEVICE;
+        fields.issued_at = now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now);
+        fields.expires_at = fields.issued_at + std::stoull(ttl);
+        std::memcpy(fields.params, params.data(), params.size());
+        fields.params_len = params.size();
+        return true;
+    };
+    const char *fields_usage =
+        "  --issuer citeory.com --app com.viadere --action signin.request --key-id 2026-11 --request <single-use id>\n"
+        "  [--scope same-device|cross-device] [--params '{\"json\":true}'] [--ttl 120] [--now <unix seconds>]\n";
+    if (sub == "sign") {
+        std::vector<uint8_t> seed;
+        auto fields = std::make_unique<ckey_safe_action>();
+        if (!read_seed(opt("--key"), seed) || !read_fields(*fields)) {
+            std::cerr << "usage: ckey action sign --key issuer.key (Ed25519)\n" << fields_usage;
             return 2;
         }
-        fields->scope = scope == "cross-device" ? CKEY_SCOPE_CROSS_DEVICE : CKEY_SCOPE_SAME_DEVICE;
-        fields->issued_at = now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now);
-        fields->expires_at = fields->issued_at + std::stoull(ttl);
-        std::memcpy(fields->params, params.data(), params.size());
-        fields->params_len = params.size();
         size_t need = 0;
         ckey_diagnostics diag{};
         ckey_safe_action_sign(fields.get(), seed.data(), nullptr, 0, &need, &diag);
@@ -311,15 +316,72 @@ static int safe_action(int argc, char **argv) {
         std::cout << out.data() << "\n";
         return 0;
     }
+    if (sub == "signing-input") {
+        // ES256 with a key service: print the bytes to sign. Pass the same
+        // fields and --now to "assemble" with the service's signature.
+        auto fields = std::make_unique<ckey_safe_action>();
+        if (!read_fields(*fields) || opt("--now").empty()) {
+            std::cerr << "usage: ckey action signing-input --now <unix seconds> (the same value for assemble)\n" << fields_usage
+                      << "prints the bytes to sign, in hex: ECDSA P-256 with SHA-256 over them (ES256)\n";
+            return 2;
+        }
+        size_t need = 0;
+        ckey_diagnostics diag{};
+        ckey_safe_action_signing_input(fields.get(), nullptr, 0, &need, &diag);
+        std::vector<uint8_t> input(need);
+        if (ckey_safe_action_signing_input(fields.get(), input.data(), input.size(), &need, &diag) != CKEY_OK) { std::cerr << diag.message << "\n"; return 1; }
+        std::cout << to_hex(input.data(), input.size()) << "\n";
+        return 0;
+    }
+    if (sub == "assemble") {
+        // The payload from fields and a signature made by a key service: raw
+        // r||s (--signature, 128 hex) or DER (--der-signature, as most key
+        // services return; converted, and s made low). Verified before printing
+        // when --public-key is given.
+        auto fields = std::make_unique<ckey_safe_action>();
+        std::vector<uint8_t> raw, der, pk;
+        const bool have_raw = from_hex(opt("--signature"), raw) && raw.size() == 64;
+        const bool have_der = from_hex(opt("--der-signature"), der) && !der.empty();
+        if (!read_fields(*fields) || opt("--now").empty() || (have_raw == have_der)) {
+            std::cerr << "usage: ckey action assemble --now <unix seconds> (as for signing-input)\n" << fields_usage
+                      << "  (--signature <128 hex r||s> | --der-signature <hex DER>) [--public-key <66 or 130 hex>]\n";
+            return 2;
+        }
+        uint8_t sig[64];
+        if (have_der) {
+            if (ckey_es256_signature_from_der(der.data(), der.size(), sig) != CKEY_OK) { std::cerr << "not a DER ECDSA signature\n"; return 1; }
+        } else std::memcpy(sig, raw.data(), 64);
+        size_t need = 0;
+        ckey_diagnostics diag{};
+        ckey_safe_action_assemble(fields.get(), sig, nullptr, 0, &need, &diag);
+        std::vector<char> out(need + 1);
+        if (ckey_safe_action_assemble(fields.get(), sig, out.data(), out.size(), &need, &diag) != CKEY_OK) { std::cerr << diag.message << "\n"; return 1; }
+        if (from_hex(opt("--public-key"), pk) && !pk.empty()) {
+            auto check = std::make_unique<ckey_safe_action>();
+            const ckey_status st = ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(out.data()), need, CKEY_SAFE_ACTION_ES256, pk.data(), pk.size(),
+                                                               fields->issued_at, static_cast<uint32_t>(fields->expires_at - fields->issued_at), check.get(), &diag);
+            if (st != CKEY_OK) { std::cerr << "the assembled payload does not verify: " << diag.message << "\n"; return 1; }
+        }
+        std::cout << out.data() << "\n";
+        return 0;
+    }
     if (sub == "verify") {
-        const std::string payload = opt("--payload"), key = opt("--public-key"), now = opt("--now"), max = opt("--max-lifetime", "600");
+        const std::string payload = opt("--payload"), key = opt("--public-key"), now = opt("--now"), max = opt("--max-lifetime", "600"), alg = opt("--alg");
         std::vector<uint8_t> pk;
-        if (payload.empty() || !from_hex(key, pk) || pk.size() != 32) { std::cerr << "usage: ckey action verify --payload 'ckey-action:1:...' --public-key <64 hex> [--now <unix seconds>] [--max-lifetime 600]\n"; return 2; }
+        const bool hexed = from_hex(key, pk);
+        // --alg, or by key length: 32 bytes Ed25519, 33 or 65 bytes ES256 (SEC 1).
+        const ckey_safe_action_alg a = alg == "es256" || alg == "ES256" ? CKEY_SAFE_ACTION_ES256 : alg == "ed25519" || alg == "Ed25519" ? CKEY_SAFE_ACTION_ED25519
+                                     : pk.size() == 32 ? CKEY_SAFE_ACTION_ED25519 : CKEY_SAFE_ACTION_ES256;
+        if (payload.empty() || !hexed || (pk.size() != 32 && pk.size() != 33 && pk.size() != 65)) {
+            std::cerr << "usage: ckey action verify --payload 'ckey-action:1:...' --public-key <64 hex Ed25519 | 66 or 130 hex ES256>\n"
+                         "                          [--alg ed25519|es256] [--now <unix seconds>] [--max-lifetime 600]\n";
+            return 2;
+        }
         auto out = std::make_unique<ckey_safe_action>();
         ckey_diagnostics diag{};
-        const ckey_status st = ckey_safe_action_verify(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), pk.data(),
-                                                       now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now),
-                                                       static_cast<uint32_t>(std::stoul(max)), out.get(), &diag);
+        const ckey_status st = ckey_safe_action_verify_key(reinterpret_cast<const uint8_t *>(payload.data()), payload.size(), a, pk.data(), pk.size(),
+                                                           now.empty() ? static_cast<uint64_t>(std::time(nullptr)) : std::stoull(now),
+                                                           static_cast<uint32_t>(std::stoul(max)), out.get(), &diag);
         std::cout << diag.message << "\n";
         if (st == CKEY_OK || st == CKEY_EXPIRED)
             std::cout << "issuer " << out->issuer << ", app " << out->app << ", action " << out->action << ", key " << out->key_id
@@ -327,7 +389,7 @@ static int safe_action(int argc, char **argv) {
                       << ".." << out->expires_at << ", params " << std::string(reinterpret_cast<const char *>(out->params), out->params_len) << "\n";
         return st == CKEY_OK ? 0 : 1;
     }
-    std::cerr << "usage: ckey action (keygen | public-key | sign | verify) ...\n";
+    std::cerr << "usage: ckey action (keygen | public-key | sign | signing-input | assemble | verify) ...\n";
     return 2;
 }
 

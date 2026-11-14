@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define CKEY_ABI_VERSION 4u
-#define CKEY_SOFTWARE_VERSION "0.1.0-build.117"
+#define CKEY_SOFTWARE_VERSION "0.1.0-build.118"
 #define CKEY_FORMAT_VERSION 14u
 #define CKEY_TEXT_FORMAT_VERSION 25u
 #define CKEY_LOCATOR_PAYLOAD_BYTES 16u
@@ -1002,6 +1002,44 @@ CKEY_API ckey_status ckey_safe_action_sign(const ckey_safe_action *fields, const
                                            char *out, size_t out_capacity, size_t *out_len,
                                            ckey_diagnostics *diag);
 CKEY_API void ckey_ed25519_public_key(const uint8_t seed[32], uint8_t out_public_key[32]);
+
+/*
+ * Issuer key algorithms (the key file's "alg"). The envelope is the same for
+ * both: its 64-byte signature is
+ *   ED25519  Ed25519 (RFC 8032) over the signing input;
+ *   ES256    ECDSA P-256 over SHA-256(signing input), raw r || s (32 bytes
+ *            each, big-endian), 1 <= r, s < n and s <= n/2 (low-S; a high-S
+ *            signature is refused). The public key is SEC 1, 33 bytes
+ *            (compressed, 02/03) or 65 bytes (uncompressed, 04).
+ * ES256 lets an issuer sign in a key service that holds P-256 keys and never
+ * releases them: build the signing input, have the service sign it (or its
+ * SHA-256 digest), convert the service's DER signature with
+ * ckey_es256_signature_from_der, then assemble the payload.
+ */
+typedef enum ckey_safe_action_alg {
+    CKEY_SAFE_ACTION_ED25519 = 1,
+    CKEY_SAFE_ACTION_ES256 = 2
+} ckey_safe_action_alg;
+#define CKEY_HAS_ES256 1
+/* As ckey_safe_action_verify, for either algorithm: key_len 32 (Ed25519) or 33/65 (ES256). */
+CKEY_API ckey_status ckey_safe_action_verify_key(const uint8_t *payload, size_t len, ckey_safe_action_alg alg,
+                                                 const uint8_t *public_key, size_t key_len, uint64_t now,
+                                                 uint32_t max_lifetime_seconds, ckey_safe_action *out,
+                                                 ckey_diagnostics *diag);
+/* The exact bytes an issuer signs for fields: "CKey Safe Action v1", a zero
+ * byte, then the envelope without its signature. Call with out NULL for *out_len. */
+CKEY_API ckey_status ckey_safe_action_signing_input(const ckey_safe_action *fields, uint8_t *out, size_t out_capacity,
+                                                    size_t *out_len, ckey_diagnostics *diag);
+/* The payload text for fields and a signature made elsewhere (64 bytes, as
+ * defined for the key's algorithm). Nothing is verified here; verify the result
+ * with the public key before publishing it. */
+CKEY_API ckey_status ckey_safe_action_assemble(const ckey_safe_action *fields, const uint8_t signature[64],
+                                               char *out, size_t out_capacity, size_t *out_len,
+                                               ckey_diagnostics *diag);
+/* A DER ECDSA-Sig-Value (what most key services return) to the raw r || s an
+ * ES256 Safe Action carries, with s normalised to low-S. CKEY_INVALID_ARGUMENT
+ * if it is not a minimal DER encoding of 0 < r, s < n. */
+CKEY_API ckey_status ckey_es256_signature_from_der(const uint8_t *der, size_t der_len, uint8_t out_signature[64]);
 
 #ifdef __cplusplus
 }

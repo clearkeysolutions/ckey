@@ -10,6 +10,25 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.118 — 2026-11-14
+
+* **ES256 issuer keys for Safe Actions** (`CKEY_HAS_ES256`). This is a second issuer key algorithm, ECDSA P-256 with SHA-256, for issuers whose key service holds P-256 keys and never releases them (requested for Viadere's vault, which cannot hold Ed25519). Ed25519 is unchanged.
+  * **Format.** The envelope is unchanged: its 64-byte signature is raw `r ‖ s` (32-byte big-endian each, 1 ≤ r, s < n). **Low-S is required:** a signature with s > n/2 is refused, so each envelope has one valid signature value. The algorithm comes from the key: `"alg": "ES256"` in the issuer's key file, with `public_key` the SEC 1 point in hex, 33 bytes compressed (`02`/`03`) or 65 bytes uncompressed (`04`).
+  * **Verification:** `ckey_safe_action_verify_key(payload, len, alg, key, key_len, …)` takes `CKEY_SAFE_ACTION_ED25519` (32-byte key) or `CKEY_SAFE_ACTION_ES256` (33/65). `ckey_safe_action_verify` is the Ed25519 case, as before. A key that is not a point on P-256 is `CKEY_INVALID_ARGUMENT`; a bad, high-S or out-of-range signature is `CKEY_INTEGRITY_FAILURE`.
+  * **Signing without the key:**
+    * `ckey_safe_action_signing_input(fields, …)` returns the exact bytes to sign.
+    * `ckey_es256_signature_from_der` converts the DER signature most key services return to raw `r ‖ s` and makes s low.
+    * `ckey_safe_action_assemble(fields, signature, …)` builds the payload.
+    * CLI: `ckey action signing-input`, `ckey action assemble` (`--der-signature` or `--signature`, verified before printing with `--public-key`), and `ckey action verify` taking ES256 keys (by length, or `--alg`).
+  * **Implementation:** `src/p256.inc`: SHA-256, P-256 in Montgomery form on 32-bit limbs (portable to every compiler the core builds with), Jacobian points, Shamir's trick, point decompression. Verification only; the issuer signs in its key service.
+  * **Checked:**
+    * 1,210 cross-checks against Node's crypto: 300 random keys and messages, compressed and uncompressed keys, low-S and high-S, tampered messages, DER from Node, off-curve and malformed keys and signatures.
+    * New independent vectors `tests/vectors/safe-actions-es256-v1.json` (9, made with Node's P-256 and verified by `tools/safe_actions_vectors.mjs --check`). They cover a high-S twin, a compressed key, an off-curve key, and an Ed25519 envelope offered an ES256 key.
+    * An end-to-end CLI run with OpenSSL as the key service (signing input → DER signature → assemble → verify, and OpenSSL agrees).
+    * SHA-256 against `sha256sum`. All 17 core suites pass, and the 22 Ed25519 vectors are unchanged.
+  * **Spec:** `spec/CKey-Safe-Actions.md` documents the algorithm, the key file and the key-service workflow.
+  * **SDKs:** the Web, Swift, Android and .NET key-file lookups still accept Ed25519 keys only; ES256 there follows.
+
 ## 0.1.0-build.117 — 2026-11-14
 
 * **Spec and comment corrections.**
