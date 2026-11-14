@@ -10,6 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.121 — 2026-11-14
+
+* **Self-hosted CI fixes**, from the first runs on the Mac runner. The release moves to 0.1.0-build.121: build.120 was prepared but never tagged.
+  * **Swift:** the Xcode 27 SDK marks `exposureDuration`, `isVideoStabilizationSupported` and `preferredVideoStabilizationMode` unavailable on macOS. They are now iOS-only, like the zoom and ISO reads beside them, so the macOS build of `CKeyScanKit` compiles again.
+  * **Benchmarks:** `ckey-bench` builds against zxing-cpp 3.x, which is what Homebrew ships. 3.x no longer installs `BitMatrix.h` or `MultiFormatWriter.h`, so the bench writes with `CreateBarcodeFromText` and `WriteBarcodeToImage` and keeps the 2.x writer when those headers exist. `ReaderOptions` replaces `DecodeHints`. Checked here against zxing-cpp 3.1.1 built from source: QR Code (M) and Data Matrix encode and decode in `--quick`.
+  * **Android:** `setup-android` installs `platform-tools` only. Its default list also asks for `tools`, which current `sdkmanager` no longer has, so the step failed. Gradle's Actions cache is off, because on the self-hosted runner `~/.gradle` stays on the machine, and the cache upload stalled for 20 minutes.
+  * **Web:** emsdk no longer uses the Actions cache, for the same reason.
+  * **Core:** `ctest --parallel 4`. The release job's tests took 25 minutes one at a time on the runner.
+  * **Not code faults:** several jobs ended "Abandoned" or were cancelled when the runner lost its connection to GitHub; keep the Mac awake while the runner works. The `core (release)` job on `community` passed every step: it was marked failed only because the run's other jobs failed.
+
 ## 0.1.0-build.120 — 2026-11-14
 
 * **Release CKey 0.1.0-build.120.** `Stable-Release` is fast-forwarded from build.85 to this commit and tagged `v0.1.0-build.120`. The release workflow builds and drafts the GitHub Release on the self-hosted runner.

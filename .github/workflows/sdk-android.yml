@@ -40,6 +40,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-disabled: true   # self-hosted: ~/.gradle stays on the machine; uploading the cache stalled
       - name: Host JNI harness
         run: sdk/android/jni-host-test/run.sh
 
@@ -58,7 +59,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-disabled: true   # self-hosted: ~/.gradle stays on the machine; uploading the cache stalled
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools   # the default also asks for 'tools', which current sdkmanager no longer has
       - name: Build, unit test, publish locally
         run: >
           gradle -p sdk/android --no-daemon --stacktrace
@@ -91,7 +95,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-disabled: true   # self-hosted: ~/.gradle stays on the machine; uploading the cache stalled
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools   # the default also asks for 'tools', which current sdkmanager no longer has
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 30

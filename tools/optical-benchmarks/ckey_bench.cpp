@@ -19,8 +19,14 @@
 #include "ckey/ckey.h"
 
 #ifdef CKEY_BENCH_ZXING
+#if __has_include(<ZXing/BitMatrix.h>)  // zxing-cpp 2.x (and 3.x built with the old writer)
+#define CKEY_ZXING_OLD_WRITER 1
 #include <ZXing/BitMatrix.h>
 #include <ZXing/MultiFormatWriter.h>
+#else                                    // zxing-cpp 3.x (Homebrew): the zint-based writer
+#include <ZXing/CreateBarcode.h>
+#include <ZXing/WriteBarcode.h>
+#endif
 #include <ZXing/ReadBarcode.h>
 #endif
 
@@ -148,21 +154,45 @@ Outcome scan_ckey(const std::vector<uint8_t> &frame, int w, int h, const std::st
 }
 
 #ifdef CKEY_BENCH_ZXING
-// zxing-cpp 2.x. Quiet zones: 4 modules (QR), 2 modules (Data Matrix).
+// zxing-cpp 2.x or 3.x. Quiet zones: 4 modules (QR), 2 modules (Data Matrix).
+// The symbol as one module per entry, true = dark.
+struct ZxModules {
+    int width = 0, height = 0;
+    std::vector<uint8_t> dark;
+    bool get(int x, int y) const { return dark[static_cast<size_t>(y) * width + x] != 0; }
+};
+ZxModules zxing_modules(ZXing::BarcodeFormat format, const std::string &text) {
+    ZxModules out;
+#ifdef CKEY_ZXING_OLD_WRITER
+    ZXing::MultiFormatWriter writer(format);
+    writer.setMargin(0);
+    if (format == ZXing::BarcodeFormat::QRCode) writer.setEccLevel(4);  // zxing-cpp maps 0..8 onto L/M/Q/H; 4 = M
+    const ZXing::BitMatrix m = writer.encode(text, 0, 0);
+    out.width = m.width(); out.height = m.height();
+    out.dark.resize(static_cast<size_t>(out.width) * out.height);
+    for (int y = 0; y < out.height; ++y) for (int x = 0; x < out.width; ++x) out.dark[static_cast<size_t>(y) * out.width + x] = m.get(x, y);
+#else
+    const auto barcode = ZXing::CreateBarcodeFromText(text, ZXing::CreatorOptions(format, format == ZXing::BarcodeFormat::QRCode ? "ecLevel=M" : ""));
+    const ZXing::Image m = ZXing::WriteBarcodeToImage(barcode, ZXing::WriterOptions().scale(1).addQuietZones(false));
+    out.width = m.width(); out.height = m.height();
+    out.dark.resize(static_cast<size_t>(out.width) * out.height);
+    for (int y = 0; y < out.height; ++y) for (int x = 0; x < out.width; ++x) out.dark[static_cast<size_t>(y) * out.width + x] = *m.data(x, y) < 128;
+#endif
+    return out;
+}
+
 bool render_zxing(ZXing::BarcodeFormat format, int quiet, const std::string &text, int side, Image &img) {
     try {
-        ZXing::MultiFormatWriter writer(format);
-        writer.setMargin(0);
-        if (format == ZXing::BarcodeFormat::QRCode) writer.setEccLevel(4);  // zxing-cpp maps 0..8 onto L/M/Q/H; 4 = M
-        const ZXing::BitMatrix m = writer.encode(text, 0, 0);
-        const int modules = m.width() + 2 * quiet;
+        const ZxModules m = zxing_modules(format, text);
+        if (m.width <= 0) return false;
+        const int modules = m.width + 2 * quiet;
         img.side = side; img.px.assign(static_cast<size_t>(side) * side, 255);
         const int ss = 3;
         for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) {
             int ink = 0;
             for (int sy = 0; sy < ss; ++sy) for (int sx = 0; sx < ss; ++sx) {
                 const int mx = static_cast<int>(std::floor((x + (sx + .5) / ss) * modules / side)) - quiet, my = static_cast<int>(std::floor((y + (sy + .5) / ss) * modules / side)) - quiet;
-                ink += mx >= 0 && my >= 0 && mx < m.width() && my < m.height() && m.get(mx, my);
+                ink += mx >= 0 && my >= 0 && mx < m.width && my < m.height && m.get(mx, my);
             }
             img.px[static_cast<size_t>(y) * side + x] = static_cast<uint8_t>(255 - 255 * ink / (ss * ss));
         }
@@ -172,7 +202,7 @@ bool render_zxing(ZXing::BarcodeFormat format, int quiet, const std::string &tex
 
 Outcome scan_zxing(ZXing::BarcodeFormat format, const std::vector<uint8_t> &frame, int w, int h, const std::string &expected) {
     Outcome r; const double t0 = now_ms();
-    ZXing::DecodeHints hints; hints.setFormats(format); hints.setTryHarder(true);
+    ZXing::ReaderOptions hints; hints.setFormats(format); hints.setTryHarder(true);
     const auto result = ZXing::ReadBarcode(ZXing::ImageView(frame.data(), w, h, ZXing::ImageFormat::Lum), hints);
     r.ms = now_ms() - t0;
     if (result.isValid()) { r.ok = result.text() == expected; if (!r.ok) r.corrected = -1; }

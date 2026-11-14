@@ -351,8 +351,7 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                                 lensPosition: device?.lensPosition, zoomFactor: device.map { Double($0.videoZoomFactor) },
                                 deviceName: device?.localizedName)
         #else
-        let state = CameraState(exposureSeconds: device.map { CMTimeGetSeconds($0.exposureDuration) }, iso: nil,
-                                lensPosition: nil, zoomFactor: nil, deviceName: device?.localizedName)
+        let state = CameraState(exposureSeconds: nil, iso: nil, lensPosition: nil, zoomFactor: nil, deviceName: device?.localizedName)
         #endif
         processor.captureDiagnostics(count: count) { frames in completion(frames, state) }
     }
@@ -449,10 +448,12 @@ open class CKeyCameraScanner: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         guard session.canAddOutput(output) else { return false }
         session.addOutput(output)
         // No video stabilization: it delays frames and crops them, and a
-        // scanner needs the newest, widest frame.
+        // scanner needs the newest, widest frame. (Not available on macOS.)
+        #if os(iOS)
         if let connection = output.connection(with: .video), connection.isVideoStabilizationSupported {
             connection.preferredVideoStabilizationMode = .off
         }
+        #endif
         return true
     }
 
