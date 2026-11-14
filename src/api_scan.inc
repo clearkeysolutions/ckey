@@ -552,6 +552,22 @@ ckey_status decode_scalable_at(const uint8_t *gray, size_t width, size_t height,
     // Fast (live) scans try the two best version hypotheses; the next frame
     // gets another chance in tens of milliseconds.
     const size_t max_attempts = scan_fast() ? 2 : kMaxDecodeAttempts;
+    // Standard and Standard arc share every key but the Ring Key, which is
+    // faint in a small or blurred code; their hypotheses for one version can
+    // score within noise of each other. When the best is one of them, the
+    // next try is the same version and orientation in the other, so a fast
+    // scan never spends both of its tries on one family.
+    if (!attempts.empty() && scalable_fine(attempts[0].family)) {
+        const Attempt &best = attempts[0];
+        const int sibling = best.family == 0 ? 3 : 0;
+        for (size_t i = 1; i < attempts.size(); ++i)
+            if (attempts[i].family == sibling && attempts[i].version == best.version && std::equal(best.h, best.h + 8, attempts[i].h)) {
+                const Attempt moved = attempts[i];
+                attempts.erase(attempts.begin() + static_cast<std::ptrdiff_t>(i));
+                attempts.insert(attempts.begin() + 1, moved);
+                break;
+            }
+    }
     if (attempts.size() > max_attempts) attempts.resize(max_attempts);
     std::vector<uint8_t> candidate(65535), codeword, reliability;
     SiteRead read; SiteSamples samples;

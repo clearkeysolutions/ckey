@@ -10,6 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.111 — 2026-11-14
+
+* **Version keys judged per group** (`scalable_version_fit`). The Grid, Ring and Ray Keys are each compared with their own blanks instead of one threshold for all fourteen samples. In a small or blurred code the Ring Key's dots (single small dots on the outermost ring) read faint, about 200 against paper at 237. One threshold, pulled down by the much darker grid and ray keys (about 130), put them on the paper side. The true version then failed its key gate (11 of 14, needing 12) while its data read almost perfectly: in one case 81 of 10,845 sites wrong, against 35 correctable bytes per block. A group whose marks are not clearly apart from its blanks (under a quarter of the overall contrast) earns no evidence, so noise in a wrong hypothesis still does not pass.
+  * **Measured** on the screen model (lattice at 6 cells per module, camera σ 1 px, 3% noise, exact corners, 900 bytes). Standard now reads at 420 px (it failed at 440); arc reads at 380. The full reader reads Standard at 400 and arc at 380. All 17 core suites pass; the simulated reader decodes 192 of 192 scenes, as before.
+* **Fast scans try both Standard families.** Standard and Standard arc share every key but the Ring Key. When the best hypothesis is one of them, the second fast try is the same version and orientation in the other.
+* **Measured with exact corners** (screen model, 900 bytes, 500 px): Standard 198 wrong sites, 15.8% inside r = 4.3; arc 15 wrong, 0.5%. At 2,000 bytes and 800 px: 265 against 9. The model reproduces the field heatmaps, and arc removes the inner-ring failure.
+* **Known limit:** at some sizes the fast path's classical locator picks the wrong outline (corners 160 px off at 440 px) or corners too rough to read without the refiner (19 px), for both formats. The full reader, which the live scanner runs after two fast misses, reads them.
+
 ## 0.1.0-build.110 — 2026-11-14
 
 * **Formats 0.32 and 0.33: Standard with equal-arc rings** ([spec](spec/CKey-Format-v0.32.0.md), [grouped](spec/CKey-Format-v0.33.0.md); `CKEY_LAYOUT_STANDARD_ARC` 5, `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6; `CKEY_HAS_ARC_LAYOUT`). Opt-in: the default layout is still Format 0.27.

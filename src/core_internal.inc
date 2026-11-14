@@ -1493,18 +1493,49 @@ KeyFit scalable_skeleton_fit(const uint8_t *gray, size_t width, size_t height, s
 // outermost ring, and the three Ray Keys. A wrong version misses them.
 KeyFit scalable_version_fit(const ScalableLayout &L, const uint8_t *gray, size_t width, size_t height, size_t stride, const double h[8]) {
     const double p = L.pitch, rk = L.ring_radius(L.rings - 1), S = L.ring_slots.back(), D = L.dial_slots, ds = 0.25 * L.dot;
-    std::vector<double> marks, empty;
+    // Three key groups, each with its own marks and blanks: the Grid Key,
+    // the Ring Key and the Ray Keys.
+    std::array<std::vector<double>, 3> marks, empty;
     for (int r = 0; r < 2; ++r) for (int c = 0; c < 2; ++c)
-        marks.push_back(gray_sample(gray, width, height, stride, h, (L.col0 + c + .5) * p, (L.row0 + r + .5) * p, 0.12 * p));
+        marks[0].push_back(gray_sample(gray, width, height, stride, h, (L.col0 + c + .5) * p, (L.row0 + r + .5) * p, 0.12 * p));
+    empty[0].push_back(gray_sample(gray, width, height, stride, h, (L.col0 - 1 + .5) * p, (L.row0 + .5) * p, 0.12 * p));
     const int k = L.ring_key_slot();
-    for (double slot : L.ring_key_marks()) marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 3.0 * p, 0, D, 0.04 * p));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 1.3 * p, L.ray_key_half(), D, 0.04 * p));
-    marks.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.3 * p, L.ray_key_three(), D, 0.04 * p));
-    empty.push_back(gray_sample(gray, width, height, stride, h, (L.col0 - 1 + .5) * p, (L.row0 + .5) * p, 0.12 * p));
-    for (double slot : L.ring_key_empties()) empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
-    empty.push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.6 * p, L.ray_key_half(), D, 0.04 * p));
-    return sample_fit(marks, empty);
+    for (double slot : L.ring_key_marks()) marks[1].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
+    for (double slot : L.ring_key_empties()) empty[1].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, rk, k + slot, S, ds));
+    marks[2].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 3.0 * p, 0, D, 0.04 * p));
+    marks[2].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 1.3 * p, L.ray_key_half(), D, 0.04 * p));
+    marks[2].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.3 * p, L.ray_key_three(), D, 0.04 * p));
+    empty[2].push_back(polar_sample_slots(gray, width, height, stride, h, kCenter, kScalableDialInner + 2.6 * p, L.ray_key_half(), D, 0.04 * p));
+    std::vector<double> all_marks, all_empty;
+    for (int g = 0; g < 3; ++g) { all_marks.insert(all_marks.end(), marks[g].begin(), marks[g].end()); all_empty.insert(all_empty.end(), empty[g].begin(), empty[g].end()); }
+    KeyFit fit = sample_fit(all_marks, all_empty);
+    if (!fit.valid) return fit;
+    // Judge each group against its own blanks. One global threshold sits
+    // between the darkest keys (grid, rays) and paper, so in a small or
+    // blurred code the Ring Key's faint dots, clearly darker than their own
+    // ring's blanks, fell on the paper side and the true version failed its
+    // keys while its data read. A group whose marks are not clearly apart
+    // from its blanks (under a quarter of the global contrast) earns no
+    // evidence, so noise in a wrong hypothesis does not pass.
+    double sum_m = 0, sum_e = 0; size_t n_m = 0, n_e = 0;
+    for (double v : all_marks) if (v >= 0) { sum_m += v; ++n_m; }
+    for (double v : all_empty) if (v >= 0) { sum_e += v; ++n_e; }
+    const bool dark = sum_m / n_m < sum_e / n_e;  // sample_fit made sure both are non-empty
+    size_t evidence = 0, total = 0;
+    for (int g = 0; g < 3; ++g) {
+        std::vector<double> m, e;
+        for (double v : marks[g]) if (v >= 0) m.push_back(v);
+        for (double v : empty[g]) if (v >= 0) e.push_back(v);
+        total += m.size() + e.size();  // samples outside the image are dropped, as in sample_fit
+        if (m.empty() || e.empty()) continue;
+        const double mm = std::accumulate(m.begin(), m.end(), 0.0) / m.size(), em = std::accumulate(e.begin(), e.end(), 0.0) / e.size();
+        if ((dark ? em - mm : mm - em) < 0.25 * fit.contrast) continue;
+        const double t = (mm + em) * .5;
+        const auto marked = [&](double v) { return dark ? v < t : v > t; };
+        evidence += std::count_if(m.begin(), m.end(), marked) + std::count_if(e.begin(), e.end(), [&](double v) { return !marked(v); });
+    }
+    fit.evidence = static_cast<double>(evidence) / static_cast<double>(total);
+    return fit;
 }
 
 void orientation_homography(const double quad[8], int reverse, int start, double h[8], bool &ok) {
