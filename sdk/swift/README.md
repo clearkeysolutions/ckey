@@ -34,7 +34,7 @@ Package layout: `CKeyCodec`, `CKeyScan`, `CKeyRender`, `CKeyCertify` and `CKeyTe
 ```swift
 import CKey
 
-let symbol = try CKeySymbol.encode("https://openckey.org")          // version 0 = smallest that fits
+let symbol = try CKeySymbol.encode("https://openckey.org")          // version 0 = smallest that fits; layout chosen automatically
 let dense  = try CKeySymbol.encode(data, version: 12, level: .h, layout: .print)
 
 let image: CGImage = try symbol.cgImage(size: 1024)                 // opaque, black on white
@@ -51,7 +51,7 @@ let exactPNG = try symbol.pixelPerfectPNG(pxPerCell: 4, dpi: 300)
 let exactSVG = try symbol.pixelPerfectSVG(pxPerCell: 4)
 ```
 
-`CKeyView`, `CKeyUIView` and `CKeyNSView` draw pixel-perfect. They show the core's lattice (`ckey_render_scalable_lattice`) with the most whole display pixels per cell that fit, unscaled and centred, so a code on screen is never resampled. `lattice(cellsPerModule:)` takes 0 (the default: 3 for `.print`, 6 for `.standard`, the smallest size that decoded at every version on clean output) or 1...6. Pixel-perfect output draws flat colours: no materials, and a logo is composited by the caller.
+`CKeyView`, `CKeyUIView` and `CKeyNSView` draw pixel-perfect. They show the core's lattice (`ckey_render_scalable_lattice`) with the most whole display pixels per cell that fit, unscaled and centred, so a code on screen is never resampled. `lattice(cellsPerModule:)` takes 0 (the default: 3 for the print layouts, 2 for `.pixel`, 6 for Standard and Arc, the smallest size that decoded at every version on clean output) or 1...6. Pixel-perfect output draws flat colours: no materials, and a logo is composited by the caller.
 
 `size` is the pixel size of the full 31-unit canvas, which includes the quiet margin. The raster policies are `.coverage` (antialiased, the default), `.binary` and `.hybrid` (thin marks kept at least 1 px wide). `CKeySymbol.capacity(version:level:layout:)` gives the payload limit for a version. `CKeyError` explains any refusal.
 
@@ -68,14 +68,22 @@ let exactSVG = try symbol.pixelPerfectSVG(pxPerCell: 4)
 
 `.u` and `.x` spend most of the symbol on parity: `.u` carries about half of `.h`'s payload and `.x` about 5% of `.l`'s, and the smallest versions carry nothing at `.x` (`capacity` returns 0, and encoding throws). Readers before 0.1.0-build.86 reject both.
 
-| `CKeyLayout` | Format | Use |
+| `layout:` | Format | Use |
 |---|---|---|
-| `.standard` (default) | 0.27 | Screens and ordinary prints. |
+| `nil` (default) | 0.27 or 0.33 | Automatic (`CKEY_LAYOUT_AUTO`, from build 114): `.standard` for versions 1–7, `.standardArcGrouped` for 8–31. With version 0, the smallest version that fits under that rule. |
+| `.standard` | 0.27 | Screens and ordinary prints. |
 | `.print` | 0.28 ("P0.1") | Small prints: larger marks and gaps, lower capacity per version. |
 | `.standardGrouped` | 0.29 | The standard geometry with byte-grouped placement. |
 | `.printGrouped` | 0.30 | The print geometry with byte-grouped placement. |
+| `.pixel` | 0.31 (experimental) | Pixel-perfect screens: the ring zone's data on grid modules. |
+| `.standardArc` | 0.32 ("Arc") | The standard geometry with equal-arc rings. |
+| `.standardArcGrouped` | 0.33 | Arc with byte-grouped placement. |
 
-Byte-grouped placement puts each byte's eight bits on neighbouring sites, so a blot, glare spot or logo costs only the bytes under it. The geometry, marks, keys and capacity are those of the ungrouped layout. Readers before 0.1.0-build.86 cannot read grouped symbols, so the encoder emits them only when asked. The decoder identifies the layout itself and reports it in `CKeyResult.layout`; `layout.isPrint` and `layout.isGrouped` tell the families apart.
+Byte-grouped placement puts each byte's eight bits on neighbouring sites, so a blot, glare spot or logo costs only the bytes under it. The geometry, marks, keys and capacity are those of the ungrouped layout. Readers before 0.1.0-build.86 cannot read grouped symbols.
+
+**Arc** gives each ring a slot count in proportion to its radius, so no ring's marks are closer together than the outermost ring's; Standard gives every ring the same count, so its inner-ring marks sit up to twice as close and blur first. Arc holds about 10–12% less at level M for large versions (v21: 959 against 1,085 bytes; v31: 4,100 against 4,619) and more for small ones (v1: 21 against 27), which is why the automatic choice keeps Standard up to v7. Readers before 0.1.0-build.110 cannot read Arc, so codes made with the default layout from v8 up needs a reader from build 110. Name a layout to get exactly that layout; `CKeySymbol.capacity(version:level:layout:)` also takes `nil`.
+
+The decoder identifies the layout itself and reports it in `CKeyResult.layout`, and `CKeySymbol.layout` is the layout actually used (never automatic). `layout.isPrint`, `layout.isGrouped` and `layout.isArc` tell the families apart.
 
 ```swift
 let tough = try CKeySymbol.encode("https://openckey.org", level: .u, layout: .standardGrouped)
@@ -130,7 +138,7 @@ if let result {
     result.text         // String? — UTF-8 without control characters (tab/LF/CR allowed)
     result.profile      // .scalable, .locator, .text, .extended
     result.version      // Profile 0 version 1...31 (0 otherwise)
-    result.layout       // .standard / .print / .standardGrouped / .printGrouped for Profile 0
+    result.layout       // the Profile 0 layout found: .standard, .standardArcGrouped, .print, ...
 }
 ```
 

@@ -114,9 +114,10 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 
 ## What CKey can do
 
-- **One design at 31 sizes.** Profile 0 runs from version 1 (29 modules across, 27 bytes at level M) to version 31 (232 across, 4,619 bytes). The reader identifies the version from the symbol itself.
+- **One design at 31 sizes.** Profile 0 runs from version 1 (29 modules across, 27 bytes at level M) to version 31 (232 across, 4,619 bytes in the Standard layout). The reader identifies the version from the symbol itself.
 - **Four error-correction levels.** L, M, Q and H correct about 7, 14, 22 and 30% of each block.
 - **A print layout.** Profile 0.1 has larger marks and gaps for small printed labels ([printing guide](spec/CKey-Printing.md)).
+- **Layouts for screens and print.** Standard (Format 0.27) gives every ring the same number of slots, so inner-ring marks sit closer together. Arc ([Format 0.32](spec/CKey-Format-v0.32.0.md), byte-grouped [0.33](spec/CKey-Format-v0.33.0.md)) gives each ring slots in proportion to its radius, so no ring's marks are closer than the outermost ring's; it holds about 10–12% less (v31: 4,100 bytes at M). From build 114 the SDKs and CLI choose automatically by default: Standard for versions 1–7, Arc grouped from version 8. Naming a layout gives exactly that layout. Readers before build 110 cannot read Arc; the latest release (build 86) does not have it.
 - **Styles that still scan.** Colours, vignette, metallic sheen, accent colours, transparency, module shapes, joined or dotted rings, bevel, depth, grain and a centre logo ([design system](spec/CKey-Design-System.md)).
 - **Certification.** The core photographs a styled code in a model (tilted, blurred, noisy, under glare), reads it back with the real decoder, and grades it against plain black on white. A model, not a guarantee.
 - **Native output.** RGBA and grayscale pixels, PNG, SVG and vector PDF, rendered directly from the geometry.
@@ -134,7 +135,7 @@ The core is C++20 behind a C ABI, [`include/ckey/ckey.h`](include/ckey/ckey.h). 
 | [Profile 0 Format 0.27.0](spec/CKey-Format-v0.27.0.md) | The scalable family |
 | [Profile 0.1 Format 0.28.0](spec/CKey-Format-v0.28.0.md) | The print layout |
 | [Format 0.29.0](spec/CKey-Format-v0.29.0.md) and [0.30.0](spec/CKey-Format-v0.30.0.md) | Byte-grouped placement for both layouts (opt-in), and correction levels U and X |
-| [Format 0.32.0](spec/CKey-Format-v0.32.0.md) and [0.33.0](spec/CKey-Format-v0.33.0.md) | Standard with equal-arc rings, scattered and byte-grouped (opt-in): inner-ring marks as far apart as the outermost ring's, about 10% less capacity |
+| [Format 0.32.0](spec/CKey-Format-v0.32.0.md) and [0.33.0](spec/CKey-Format-v0.33.0.md) | Arc: Standard with equal-arc rings, scattered and byte-grouped. Inner-ring marks as far apart as the outermost ring's, about 10–12% less capacity. From build 114, 0.33 is the default layout from version 8 |
 | [Profile 1 Format 0.14.0](spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](spec/CKey-Format-v0.25.0.md), [Profile 3 Format 0.26.0](spec/CKey-Format-v0.26.0.md) | The locator, text and extended profiles |
 | [`.ckey` interchange](spec/CKey-Interchange-v1.md) | The optional `.ckey` file |
 | [Payload conventions](spec/CKey-Payload-Conventions.md) | What a reader shows and offers for each kind of payload |

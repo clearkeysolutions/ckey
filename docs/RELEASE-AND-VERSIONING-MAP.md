@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.86**, C ABI **4**.
+Build **0.1.0-build.116** on `scratch`, C ABI **4**. The latest release is 0.1.0-build.86; it has neither Pixel nor Arc.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -24,11 +24,13 @@ Build **0.1.0-build.86**, C ABI **4**.
 | Profile 0, byte-grouped placement (opt-in) | [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | as 0.27 | none |
 | Profile 0.1, byte-grouped placement (opt-in) | [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | as 0.28 | none |
 | Profile 0, pixel layout (experimental, opt-in) | 0.31.0 (no specification yet; defined by the reference core) | `1F` | as 0.28 | none |
+| Profile 0, Arc layout (equal-arc rings) | [0.32.0](../spec/CKey-Format-v0.32.0.md) | `20` | 31 versions, 21–4,100 bytes at level M | none |
+| Profile 0, Arc layout, byte-grouped (the default from v8) | [0.33.0](../spec/CKey-Format-v0.33.0.md) | `21` | as 0.32 | none |
 | Profile 1 (locator) | [0.14.0](../spec/CKey-Format-v0.14.0.md) | `0E` | exactly 16 bytes | 0.8, 0.11, 0.12, 0.13 |
 | Profile 2 (text) | [0.25.0](../spec/CKey-Format-v0.25.0.md) | `19` | 0–200 bytes | 0.9, 0.15, 0.18, 0.19, 0.22, 0.23 |
 | Profile 3 (extended) | [0.26.0](../spec/CKey-Format-v0.26.0.md) | `1A` | 1–2,048 bytes in seven tiers | 0.10, 0.16, 0.17, 0.20, 0.21, 0.24 |
 
-The encoders emit only the current formats. The image decoders read only the current layouts. Legacy formats are accepted only when the caller already has the codeword bytes.
+The encoders emit only the current formats. Since build 114 the SDKs and CLI choose the layout automatically unless told otherwise (`CKEY_LAYOUT_AUTO`): Format 0.27 for versions 1–7 and Format 0.33 for versions 8–31. The C API encodes Auto only when a caller passes it. The image decoders read only the current layouts. Legacy formats are accepted only when the caller already has the codeword bytes.
 
 ## Format history
 
@@ -71,6 +73,8 @@ The encoders emit only the current formats. The image decoders read only the cur
 | [0.29.0](../spec/CKey-Format-v0.29.0.md) | `1D` | 0 | build.86 | **current** (opt-in) | Format 0.27 with byte-grouped placement; defines levels U and X for 0.27 to 0.30. |
 | [0.30.0](../spec/CKey-Format-v0.30.0.md) | `1E` | 0 (print layout) | build.86 | **current** (opt-in) | Format 0.28 with byte-grouped placement. |
 | 0.31.0 | `1F` | 0 (pixel layout) | build.98 | **experimental** (opt-in) | The Print family's frame, finders, grid, dial and keys; the ring zone's data on grid modules; one ring carrying only the Ring Key; rays two modules apart, short rays 0.6 module. Drawn pixel-perfect, every data site is a distinct cell at one cell per module. |
+| [0.32.0](../spec/CKey-Format-v0.32.0.md) | `20` | 0 (Arc layout) | build.110 | **current** | Format 0.27 with each ring's slot count scaled to its radius (8·⌊D·r_k/r_outer/8⌋; the outermost keeps D) and the Ring Key at 6:00. About 10–12% less capacity for large versions. Readers before build.110 cannot read it. |
+| [0.33.0](../spec/CKey-Format-v0.33.0.md) | `21` | 0 (Arc layout) | build.110 | **current**; default from v8 since build.114 | Format 0.32 with Format 0.29's byte-grouped placement. |
 
 The "Introduced" column is the build whose changelog entry first describes the format. Some format specifications were committed to `spec/` a few builds later.
 
@@ -87,10 +91,13 @@ Between these, many functions were added without a bump (image decoding, calibra
 
 ## Builds and commits
 
-The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 33–36, 44) have no commit of their own: they were either never published or committed together with a neighbouring build. See the changelog.
+The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 33–36, 44) have no commit of their own: they were either never published or committed together with a neighbouring build. See the changelog. From build 87 on, only builds that changed a format, the ABI or a default have a row; the changelog describes every build.
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
+| build.114 | `c324a1e` | 2026-11-14 | Automatic layout (`CKEY_LAYOUT_AUTO` 255): Standard for v1–7, Arc grouped (Format 0.33) from v8; the new default in Swift, web, Android and the CLI; opt-in in the C API; additive, ABI 4 |
+| build.110 | `ab30644` | 2026-11-14 | Formats 0.32/0.33, Arc: Standard with equal-arc rings, scattered and byte-grouped (`CKEY_LAYOUT_STANDARD_ARC` 5, `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6), and the reader for them; opt-in at first; additive, ABI 4 |
+| build.98 | `22f8c8d` | 2026-11-13 | Format 0.31, the experimental pixel layout (`CKEY_LAYOUT_PIXEL` 4); additive, ABI 4 |
 | build.86 | `scratch` | 2026-11-10 | Reader repair pass after the CKTEST-RH-001 campaign: new border search, frame-edge corner fit with a lens term, erasure and soft-decision decoding, work budget; Formats 0.29/0.30 (byte-grouped, opt-in); levels U and X; frame scan, tracking and camera advice calls; Swift camera layer; additive, ABI 4 |
 | build.85 | `scratch` and `Stable-Release` | 2026-11-07 | Safe Actions: Ed25519 envelope verification in the core, CLI, spec, 22 independent vectors, and SDK-owned policy in every SDK; `CKEY_EXPIRED`; additive, ABI 4 |
 | build.84 | `scratch` and `Stable-Release` | 2026-11-07 | Field-test suite, generated docs and GitHub issue form; no core change |

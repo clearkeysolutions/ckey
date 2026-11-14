@@ -29,7 +29,7 @@ import { loadCKey } from 'openckey';
 const ckey = await loadCKey();
 
 // text (UTF-8) or bytes; version 0 picks the smallest that fits
-const sym = ckey.encode('https://openckey.org', { version: 0, level: 'M', layout: 'standard' });
+const sym = ckey.encode('https://openckey.org', { version: 0, level: 'M', layout: 'auto' });   // 'auto' is the default
 console.log(sym.version, sym.level, sym.layout, sym.payloadLength, sym.capacity);
 
 // pixel-perfect on screen (recommended for display): every module a fixed
@@ -52,14 +52,26 @@ const pdf = ckey.renderPDF(sym, { widthPt: 144 });                  // Uint8Arra
 sym.free(); // release WebAssembly memory now; a forgotten symbol is freed by the GC
 ```
 
-`level` is `'L'`, `'M'` (default), `'Q'`, `'H'`, `'U'` (Ultra, 80% parity) or `'X'` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity, and the smallest versions carry nothing at those levels: `ckey.capacity(1, 'X')` is 0 and encoding there throws. `layout` is `'standard'` (default), `'print'` (Profile 0.1), or their byte-grouped forms `'standard-grouped'` (Format 0.29) and `'print-grouped'` (Format 0.30), which keep the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. Decoding reports the layout found; `'print-grouped'` reports profile `'0.1'`.
+`level` is `'L'`, `'M'` (default), `'Q'`, `'H'`, `'U'` (Ultra, 80% parity) or `'X'` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity, and the smallest versions carry nothing at those levels: `ckey.capacity(1, 'X')` is 0 and encoding there throws. `layout` is one of:
+
+| `layout` | Format | |
+|---|---|---|
+| `'auto'` (default, also when omitted) | 0.27 or 0.33 | From build 114: `'standard'` for versions 1–7, `'arc-grouped'` for 8–31. With version 0, the smallest version that fits under that rule. |
+| `'standard'` | 0.27 | Screens and ordinary prints. |
+| `'print'` | 0.28 (Profile 0.1) | Small prints. |
+| `'standard-grouped'`, `'print-grouped'` | 0.29, 0.30 | Byte-grouped forms of the two, with the same geometry and capacity. |
+| `'pixel'` | 0.31 (experimental) | Pixel-perfect screens. |
+| `'arc'` | 0.32 | Standard with equal-arc rings. |
+| `'arc-grouped'` | 0.33 | Arc, byte-grouped. |
+
+Arc gives each ring a slot count in proportion to its radius, so no ring's marks are closer than the outermost ring's (Standard's inner-ring marks sit up to twice as close). It holds about 10–12% less at level M for large versions (v21: 959 against 1,085 bytes; v31: 4,100 against 4,619) and more for small ones (v1: 21 against 27). Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, and readers before 0.1.0-build.110 cannot read Arc, so codes made with the default layout from v8 up need a reader from build 110. Naming a layout gives exactly that layout. `sym.layout` and decoding report the layout actually used, never `'auto'`; `'print-grouped'` reports profile `'0.1'`. `ckey.capacity(version, level, layout)` takes `'auto'` too, and it is the default there.
 
 `encode` throws an `Error` that carries the core's diagnostic message, for example `payload exceeds the selected Profile 0 version and level`. An invalid option throws a `TypeError` or a `RangeError`.
 
 #### Pixel-perfect rendering
 
 `renderLattice`, `renderPixelPerfect`, `renderToCanvasPixelPerfect`, `renderPNGPixelPerfect` and `renderSVGPixelPerfect` draw the core's lattice (`ckey_render_scalable_lattice`). Every grid module is exactly `cellsPerModule` × `cellsPerModule` cells, and each cell is `pxPerCell` × `pxPerCell` whole pixels, so the canvas, the PNG and the SVG are the same image and nothing is ever resampled.
-- `cellsPerModule` 0, the default, is the smallest size that decoded at every version on clean output: 3 for `'print'` and 6 for `'standard'`.
+- `cellsPerModule` 0, the default, is the smallest size that decoded at every version on clean output: 3 for the print layouts, 2 for `'pixel'`, and 6 for Standard and Arc.
 - Show a pixel-perfect canvas only at one canvas pixel per device pixel. `renderToCanvasPixelPerfect` with `cssPx` and `devicePixelRatio` does this.
 - Redraw when `devicePixelRatio` changes, for example when the window moves to another screen.
 - Colours are flat: materials are not drawn, and logos are composited by the caller.

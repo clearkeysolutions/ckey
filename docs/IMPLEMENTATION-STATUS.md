@@ -11,6 +11,8 @@ This document maps each section of [the specification](SPECIFICATION-rendering-s
 
 No real-device, real-print or platform claim is made unless it was measured.
 
+Rows that name a later build were added after build 83 and describe `scratch` at that build.
+
 ## Rendering (spec §2–§3)
 
 | Item | Status | Where / notes |
@@ -26,6 +28,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | PDF vector export (§2.3–§2.4) | **Done** | `ckey_render_scalable_pdf`: exact paths, flat colours, optional transparency. |
 | `.ckey` interchange (§2.5) | **Done** (draft v1) | `spec/CKey-Interchange-v1.md`. A strict reader, fuzzed. |
 | Transparent output, alpha 0 where unpainted (§2) | **Done** | `transparent = 1` in raster and PDF. |
+| Profile 0 layouts for screens: Arc (Formats 0.32/0.33, build 110) and automatic choice (build 114) | **Done** (core, CLI, web options); **Done, CI-verified only** (Swift, Android); **Open** (.NET) | `CKEY_LAYOUT_STANDARD_ARC`, `CKEY_LAYOUT_STANDARD_ARC_GROUPED`, `CKEY_LAYOUT_AUTO` (Standard for v1–7, Arc grouped from v8). All 31 versions in both placements decode from renders at 6 px/module (`scalable_tests`); Auto is tested in `scalable_tests` and `options.test.mjs`. Auto is the default in Swift, web, Android and the CLI, opt-in in the C API. The .NET SDK encodes only Standard, Print and their grouped forms, and reports a decoded Pixel or Arc code's layout as `Standard`. Field evidence is one owner's iPhone side by side (see the changelog for build 114); no wider field test yet. |
 | Print backend: physical size, minimum features, compensation (§2.4) | **Partial** | Device-grid bitmaps, the Profile 0.1 print layout, PDF and a calibration sheet all exist. **Open:** measured printer/media profiles, which need real prints. |
 | Web canvas / WASM (§3) | **Done, CI-verified only** | `sdk/web` (npm `openckey`). Its JS and native bridge tests run here; the wasm build runs in `sdk-web.yml`. |
 | Swift package / `CKeyView` (§3) | **Done, CI-verified only** | `Package.swift`, `sdk/swift`. Its C++ shims are verified here. |
@@ -82,6 +85,7 @@ No real-device, real-print or platform claim is made unless it was measured.
 | Local aggregate counters, no identifiers | **Done** | `docs/adoption-and-telemetry.md`. |
 | Session definition, batching, cadence, switching semantics | **Done** | Same document. |
 | Ingestion service with abuse controls, no IP retention | **Done** (code); **Open** (deployment) | Runs on openckey.org, which is a separate, proprietary site, not part of this repository. It must meet the service obligations in `docs/adoption-and-telemetry.md`. |
+| Diagnostics are never sent by an SDK | **Done** | The per-site heatmap (`ckey_read_sites_gray8`, Swift `CKeySiteHeatmap`, builds 107–113) and per-frame diagnostic reports are local APIs. The Open CKey Scanner app's opt-in detailed scan reports, which carry them, are the app's own (openckey.org repository), separate from SDK telemetry. |
 | Scanner builds without telemetry | **Done** | `-DCKEY_BUILD_TELEMETRY=OFF`, the SwiftPM `CKeyScanner` product, the Android core module, and `CKEY_DOTNET_TELEMETRY=OFF`. |
 
 ## Acceptance criteria (spec §11)

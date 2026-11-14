@@ -4,7 +4,7 @@ A tour of the formats, the libraries and the tools, with the commands that exerc
 
 ## Current milestone
 
-The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read the current draft formats — [Profile 0 Format 0.27.0](../spec/CKey-Format-v0.27.0.md), [Profile 0.1 Format 0.28.0](../spec/CKey-Format-v0.28.0.md), [Profile 1 Format 0.14.0](../spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](../spec/CKey-Format-v0.25.0.md), and [Profile 3 Format 0.26.0](../spec/CKey-Format-v0.26.0.md) — before treating any bytes or geometry as interoperable. Byte-grouped placement for Profile 0 ([Format 0.29.0](../spec/CKey-Format-v0.29.0.md), [0.30.0](../spec/CKey-Format-v0.30.0.md)) and correction levels U and X are opt-in from build 86. It is a draft and may change before 1.0.
+The locator core defines a fixed 29 × 29 profile, byte framing, CRC-32C, shortened Reed–Solomon coding and correction, deterministic Cartesian/polar placement, SVG rendering, and grayscale image decoding. Read the current draft formats — [Profile 0 Format 0.27.0](../spec/CKey-Format-v0.27.0.md), [Profile 0.1 Format 0.28.0](../spec/CKey-Format-v0.28.0.md), [Profile 1 Format 0.14.0](../spec/CKey-Format-v0.14.0.md), [Profile 2 Format 0.25.0](../spec/CKey-Format-v0.25.0.md), and [Profile 3 Format 0.26.0](../spec/CKey-Format-v0.26.0.md) — before treating any bytes or geometry as interoperable. Byte-grouped placement for Profile 0 ([Format 0.29.0](../spec/CKey-Format-v0.29.0.md), [0.30.0](../spec/CKey-Format-v0.30.0.md)) and correction levels U and X are opt-in from build 86. The Arc layout ([Format 0.32.0](../spec/CKey-Format-v0.32.0.md), byte-grouped [0.33.0](../spec/CKey-Format-v0.33.0.md)) is read from build 110, and from build 114 the SDKs and CLI encode Format 0.33 by default from version 8 (see [layouts](#layouts)). It is a draft and may change before 1.0.
 
 ## Build and use
 
@@ -94,13 +94,35 @@ Every SDK wraps the same core. Each gives you:
 
 ## Profile 0: the scalable family
 
-Profile 0 ([Format 0.27.0](../spec/CKey-Format-v0.27.0.md)) is one design at 31 sizes. Every version keeps the same frame, finders, rings and dial, and only the module pitch changes. It runs from Profile 1-sized modules (v1, 29 across, 27 bytes at level M) to Profile 3 density (v31, 232 across, 4,619 bytes), about 7% finer per step. It removes the appearance jumps between Profiles 1, 2 and 3: a 33-character URL becomes v2, which still looks like a locator.
+Profile 0 ([Format 0.27.0](../spec/CKey-Format-v0.27.0.md)) is one design at 31 sizes. Every version keeps the same frame, finders, rings and dial, and only the module pitch changes. It runs from Profile 1-sized modules (v1, 29 across, 27 bytes at level M) to Profile 3 density (v31, 232 across, 4,619 bytes in the Standard layout), about 7% finer per step. It removes the appearance jumps between Profiles 1, 2 and 3: a 33-character URL becomes v2, which still looks like a locator.
 
 The Grid, Ring and Ray Keys are drawn at each version's own pitch, so the reader identifies the version from them. Four correction levels (L/M/Q/H) trade capacity for robustness. Profiles 1–3 remain available and unchanged.
+
+### Layouts
+
+Profile 0 has several layouts. They share the frame, finders, version table and framing; the reader tells them apart from the keys and reports the one it found.
+
+| Layout | Format | C (`ckey_scalable_layout`) | Web / CLI | Swift | Android | Use |
+|---|---|---|---|---|---|---|
+| Standard | [0.27](../spec/CKey-Format-v0.27.0.md) | `CKEY_LAYOUT_STANDARD` 0 | `standard` | `.standard` | `STANDARD` | Screens and ordinary prints; the default for versions 1–7 |
+| Print (P0.1) | [0.28](../spec/CKey-Format-v0.28.0.md) | `CKEY_LAYOUT_PRINT` 1 | `print` | `.print` | `PRINT` | Small prints |
+| Standard grouped | [0.29](../spec/CKey-Format-v0.29.0.md) | `CKEY_LAYOUT_STANDARD_GROUPED` 2 | `standard-grouped` | `.standardGrouped` | `STANDARD_GROUPED` | Standard, byte-grouped |
+| Print grouped | [0.30](../spec/CKey-Format-v0.30.0.md) | `CKEY_LAYOUT_PRINT_GROUPED` 3 | `print-grouped` | `.printGrouped` | `PRINT_GROUPED` | Print, byte-grouped |
+| Pixel (experimental) | 0.31 | `CKEY_LAYOUT_PIXEL` 4 | `pixel` | `.pixel` | `PIXEL` | Pixel-perfect screens at one or two pixels per module |
+| Arc | [0.32](../spec/CKey-Format-v0.32.0.md) | `CKEY_LAYOUT_STANDARD_ARC` 5 | `arc` | `.standardArc` | `STANDARD_ARC` | Standard with equal-arc rings |
+| Arc grouped | [0.33](../spec/CKey-Format-v0.33.0.md) | `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6 | `arc-grouped` | `.standardArcGrouped` | `STANDARD_ARC_GROUPED` | Arc, byte-grouped; the default from version 8 |
+| Auto (encoding only) | — | `CKEY_LAYOUT_AUTO` 255 | `auto` | `nil` | `AUTO` | Standard for v1–7, Arc grouped for v8–31 |
+
+**Arc** (build 110). Standard gives every ring the dial's slot count D at equal angles, so inner-ring marks sit up to twice as close as the outermost ring's (v21: 0.074 units apart on the innermost ring against 0.149 on the outermost; module pitch 0.25). Arc gives ring k 8·⌊D·r_k/r_outer/8⌋ slots and keeps D on the outermost ring, and its Ring Key starts at 6:00 instead of 3:00 so the reader tells the two families apart. Capacity at level M is about 10–12% lower for large versions (v21: 959 against 1,085 bytes; v31: 4,100 against 4,619) and more for small ones (v1: 21 against 27). To the eye it looks like Standard, except that the inner rings have fewer, longer marks.
+
+**Auto** (build 114) is the default in Swift (`encode(layout: nil)`), the web (`layout: 'auto'` or omitted), Android (`Layout.AUTO`) and the CLI (`--layout auto`). With version 0 it picks the smallest version that fits under that rule. In the C API it is opt-in: callers name a layout, and `CKEY_LAYOUT_AUTO` is one of the choices. A symbol always carries the layout actually chosen, and naming a layout gives exactly that layout. The .NET SDK does not have Arc, Pixel or Auto yet; its default is Standard. Codes made by default from v8 up need readers from build 110.
+
+**Why.** Opt-in scan reports from the owner's iPhone showed Standard codes' ring errors falling steadily with radius, from about 21% inside r = 4.3 to about 1% on the outermost rings, with the grid at 0.1–0.4%. Because each byte's 8 sites are scattered, 4% wrong sites spoiled 26–30% of bytes, and the worst Reed–Solomon block had 77–86 bad bytes against 35 correctable. In a side-by-side field run (same payload, reader build 113), Arc v22 at 392–438 px and Standard v21 at 442–465 px both read in a median of about 120 ms; in the frames that read, Arc had about a third of Standard's wrong sites (median 43 against 96) and a fifth of its inner-ring errors (0.3–1.9% against 3–9%), at a smaller size. On the screen model (lattice at 6 cells per module, blur σ 1 px, 3% noise) the smallest width that reads with the full reader is 246 px for Standard and 210 for Arc at 300 bytes, 400 and 329 at 900 bytes, and 590 and 507 at 2,000 bytes. Small versions keep Standard because Arc costs them the most capacity.
 
 ```sh
 ./build/ckey encode-scalable --utf8 "https://citeory.com/tour?ref=ckey" --out p0.svg
 ./build/ckey encode-scalable --utf8 "a longer message" --version 12 --level Q --out p0-v12.svg
+./build/ckey encode-scalable --utf8 "a longer message" --version 12 --layout standard --out p0-v12-standard.svg   # not Arc
 ```
 
 ## Design system

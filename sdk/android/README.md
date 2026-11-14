@@ -29,7 +29,7 @@ To build from source, run `gradle -p sdk/android publishAllPublicationsToLocalRe
 ## Render
 
 ```kotlin
-val symbol = CKeySymbol.encode("https://openckey.org/tour")            // version 0 = smallest that fits, level M, STANDARD
+val symbol = CKeySymbol.encode("https://openckey.org/tour")            // version 0 = smallest that fits, level M, Layout.AUTO
 val sized  = CKeySymbol.encode(bytes, version = 0, level = EccLevel.H, layout = Layout.PRINT)
 val tough  = CKeySymbol.encode(bytes, level = EccLevel.U, layout = Layout.STANDARD_GROUPED)  // needs build 86+ readers
 
@@ -41,7 +41,7 @@ val pdf: ByteArray = symbol.toPdf(widthPt = 144.0)                      // 2 inc
 val rgba = symbol.toRgba(512)                                           // straight-alpha RGBA8, no Bitmap
 ```
 
-* **Levels and layouts.** `EccLevel` is `L`, `M` (default), `Q`, `H`, `U` (Ultra, 80% parity) and `X` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity; the smallest versions carry nothing at those levels (`CKeySymbol.capacity` returns 0 and `encode` throws a `CKeyException`). `Layout` is `STANDARD` (default), `PRINT` (P0.1), and their byte-grouped forms `STANDARD_GROUPED` (Format 0.29) and `PRINT_GROUPED` (Format 0.30), which have the same geometry and capacity. Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, so they are opt-in. The decoder reports the layout it found; `PRINT_GROUPED` reports profile `P0_1`.
+* **Levels and layouts.** `EccLevel` is `L`, `M` (default), `Q`, `H`, `U` (Ultra, 80% parity) and `X` (Extreme, 95% parity). `U` and `X` spend most of the symbol on parity; the smallest versions carry nothing at those levels (`CKeySymbol.capacity` returns 0 and `encode` throws a `CKeyException`). `Layout` is `AUTO` (the default from build 114, for encoding only: `STANDARD` for versions 1–7, `STANDARD_ARC_GROUPED` for 8–31; with version 0, the smallest version that fits under that rule), `STANDARD` (Format 0.27), `PRINT` (P0.1, Format 0.28), their byte-grouped forms `STANDARD_GROUPED` (0.29) and `PRINT_GROUPED` (0.30), which have the same geometry and capacity, `PIXEL` (0.31, experimental), and the Arc layouts `STANDARD_ARC` (0.32) and `STANDARD_ARC_GROUPED` (0.33, byte-grouped). Arc gives each ring a slot count in proportion to its radius, so no ring's marks are closer than the outermost ring's; it holds about 10–12% less at level M for large versions (v31: 4,100 against 4,619 bytes) and more for small ones (v1: 21 against 27). Readers before 0.1.0-build.86 cannot read `U`, `X` or the grouped layouts, and readers before 0.1.0-build.110 cannot read Arc, so codes made with the default layout from v8 up need a reader from build 110. Naming a layout gives exactly that layout. `CKeySymbol.layout` and the decoder report the layout actually used (never `AUTO`); `isPrint`, `isGrouped` and `isArc` tell the families apart, and `PRINT_GROUPED` reports profile `P0_1`. `CKeyView.layout` also defaults to `AUTO`.
 * **Pixels.** The core renders straight (non-premultiplied) RGBA8. `toBitmap` premultiplies it in the bridge, because `Bitmap.copyPixelsFromBuffer` reads ARGB_8888 memory as premultiplied RGBA. With `transparent = true`, unpainted pixels have alpha 0.
 * **Styles.** Start from `CKeyStyle.DEFAULT` (black on white) or `CKeyStyle.CONCEPT` and use `copy(...)`. Colours are `0xRRGGBB`. `policy` takes one of three values:
   * `StylePolicy.STRICT` (the default) refuses a style that fails the safety rules with a `CKeyException` that carries the core's reason.

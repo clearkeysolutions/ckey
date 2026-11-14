@@ -1,9 +1,9 @@
 # CKey living project context
 
-**Current software version:** `0.1.0-build.115`
-**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout), plus the opt-in byte-grouped placements `0.29.0` (byte `1D`) and `0.30.0` (byte `1E`)
+**Current software version:** `0.1.0-build.116`
+**Current wire formats:** `CKey Format 0.14.0` (byte `0E`, locator profile `01`), `0.25.0` (byte `19`, text profile `02`), and `0.26.0` (byte `1A`, extended profile `03`), plus `0.27.0` (byte `1B`, scalable profile `00`), plus `0.28.0` (byte `1C`, Profile 0.1 print layout), plus the opt-in byte-grouped placements `0.29.0` (byte `1D`) and `0.30.0` (byte `1E`), the experimental pixel layout `0.31.0` (byte `1F`), and the Arc layouts `0.32.0` (byte `20`) and `0.33.0` (byte `21`, byte-grouped; the SDKs' default from version 8 since build 114)
 **Branch:** `scratch` (maintainer working branch; see docs/BRANCHES-AND-RELEASES.md). Cleared after the v0.1.0-build.76 tag; v0.1.0-build.83 is the first published release: it holds only the versioning files, this record and the documentation. From build 86 the source tree is back on `scratch` (restored from `Stable-Release` at `ede38f5`, by owner decision): changes are written and tested here, then promoted to `Stable-Release`. Version and release history: docs/RELEASE-AND-VERSIONING-MAP.md. Changelogs: CHANGELOG.md (builds), CHANGELOG-STABLE.md (releases; first published: v0.1.0-build.83), CHANGELOG-COMMUNITY.md (community merges).
-**Context updated:** 2026-11-10
+**Context updated:** 2026-11-14
 
 ## Mission
 
@@ -103,7 +103,7 @@ Build 86 implements `Pretest-observations-for-repair.md` (the repair notes from 
 **Owner decisions taken for this build (2026-11-10):**
 * The source tree returns to `scratch`.
 * Byte-grouped Formats 0.29/0.30 and levels U and X ship in both the reader and the encoder/renderer.
-* The print layout (P0.1) is **not** the default; it is the print version. The default stays Format 0.27, and the encoder already picks the lowest version that fits.
+* The print layout (P0.1) is **not** the default; it is the print version. The default stays Format 0.27, and the encoder already picks the lowest version that fits. (Superseded for versions 8–31 at build 114: see "Builds 110–115" below.)
 * The SDK scanner takes control of the camera by default; the snapping brackets are an optional part of the SDK.
 * The iOS app (`clearkeysolutions/ckey-web`, `apps/ios`) is re-pinned to this build and its scanning code replaced by the SDK camera layer.
 
@@ -144,6 +144,16 @@ No wrong payload. The reader is still far from the 98–100% of recoverable fram
 **Not compiled or run here:** all Swift (SDK camera layer, reference reader, Renderer app, the iOS app in ckey-web), the .NET SDK, the wasm build, the Android instrumented tests.
 
 **Next:** build the Swift package and the iOS app in Xcode and field-test them; run the campaign's `./ckt build-candidate` and `./ckt regress` on the server with the locked design; decide what to do about the standard layout's ring dots (item 1) before more reader work.
+
+## Builds 110–115: Arc and the automatic layout (2026-11-14)
+
+This addresses item 1 of the build 86 record (the Standard layout's inner rings). Details are in `CHANGELOG.md`.
+
+* **Formats 0.32 and 0.33, "Arc" (build 110).** Format 0.27 gives every ring the dial's slot count D at equal angles, so inner-ring marks sit up to twice as close as the outermost ring's (v21: 0.074 units apart on the innermost ring against 0.149 on the outermost; module pitch 0.25). Arc gives ring k 8·⌊D·r_k/r_outer/8⌋ slots; the outermost keeps D. The Ring Key starts at 6:00 instead of 3:00 so the version fit tells the families apart. 0.32 is scattered (`CKEY_LAYOUT_STANDARD_ARC` 5, web `'arc'`, Swift `.standardArc`, Android `STANDARD_ARC`); 0.33 is byte-grouped (`CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6, `'arc-grouped'`, `.standardArcGrouped`, `STANDARD_ARC_GROUPED`). Capacity at M is about 10–12% lower for large versions (v21: 959 against 1,085 bytes; v31: 4,100 against 4,619) and more for small ones (v1: 21 against 27). Readers before build 110 cannot read Arc.
+* **Why.** The owner's opt-in scan reports (Open CKey Scanner, per-site heatmap) showed Standard's ring errors falling steadily with radius, about 21% inside r = 4.3 to about 1% on the outermost rings, grid 0.1–0.4%. With scattered placement 4% wrong sites spoiled 26–30% of bytes; the worst Reed–Solomon block had 77–86 bad bytes against 35 correctable.
+* **Automatic layout, the default (build 114).** `CKEY_LAYOUT_AUTO` = 255: Format 0.27 for versions 1–7, Format 0.33 for 8–31; with version 0, the smallest version that fits under that rule. The default in Swift (`encode(layout: nil)`), web (`'auto'` or omitted), Android (`Layout.AUTO`) and the CLI (`--layout auto`); opt-in in the C API. Naming a layout gives exactly that layout. Default-made codes from v8 need readers from build 110. The .NET SDK has neither Arc nor Auto yet (default Standard). Evidence: side by side on the owner's iPhone (same payload, reader build 113), Arc v22 at 392–438 px and Standard v21 at 442–465 px both read in a median of about 120 ms; in the frames that read, Arc had about a third of Standard's wrong sites (median 43 against 96) and a fifth of its inner-ring errors (0.3–1.9% against 3–9%), at a smaller size. Screen model (lattice at 6 cells per module, blur σ 1 px, 3% noise), smallest width read by the full reader: 300 B Standard 246 / Arc 210 px; 900 B 400 / 329; 2,000 B 590 / 507.
+* **Reader.** Build 111 judges the Grid, Ring and Ray Keys each against their own blanks, so small or blurred codes whose data read fine no longer fail the version-key gate. Build 115's corner refinement always compares its three starting outline sizes, so the fast (live) scan reads large dense codes: smallest fast-scan width at 2,000 B, Standard 685 → 590 px, Arc 982 → 531 px.
+* **Still open.** One owner's iPhone is the only field evidence; no community field test of Arc yet. The format specifications 0.32/0.33 still say encoders emit them "only when asked", which was true at build 110. Swift and Android were not compiled here.
 
 ## How to use this context
 

@@ -10,6 +10,10 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.116 — 2026-11-14
+
+* **Documentation for Arc and the automatic layout; no code change.** README, `docs/OVERVIEW.md` (a layout table with every name per SDK), the release and versioning map (Formats 0.32/0.33 at build 110, the automatic default at build 114, and the pixel layout at build 98), implementation status, `CONTEXT.md`, and the Swift, web, Android and .NET READMEs now describe Formats 0.32/0.33, `CKEY_LAYOUT_AUTO` as the default in Swift, web, Android and the CLI, Arc's capacity, and that readers before build 110 cannot read Arc. The .NET README says plainly that .NET has neither Pixel, Arc nor Auto (default Standard) and reports decoded Pixel and Arc codes as `Standard`; it also named ABI 5 where the assembly checks ABI 4.
+
 ## 0.1.0-build.115 — 2026-11-14
 
 * **Fast scans read large dense codes** (`ckey_refine_quad_gray8`). In small or dense codes on a screen, the border search often returns an outline about a unit inside each side: the frame and the first grid rows blur together (385 px found for a 411 px field at v21, 785 for 842 at v27). The refinement tries three starting sizes (the outline found, and ±1.3 units), but stopped after the first when that one "already fit a full skeleton" (score ≥ 60). The wrong-size outline scores 124 against 214 for the true frame, so it was kept, 13–30 px off. The full reader's ML refiner recovered such corners; the fast scan, which skips it, could not. All three sizes are now always compared.
