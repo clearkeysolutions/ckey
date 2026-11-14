@@ -10,6 +10,11 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.115 — 2026-11-14
+
+* **Fast scans read large dense codes** (`ckey_refine_quad_gray8`). In small or dense codes on a screen, the border search often returns an outline about a unit inside each side: the frame and the first grid rows blur together (385 px found for a 411 px field at v21, 785 for 842 at v27). The refinement tries three starting sizes (the outline found, and ±1.3 units), but stopped after the first when that one "already fit a full skeleton" (score ≥ 60). The wrong-size outline scores 124 against 214 for the true frame, so it was kept, 13–30 px off. The full reader's ML refiner recovered such corners; the fast scan, which skips it, could not. All three sizes are now always compared.
+  * **Measured** on the screen model (lattice at 6 cells per module, σ 1 px, 3% noise). The four frames where the fast scan failed now refine to within 0.8–1.5 px and read: arc v21 at 440 px, arc v27 and Standard v26 at 900 px. Standard v20 at 440 px still refines to 1.5 px. All 17 core suites pass; the simulated reader decodes 192 of 192 scenes; the smeared-frame fast scan takes 203 ms (it was 236).
+
 ## 0.1.0-build.114 — 2026-11-14
 
 * **Automatic layout, the new default for encoding** (`CKEY_LAYOUT_AUTO` = 255, `CKEY_HAS_AUTO_LAYOUT`, `CKEY_AUTO_LAYOUT_ARC_FROM_VERSION` 8). Standard (Format 0.27) for versions 1–7, Standard arc grouped (Format 0.33) for 8–31; with version 0, the smallest version that fits under that rule. `ckey_scalable_capacity` accepts it too. A symbol never carries it: its layout is the one chosen. Naming a layout still gives exactly that layout.

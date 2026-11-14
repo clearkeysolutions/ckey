@@ -752,7 +752,12 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
     // wherever the border search's coarse outline put it.
     // The border search sometimes returns the stroke's inner outline (the
     // moat's rim) or an outer rim instead of the stroke's outer edge, so
-    // three sizes are tried and the best-fitting frame wins.
+    // three sizes are tried and the best-fitting frame wins. All three are
+    // always compared: an outline a unit inside each side (the frame and the
+    // first grid rows blurred together, as in dense codes on a screen) still
+    // fits a partial skeleton (score 124 against 214 for the true frame), so
+    // stopping at the first "full" skeleton kept corners 13-30 px off that
+    // the fast scan, without the refiner, could not read.
     double start_quad[8]; double start_scale = kBorderToField;
     double alternative_score = -1, alternative_quad[8] = {};
     bool start_has_skeleton = false;
@@ -765,8 +770,7 @@ double ckey_refine_quad_gray8(const uint8_t *gray, size_t width, size_t height, 
             fit_frame_edges(gray, width, height, stride, field, 0.25);
             const double fit = frame_edge_score(gray, width, height, stride, field, 1.5) * (0.25 + scalable_skeleton_score(gray, width, height, stride, field));
             if (fit > best_fit) { best_fit = fit; std::copy(field, field + 8, start_quad); fitted = true; }
-            // The outline as found already fits a full skeleton: no need to try the other sizes.
-            if (work_exhausted() || (grow == 1.0 && scalable_skeleton_score(gray, width, height, stride, field) >= 60.0)) break;
+            if (work_exhausted()) break;
         }
         if (fitted && !refine_legacy_start()) start_scale = 1.0; else { std::copy(border_quad, border_quad + 8, start_quad); start_scale = kBorderToField; }
         // A clean frame with no CKey skeleton inside it (finder arms, moat,
