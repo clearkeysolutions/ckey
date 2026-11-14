@@ -60,9 +60,17 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
           cache-disabled: true   # self-hosted: ~/.gradle stays on the machine; uploading the cache stalled
+      # An interrupted download leaves an NDK folder without source.properties,
+      # which Gradle then refuses (CXX1101): remove it so it is installed again.
+      - name: Remove an incomplete NDK
+        run: |
+          ndk="$HOME/.android/sdk/ndk/27.2.12479018"
+          if [ -d "$ndk" ] && [ ! -f "$ndk/source.properties" ]; then echo "removing incomplete $ndk"; rm -rf "$ndk"; fi
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
-          packages: platform-tools   # the default also asks for 'tools', which current sdkmanager no longer has
+          # The default also asks for 'tools', which current sdkmanager no longer has.
+          # The NDK matches ckey/build.gradle.kts (ndkVersion).
+          packages: platform-tools ndk;27.2.12479018
       - name: Build, unit test, publish locally
         run: >
           gradle -p sdk/android --no-daemon --stacktrace
@@ -98,9 +106,17 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
           cache-disabled: true   # self-hosted: ~/.gradle stays on the machine; uploading the cache stalled
+      # An interrupted download leaves an NDK folder without source.properties,
+      # which Gradle then refuses (CXX1101): remove it so it is installed again.
+      - name: Remove an incomplete NDK
+        run: |
+          ndk="$HOME/.android/sdk/ndk/27.2.12479018"
+          if [ -d "$ndk" ] && [ ! -f "$ndk/source.properties" ]; then echo "removing incomplete $ndk"; rm -rf "$ndk"; fi
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
-          packages: platform-tools   # the default also asks for 'tools', which current sdkmanager no longer has
+          # The default also asks for 'tools', which current sdkmanager no longer has.
+          # The NDK matches ckey/build.gradle.kts (ndkVersion).
+          packages: platform-tools ndk;27.2.12479018
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 30
