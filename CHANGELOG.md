@@ -10,6 +10,10 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.112 — 2026-11-14
+
+* **Swift SDK builds again.** `CKeyResult.profileDescription` covers the two arc layouts ("Profile 0 · arc · v21", "… · arc · grouped · …"); build 110 added the cases without it, a compile error found in Xcode.
+
 ## 0.1.0-build.111 — 2026-11-14
 
 * **Version keys judged per group** (`scalable_version_fit`). The Grid, Ring and Ray Keys are each compared with their own blanks instead of one threshold for all fourteen samples. In a small or blurred code the Ring Key's dots (single small dots on the outermost ring) read faint, about 200 against paper at 237. One threshold, pulled down by the much darker grid and ray keys (about 130), put them on the paper side. The true version then failed its key gate (11 of 14, needing 12) while its data read almost perfectly: in one case 81 of 10,845 sites wrong, against 35 correctable bytes per block. A group whose marks are not clearly apart from its blanks (under a quarter of the overall contrast) earns no evidence, so noise in a wrong hypothesis still does not pass.

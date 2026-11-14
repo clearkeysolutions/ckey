@@ -147,6 +147,8 @@ public struct CKeyResult: Equatable, Sendable {
             case .standardGrouped: return "Profile 0 · grouped · v\(version)"
             case .printGrouped: return "Profile 0.1 · print · grouped · v\(version)"
             case .pixel: return "Profile 0 · pixel · v\(version)"
+            case .standardArc: return "Profile 0 · arc · v\(version)"
+            case .standardArcGrouped: return "Profile 0 · arc · grouped · v\(version)"
             }
         case .locator: return "Profile 1 · Locator"
         case .text: return "Profile 2 · Text"
