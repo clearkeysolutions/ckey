@@ -286,7 +286,12 @@ final class CKeyScanLayerTests: XCTestCase {
         XCTAssertEqual(CKeyLayout.print.rawValue, 1)
         XCTAssertEqual(CKeyLayout.standardGrouped.rawValue, 2)   // CKEY_LAYOUT_STANDARD_GROUPED
         XCTAssertEqual(CKeyLayout.printGrouped.rawValue, 3)      // CKEY_LAYOUT_PRINT_GROUPED
-        XCTAssertEqual(CKeyLayout.allCases.count, 4)
+        XCTAssertEqual(CKeyLayout.pixel.rawValue, 4)              // CKEY_LAYOUT_PIXEL
+        XCTAssertEqual(CKeyLayout.standardArc.rawValue, 5)        // CKEY_LAYOUT_STANDARD_ARC
+        XCTAssertEqual(CKeyLayout.standardArcGrouped.rawValue, 6) // CKEY_LAYOUT_STANDARD_ARC_GROUPED
+        XCTAssertEqual(CKeyLayout.allCases.count, 7)
+        XCTAssertTrue(CKeyLayout.standardArcGrouped.isArc && CKeyLayout.standardArcGrouped.isGrouped)
+        XCTAssertTrue(CKeyLayout.standardArc.isArc && !CKeyLayout.standardArc.isGrouped && !CKeyLayout.standardArc.isPrint)
         XCTAssertTrue(CKeyLayout.printGrouped.isPrint && CKeyLayout.printGrouped.isGrouped)
         XCTAssertTrue(CKeyLayout.standardGrouped.isGrouped && !CKeyLayout.standardGrouped.isPrint)
         XCTAssertFalse(CKeyLayout.standard.isGrouped || CKeyLayout.print.isGrouped)

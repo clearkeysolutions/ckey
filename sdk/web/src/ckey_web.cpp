@@ -184,7 +184,8 @@ CKW_EXPORT void ckw_symbol_info(const ckey_scalable_symbol *sym, uint32_t *out) 
 CKW_EXPORT WebStyle *ckw_style_new(uint32_t preset) {
     auto *ws = new (std::nothrow) WebStyle();
     if (!ws) { set_error("out of memory"); return nullptr; }
-    if (ckey_style_preset_fill(&ws->style, static_cast<ckey_style_preset>(preset)) != CKEY_OK) {
+    // Range-checked before the cast: an out-of-range value in an enum is undefined behaviour (UBSan on clang).
+    if (preset > CKEY_PRESET_CONCEPT || ckey_style_preset_fill(&ws->style, static_cast<ckey_style_preset>(preset)) != CKEY_OK) {
         set_error("unknown style preset");
         delete ws;
         return nullptr;
