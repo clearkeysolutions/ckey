@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.116** on `scratch`, C ABI **4**. The latest release is 0.1.0-build.86; it has neither Pixel nor Arc.
+Build **0.1.0-build.120** on `scratch` and `Stable-Release`, C ABI **4**. The latest release is 0.1.0-build.120 (tag `v0.1.0-build.120`); the release before it, 0.1.0-build.85, has neither the reader repair pass nor Pixel, Arc, Auto or ES256.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -95,6 +95,8 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
+| build.120 | `Stable-Release` | 2026-11-14 | Release CKey 0.1.0-build.120: `Stable-Release` fast-forwarded from build.85 |
+| build.118 | `e19cc67` | 2026-11-14 | ES256 Safe Action issuer keys (ECDSA P-256, raw r‖s, low-S); signing in a key service; additive, ABI 4 (SDKs: build.119) |
 | build.114 | `c324a1e` | 2026-11-14 | Automatic layout (`CKEY_LAYOUT_AUTO` 255): Standard for v1–7, Arc grouped (Format 0.33) from v8; the new default in Swift, web, Android and the CLI; opt-in in the C API; additive, ABI 4 |
 | build.110 | `ab30644` | 2026-11-14 | Formats 0.32/0.33, Arc: Standard with equal-arc rings, scattered and byte-grouped (`CKEY_LAYOUT_STANDARD_ARC` 5, `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6), and the reader for them; opt-in at first; additive, ABI 4 |
 | build.98 | `22f8c8d` | 2026-11-13 | Format 0.31, the experimental pixel layout (`CKEY_LAYOUT_PIXEL` 4); additive, ABI 4 |
@@ -210,7 +212,9 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 
 | Release | Tag | Builds | Formats emitted | ABI | Status |
 |---|---|---|---|---|---|
-| CKey 0.1.0-build.83 | `v0.1.0-build.83` | dev.1 to build.83 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.120 | `v0.1.0-build.120` | dev.1 to build.120 | P0 0.27.0 (v1–7) and 0.33.0 (v8–31) by default; opt-in 0.28.0, 0.29.0, 0.30.0, 0.31.0 (experimental), 0.32.0; P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.85 | `v0.1.0-build.85` | dev.1 to build.85 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded |
+| CKey 0.1.0-build.83 | `v0.1.0-build.83` | dev.1 to build.83 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded |
 | CKey 0.1.0-build.82 | `v0.1.0-build.82` | dev.1 to build.82 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded (npm name taken) |
 | CKey 0.1.0-build.81 | `v0.1.0-build.81` | dev.1 to build.81 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded (release build stopped) |
 | CKey 0.1.0-build.76 | `v0.1.0-build.76` | dev.1 to build.76 | the same | 4 | not released: its release build failed; nothing was published |

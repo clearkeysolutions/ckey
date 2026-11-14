@@ -2,7 +2,7 @@
 
 This log lists the releases tagged on the `Stable-Release` branch, newest first. Each release is one immutable tag. The per-build history is in [CHANGELOG.md](CHANGELOG.md), and the [release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) explains how to cut and deprecate a release.
 
-**Releases so far: 1** (`v0.1.0-build.83`; `v0.1.0-build.76`, `v0.1.0-build.81` and `v0.1.0-build.82` were tagged but superseded before they were published).
+**Releases so far: 3** (`v0.1.0-build.120`, `v0.1.0-build.85`, `v0.1.0-build.83`; `v0.1.0-build.76`, `v0.1.0-build.81` and `v0.1.0-build.82` were tagged but superseded before they were published).
 
 ## Entry template
 
@@ -27,6 +27,42 @@ When a release is deprecated:
 2. Update its **Status** line here. Never delete the entry.
 
 ## Releases
+
+### CKey 0.1.0-build.120 — 2026-11-14
+
+* **Tag:** `v0.1.0-build.120`
+* **Status:** supported
+* **Builds included:** dev.1 to build.120. New since 0.1.0-build.85: build.86 to build.120 (see CHANGELOG.md).
+* **Formats emitted:**
+  * **Default:** P0 0.27.0 for versions 1–7 and P0 0.33.0 (Arc, byte-grouped) for versions 8–31. This is the SDK and CLI default (Auto layout).
+  * **Opt-in:** P0.1 0.28.0, 0.29.0, 0.30.0 and 0.32.0, plus 0.31.0 (Pixel, experimental, no specification yet).
+  * **Other profiles:** P1 0.14.0, P2 0.25.0, P3 0.26.0.
+* **Formats read:** the emitted formats, plus the legacy formats listed in the map.
+* **C ABI:** 4. Everything since build.85 is additive.
+* **Highlights:**
+  * **Reader repair pass (build.86):** a new border search, a frame-edge corner fit with a lens term, erasure and soft-decision decoding, and a work budget. Also levels U and X, and byte-grouped placement (Formats 0.29/0.30).
+  * **Arc (Formats 0.32/0.33, build.110):** Standard geometry with each ring's slot count scaled to its radius. Auto layout (`CKEY_LAYOUT_AUTO`, build.114) makes it the default from v8. Arc and grouped readers use per-group version keys (build.111), and the fast scan always compares three start sizes (build.115).
+  * **Per-site scan heatmaps and opt-in detailed scan reports** in the SDKs.
+  * **ES256 Safe Action issuer keys (build.118–119):** ECDSA P-256 with SHA-256, raw `r ‖ s`, low-S, and 33- or 65-byte SEC 1 keys. They are verified in the core and in every SDK. Signing goes through a key service that keeps the key (`ckey_safe_action_signing_input`, `ckey_es256_signature_from_der`, `ckey_safe_action_assemble`, and `ckey action signing-input` / `assemble` in the CLI). Ed25519 is unchanged.
+  * **CI and releases on the self-hosted runner** (build.119).
+* **Known limits:**
+  * Experimental: formats are drafts and may change before 1.0.
+  * Format 0.31 (Pixel) has no specification yet.
+  * The release builds on one self-hosted Apple-silicon Mac. This release's archives are macos-arm64 only, and the NuGet package carries the osx-arm64 and osx-x64 natives only. Linux and Windows natives return when runners for them exist.
+  * No independent security review yet, including of the P-256 verifier. It is cross-checked against Node's crypto and OpenSSL.
+
+### CKey 0.1.0-build.85 — 2026-11-07
+
+* **Tag:** `v0.1.0-build.85` (commit `ede38f5`)
+* **Status:** superseded by CKey 0.1.0-build.120
+* **Builds included:** dev.1 to build.85 (see CHANGELOG.md)
+* **Formats emitted:** P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0
+* **Formats read:** the emitted formats, plus the legacy formats listed in the map
+* **C ABI:** 4
+* **Highlights:**
+  * Safe Actions: Ed25519 envelope verification in the core and CLI, the specification, 22 independent vectors, and SDK-owned policy in every SDK. Adds `CKEY_EXPIRED`.
+  * The field-test suite (build.84).
+* **Known limits:** as 0.1.0-build.83.
 
 ### CKey 0.1.0-build.83 — 2026-11-06
 

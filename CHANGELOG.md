@@ -10,6 +10,14 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.120 — 2026-11-14
+
+* **Release CKey 0.1.0-build.120.** `Stable-Release` is fast-forwarded from build.85 to this commit and tagged `v0.1.0-build.120`. The release workflow builds and drafts the GitHub Release on the self-hosted runner.
+  * `CHANGELOG-STABLE.md` gains entries for this release and for 0.1.0-build.85, which was published on 2026-11-07 but had no entry.
+  * The map gains release-table rows for both, and 0.1.0-build.83 is marked superseded. It also gains build rows for build.118 and build.120.
+* **Install docs** (README, the SDK READMEs, and the iOS and macOS app READMEs) name 0.1.0-build.120. Before this they named 0.1.0-build.86, which was never tagged.
+* No code change.
+
 ## 0.1.0-build.119 — 2026-11-14
 
 * **ES256 Safe Action keys in every SDK.** Each SDK takes the algorithm from the pinned key's length: 32 bytes (64 hex) is Ed25519; 33 or 65 bytes (66 or 130 hex, SEC 1) is ES256. The issuer key-file lookup accepts `"alg": "Ed25519"` and `"alg": "ES256"`, and skips a key whose length disagrees with its `alg`.
