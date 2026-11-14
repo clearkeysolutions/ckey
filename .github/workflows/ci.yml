@@ -65,7 +65,7 @@ jobs:
           cmake --build build --target ckey-bench --parallel 2
       - name: Run
         run: ./build/ckey-bench --quick --md benchmarks.md --json benchmarks.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: benchmarks
-          path: benchmarks.*
+      # The results go in the run's summary, not an artifact (the account's
+      # artifact storage is at its quota).
+      - name: Summary
+        run: cat benchmarks.md >> "$GITHUB_STEP_SUMMARY"
