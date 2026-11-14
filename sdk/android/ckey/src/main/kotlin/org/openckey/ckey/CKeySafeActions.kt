@@ -15,7 +15,7 @@ import java.net.URLEncoder
  *    requesting device and place.
  *
  * There is no public way to approve a [CKeySafeActionRequest] other than that
- * prompt. Verification (Ed25519, envelope, lifetime) is the C core's.
+ * prompt. Verification (Ed25519 or ES256, envelope, lifetime) is the C core's.
  *
  * ```
  * val actions = CKeySafeActions("com.viadere")
@@ -160,14 +160,16 @@ class CKeySafeActions @JvmOverloads constructor(
     }
 
     /**
-     * Pins an issuer's Ed25519 public key (64 hexadecimal digits). [requestInfo]
-     * is the issuer's `request_info` URL template, required for cross-device actions.
+     * Pins an issuer's public key: Ed25519 (64 hexadecimal digits) or ES256
+     * (ECDSA P-256, a SEC 1 point: 66 or 130 hexadecimal digits). The length
+     * says which. [requestInfo] is the issuer's `request_info` URL template,
+     * required for cross-device actions.
      */
     @JvmOverloads
     fun trust(issuer: String, keyId: String, publicKeyHex: String, requestInfo: String? = null): CKeySafeActions {
         require(ISSUER.matches(issuer)) { "issuer is a lower-case domain name" }
         require(KEY_ID.matches(keyId)) { "keyId is 1 to 32 letters, digits, . _ or -" }
-        val key = hexKey(publicKeyHex) ?: throw IllegalArgumentException("a public key is 64 hexadecimal digits")
+        val key = hexKey(publicKeyHex) ?: throw IllegalArgumentException("a public key is 64 (Ed25519), 66 or 130 (ES256) hexadecimal digits")
         synchronized(this) { keys["$issuer $keyId"] = Trusted(key, requestInfo) }
         return this
     }
@@ -248,9 +250,11 @@ class CKeySafeActions @JvmOverloads constructor(
             for (k in parsed["keys"] as? List<*> ?: emptyList<Any>()) {
                 val m = k as? Map<*, *> ?: continue
                 val id = m["id"] as? String ?: continue
-                if (m["alg"] != "Ed25519" || !KEY_ID.matches(id)) continue
+                val alg = m["alg"] as? String ?: continue
+                if ((alg != "Ed25519" && alg != "ES256") || !KEY_ID.matches(id)) continue  // other algs are ignored
                 val hex = m["public_key"] as? String ?: continue
                 val key = hexKey(hex) ?: continue
+                if ((alg == "Ed25519") != (key.size == 32)) continue  // the alg and the key's length must agree
                 val notAfterText = m["not_after"] as? String
                 val notAfter = if (notAfterText == null) null else (utcMillis(notAfterText) ?: continue)
                 entries[id] = key to notAfter
@@ -283,9 +287,10 @@ class CKeySafeActions @JvmOverloads constructor(
         /** True when [text] is a Safe Action payload. Says nothing about whether it is valid. */
         @JvmStatic fun isSafeAction(text: String): Boolean = text.startsWith(PREFIX) && text.length > PREFIX.length
 
+        /** 32 bytes (Ed25519), 33 or 65 bytes (ES256, SEC 1); null otherwise. */
         internal fun hexKey(hex: String): ByteArray? {
-            if (!Regex("^[0-9A-Fa-f]{64}$").matches(hex)) return null
-            return ByteArray(32) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+            if (!Regex("^([0-9A-Fa-f]{64}|[0-9A-Fa-f]{66}|[0-9A-Fa-f]{130})$").matches(hex)) return null
+            return ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
         }
 
         /** `YYYY-MM-DDTHH:MM:SSZ` (java.time needs API 26; this SDK supports 24). */

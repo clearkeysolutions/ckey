@@ -113,7 +113,7 @@ public final class HostHarness {
         check(extremeDecoded != null && Arrays.equals(extremeDecoded, utf8) && xdec[0] == 1 && xdec[2] == 3, "PRINT_GROUPED round trip, level X (profile P0.1, layout 3)");
         check(CKeyNative.nativeCapacity(1, 5, 0) == 0 && CKeyNative.nativeCapacity(1, 4, 0) == 0, "v1 carries nothing at U or X");
         check(CKeyNative.nativeCapacity(8, 4, 0) > 0 && CKeyNative.nativeCapacity(8, 4, 0) == CKeyNative.nativeCapacity(8, 4, 2), "grouped capacity equals the scattered layout's");
-        check(CKeyNative.nativeCapacity(8, 6, 0) == 0 && CKeyNative.nativeCapacity(8, 1, 4) == 0, "out-of-range level or layout has no capacity");
+        check(CKeyNative.nativeCapacity(8, 6, 0) == 0 && CKeyNative.nativeCapacity(8, 1, 7) == 0, "out-of-range level or layout has no capacity");
 
         // Blank frame: no result, no exception.
         byte[] blank = new byte[320 * 240];
@@ -214,7 +214,7 @@ public final class HostHarness {
         throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[100], 1, 3, 0), "payload over a fixed version's capacity");
         throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 1, 5, 0), "level X at v1 (zero capacity)");
         throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 0, 6, 0), "level out of range");
-        throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 0, 1, 4), "layout out of range");
+        throwsType(CKeyException.class, () -> CKeyNative.nativeEncode(new byte[1], 0, 1, 7), "layout out of range");
 
         // ---- telemetry
         CKeyNative.nativeTelemetryResetForTesting();

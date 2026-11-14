@@ -195,7 +195,7 @@ namespace OpenCKey
         private static readonly Regex IssuerPattern = new Regex("^[a-z0-9.-]+\\.[a-z0-9-]+$", RegexOptions.CultureInvariant);
         private static readonly Regex ActionPattern = new Regex("^[a-z0-9._-]{1,64}$", RegexOptions.CultureInvariant);
         private static readonly Regex KeyIdPattern = new Regex("^[A-Za-z0-9._-]{1,32}$", RegexOptions.CultureInvariant);
-        private static readonly Regex HexKeyPattern = new Regex("^[0-9A-Fa-f]{64}$", RegexOptions.CultureInvariant);
+        private static readonly Regex HexKeyPattern = new Regex("^(?:[0-9A-Fa-f]{64}|0[23][0-9A-Fa-f]{64}|04[0-9A-Fa-f]{128})$", RegexOptions.CultureInvariant);
 
         /// <summary>The core's verdict. Replaced only by unit tests.</summary>
         internal delegate int CoreFn(byte[] payload, byte[]? publicKey, long nowSeconds, int maxLifetime, out CKeyVerifiedSafeAction? fields, out string message);
@@ -240,12 +240,12 @@ namespace OpenCKey
         /// <summary>True when text is a Safe Action payload. Says nothing about whether it is valid.</summary>
         public static bool IsSafeAction(string? text) => text != null && text.StartsWith(Prefix, StringComparison.Ordinal) && text.Length > Prefix.Length;
 
-        /// <summary>Pins an issuer's Ed25519 public key (64 hex digits). <paramref name="requestInfo"/> is the issuer's request_info URL template, required for cross-device actions.</summary>
+        /// <summary>Pins an issuer's public key: Ed25519 (64 hex digits) or ES256 (P-256, SEC 1: 66 hex digits compressed or 130 uncompressed); the length says which. <paramref name="requestInfo"/> is the issuer's request_info URL template, required for cross-device actions.</summary>
         public CKeySafeActions Trust(string issuer, string keyId, string publicKeyHex, string? requestInfo = null)
         {
             if (issuer == null || !IssuerPattern.IsMatch(issuer)) throw new ArgumentException("issuer is a lower-case domain name", nameof(issuer));
             if (keyId == null || !KeyIdPattern.IsMatch(keyId)) throw new ArgumentException("keyId is 1 to 32 letters, digits, . _ or -", nameof(keyId));
-            byte[] key = HexKey(publicKeyHex) ?? throw new ArgumentException("a public key is 64 hexadecimal digits", nameof(publicKeyHex));
+            byte[] key = HexKey(publicKeyHex) ?? throw new ArgumentException("a public key is 64 (Ed25519), 66 or 130 (ES256) hexadecimal digits", nameof(publicKeyHex));
             lock (_lock) _keys[issuer + " " + keyId] = new Trusted { Key = key, RequestInfo = requestInfo };
             return this;
         }
@@ -332,9 +332,11 @@ namespace OpenCKey
                     {
                         if (!(k is Dictionary<string, object?> m)) continue;
                         if (!(m.TryGetValue("id", out var id) && id is string idText && KeyIdPattern.IsMatch(idText))) continue;
-                        if (!(m.TryGetValue("alg", out var alg) && (alg as string) == "Ed25519")) continue;
+                        string? algName = m.TryGetValue("alg", out var alg) ? alg as string : null;
+                        if (algName != "Ed25519" && algName != "ES256") continue;
                         byte[]? key = m.TryGetValue("public_key", out var pk) && pk is string hex ? HexKey(hex) : null;
-                        if (key == null) continue;
+                        // The key's length must agree with its alg (32 bytes Ed25519; 33 or 65 ES256).
+                        if (key == null || (key.Length == 32) != (algName == "Ed25519")) continue;
                         DateTimeOffset? notAfter = null;
                         if (m.TryGetValue("not_after", out var na) && na is string naText)
                         {
@@ -375,8 +377,8 @@ namespace OpenCKey
         internal static byte[]? HexKey(string? hex)
         {
             if (hex == null || !HexKeyPattern.IsMatch(hex)) return null;
-            var key = new byte[32];
-            for (int i = 0; i < 32; i++) key[i] = byte.Parse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            var key = new byte[hex.Length / 2];
+            for (int i = 0; i < key.Length; i++) key[i] = byte.Parse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             return key;
         }
 
@@ -415,9 +417,13 @@ namespace OpenCKey
                 }
                 else
                 {
-                    if (publicKey.Length != 32) throw new ArgumentException("a public key is 32 bytes", nameof(publicKey));
+                    // 32 bytes: Ed25519. 33 or 65 bytes: ES256 (ECDSA P-256, SEC 1).
+                    if (publicKey.Length != 32 && publicKey.Length != 33 && publicKey.Length != 65)
+                        throw new ArgumentException("a public key is 32 (Ed25519), 33 or 65 (ES256) bytes", nameof(publicKey));
                     fixed (byte* k = publicKey)
-                        status = NativeMethods.ckey_safe_action_verify(p, (nuint)payload.Length, k, (ulong)Math.Max(0, nowSeconds), (uint)maxLifetime, &sa, &diag);
+                        status = publicKey.Length == 32
+                            ? NativeMethods.ckey_safe_action_verify(p, (nuint)payload.Length, k, (ulong)Math.Max(0, nowSeconds), (uint)maxLifetime, &sa, &diag)
+                            : NativeMethods.ckey_safe_action_verify_key(p, (nuint)payload.Length, 2 /* CKEY_SAFE_ACTION_ES256 */, k, (nuint)publicKey.Length, (ulong)Math.Max(0, nowSeconds), (uint)maxLifetime, &sa, &diag);
                 }
             }
             if (status != 0)

@@ -81,12 +81,15 @@ export function createCKey(M, options = {}) {
   const f64s = (p, n) => Array.from(new Float64Array(heap().buffer, p, n));
 
   // ---- Safe Actions (verification is the core's) -----------------------------
-  const safeActionCall = (bytes, key, nowSeconds, maxLifetime) => {
+  const safeActionCall = (bytes, key, nowSeconds, maxLifetime, alg = 'Ed25519') => {
     if (typeof M._ckw_safe_action !== 'function') throw new Error('this CKey core has no Safe Actions');
+    if (key && alg !== 'Ed25519' && typeof M._ckw_safe_action_key !== 'function') throw new Error('this CKey core has no ES256 (core 0.1.0-build.118 or later)');
     const p = copyIn(bytes);
     const k = key ? copyIn(key) : 0;
     try {
-      const out = M._ckw_safe_action(p, bytes.length, k, nowSeconds, maxLifetime);
+      const out = key && alg !== 'Ed25519'
+        ? M._ckw_safe_action_key(p, bytes.length, alg === 'ES256' ? 2 : 0, k, key.length, nowSeconds, maxLifetime)
+        : M._ckw_safe_action(p, bytes.length, k, nowSeconds, maxLifetime);
       if (!out) throw new Error(lastError('not a valid Safe Action'));
       const fields = JSON.parse(cstring(out));
       M._ckw_free(out);
@@ -100,7 +103,7 @@ export function createCKey(M, options = {}) {
   };
   const safeActionCore = {
     parse: (bytes) => safeActionCall(bytes, null, 0, 0),
-    verify: (bytes, key, nowSeconds, maxLifetime) => safeActionCall(bytes, key, nowSeconds, maxLifetime),
+    verify: (bytes, key, nowSeconds, maxLifetime, alg) => safeActionCall(bytes, key, nowSeconds, maxLifetime, alg),
   };
 
   // ---- symbols -------------------------------------------------------------

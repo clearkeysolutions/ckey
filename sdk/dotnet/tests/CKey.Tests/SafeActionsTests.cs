@@ -18,14 +18,14 @@ namespace OpenCKey.Tests
         private const string Key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
         private static readonly DateTimeOffset Now = DateTimeOffset.FromUnixTimeSeconds(1794000000);
 
-        private static JsonElement Vectors()
+        private static JsonElement Vectors(string file = "safe-actions-v1.json")
         {
             for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
             {
-                string path = Path.Combine(dir.FullName, "tests", "vectors", "safe-actions-v1.json");
+                string path = Path.Combine(dir.FullName, "tests", "vectors", file);
                 if (File.Exists(path)) return JsonDocument.Parse(File.ReadAllText(path)).RootElement;
             }
-            throw new FileNotFoundException("tests/vectors/safe-actions-v1.json");
+            throw new FileNotFoundException("tests/vectors/" + file);
         }
 
         private static JsonElement Vector(string name) => Vectors().GetProperty("vectors").EnumerateArray().First(v => v.GetProperty("name").GetString() == name);
@@ -72,6 +72,43 @@ namespace OpenCKey.Tests
                 n++;
             }
             Assert.True(n >= 20);
+        }
+
+        // tests/vectors/safe-actions-es256-v1.json: ES256 (ECDSA P-256) issuer keys,
+        // compressed and uncompressed. A key of the wrong length never reaches the core.
+        [Fact]
+        public void Es256VectorVerdicts()
+        {
+            int n = 0;
+            var core = new CKeySafeActions("com.viadere").Core;
+            foreach (var v in Vectors("safe-actions-es256-v1.json").GetProperty("vectors").EnumerateArray())
+            {
+                string name = v.GetProperty("name").GetString()!;
+                string expect = v.GetProperty("expect").GetString()!;
+                byte[]? key = CKeySafeActions.HexKey(v.GetProperty("public_key").GetString());
+                if (key == null)
+                {
+                    Assert.Equal("invalid", expect);
+                    Assert.Throws<ArgumentException>(() => new CKeySafeActions("com.viadere").Trust("viadere.com", "k", v.GetProperty("public_key").GetString()!));
+                    n++;
+                    continue;
+                }
+                byte[] payload = Encoding.UTF8.GetBytes(v.GetProperty("payload").GetString()!);
+                int status = core(payload, key, v.GetProperty("now").GetInt64(), v.GetProperty("max_lifetime").GetInt32(), out var fields, out string message);
+                bool ok = expect switch
+                {
+                    "ok" => status == 0,
+                    "integrity" => status == 6,
+                    "expired" => status == 7,
+                    "invalid" => status == 1,
+                    "invalid_or_integrity" => status == 1 || status == 6,
+                    _ => false,
+                };
+                Assert.True(ok, $"{name}: expected {expect}, got {status} {message}");
+                if (expect == "ok") Assert.Equal(v.GetProperty("fields").GetProperty("issuer").GetString(), fields!.Issuer);
+                n++;
+            }
+            Assert.True(n >= 9);
         }
 
         private static CKeySafeActions Actions(Func<string, string?>? fetch = null)

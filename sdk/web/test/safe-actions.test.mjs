@@ -195,3 +195,54 @@ function fakeDocument() {
     click: (label) => nodes.flatMap(all).find((n) => n.tag === 'button' && n.textContent === label).listeners.click(),
   };
 }
+
+// ES256 (ECDSA P-256, raw r || s, low-S): the same policy layer, with the
+// algorithm passed to the core from a pinned key's length or the key file's alg.
+test('ES256 issuer keys: pinned by length or from the key file, and the alg reaches the core', async () => {
+  const { generateKeyPairSync, createPublicKey: pub } = await import('node:crypto');
+  const N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const x = Buffer.from(jwk.x, 'base64url'), y = Buffer.from(jwk.y, 'base64url');
+  const uncompressed = Buffer.concat([Buffer.from([4]), x, y]), compressed = Buffer.concat([Buffer.from([2 + (y[31] & 1)]), x]);
+  const signEs = (payload) => {
+    const { b, sigAt } = parseBytes(Buffer.from(payload));
+    const raw = sign('sha256', Buffer.concat([CONTEXT, b.subarray(0, sigAt)]), { key: privateKey, dsaEncoding: 'ieee-p1363' });
+    let s = BigInt('0x' + raw.subarray(32).toString('hex')); if (s > N / 2n) s = N - s;
+    const sig = Buffer.concat([raw.subarray(0, 32), Buffer.from(s.toString(16).padStart(64, '0'), 'hex')]);
+    return 'ckey-action:1:' + Buffer.concat([b.subarray(0, sigAt), sig]).toString('base64url');
+  };
+  const seen = [];
+  const esCore = {
+    parse: core.parse,
+    verify(bytes, key, now, maxLifetime, alg) {
+      seen.push([alg, key.length]);
+      if (alg !== 'ES256') return core.verify(bytes, key, now, maxLifetime);
+      const { b, sigAt, fields } = parseBytes(bytes);
+      const spki = Buffer.concat([Buffer.from(key.length === 33 ? '3039301306072a8648ce3d020106082a8648ce3d030107032200' : '3059301306072a8648ce3d020106082a8648ce3d030107034200', 'hex'), Buffer.from(key)]);
+      const ok = verify('sha256', Buffer.concat([CONTEXT, b.subarray(0, sigAt)]), { key: pub({ key: spki, format: 'der', type: 'spki' }), dsaEncoding: 'ieee-p1363' }, b.subarray(sigAt));
+      if (!ok) throw new Error('the signature does not match this key');
+      return fields;
+    }
+  };
+  const keyFile = { issuer: 'viadere.com', keys: [
+    { id: 'rsa-1', alg: 'RS256', public_key: 'ab' },
+    { id: 'vault-p256-1', alg: 'ES256', public_key: compressed.toString('hex') },
+  ] };
+  const fetch = async () => Response.json(keyFile);
+  const sa = new SafeActions(esCore, 'com.viadere', { now: () => NOW * 1000, fetch, keyFiles: true })
+    .trust('citeory.com', 'pinned-p256', uncompressed.toString('hex'))
+    .register('open.library', { issuers: ['citeory.com', 'viadere.com'] }, () => 'opened');
+  const fromFile = await sa.handle(signEs(make({ issuer: 'viadere.com', key_id: 'vault-p256-1' })));
+  assert.equal(fromFile.kind, 'ran');
+  const pinned = await sa.handle(signEs(make({ key_id: 'pinned-p256' })));
+  assert.equal(pinned.kind, 'ran');
+  assert.deepEqual(seen, [['ES256', 33], ['ES256', 65]]);
+  // A key file entry with an unknown alg is ignored.
+  const unknown = await sa.handle(signEs(make({ issuer: 'viadere.com', key_id: 'rsa-1' })));
+  assert.equal(unknown.kind, 'rejected');
+  assert.match(unknown.reason, /no trusted key/);
+  // Pinned keys of the wrong length, or an alg that does not fit, are refused.
+  assert.throws(() => sa.trust('citeory.com', 'bad', 'ab'.repeat(40)), /alg is Ed25519 or ES256/);
+  assert.throws(() => sa.trust('citeory.com', 'bad', uncompressed, { alg: 'Ed25519' }), /32 bytes/);
+});

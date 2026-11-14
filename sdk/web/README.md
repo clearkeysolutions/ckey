@@ -138,6 +138,8 @@ else if (outcome.kind === 'confirm') await outcome.request.present(); // the SDK
 else if (outcome.kind === 'rejected') showUnverified(outcome.reason);
 ```
 
+The pinned key is Ed25519 (64 hex digits) or ES256, ECDSA P-256 (66 hex digits compressed, 130 uncompressed); its length says which. An issuer whose key service holds only P-256 keys publishes `"alg": "ES256"` in its key file. See `spec/CKey-Safe-Actions.md`.
+
 Same-device actions run at once. Cross-device actions run only from `request.present()`, which shows the verified issuer and who is asking; there is no other way to approve one. Anything that fails a check runs nothing; show that the code claims to be a Safe Action but could not be verified, with the reason. See [spec/CKey-Safe-Actions.md](../../spec/CKey-Safe-Actions.md).
 
 ## Privacy and telemetry

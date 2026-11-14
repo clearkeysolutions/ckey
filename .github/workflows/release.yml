@@ -9,7 +9,7 @@ permissions:
   contents: read
 jobs:
   verify:
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -35,14 +35,11 @@ jobs:
     needs: verify
     strategy:
       matrix:
+        # The only runner is a self-hosted Apple-silicon Mac. linux-x64 and
+        # windows-x64 archives come back as rows when those runners exist.
         include:
-          - os: ubuntu-24.04
-            name: linux-x64
-          - os: macos-15
-            name: macos-arm64
-          - os: windows-2022
-            name: windows-x64
-    runs-on: ${{ matrix.os }}
+          - name: macos-arm64
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build and install
@@ -78,18 +75,13 @@ jobs:
 
   publish:
     needs: [verify, build, sdk-web, sdk-android, sdk-dotnet, sdk-swift]
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted   # needs gh (brew install gh) on the runner
     permissions:
       contents: write        # create the draft release
       id-token: write        # Sigstore signing for provenance
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: ckey-*-x64
-          path: dist
-          merge-multiple: true
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ckey-macos-*
@@ -121,7 +113,7 @@ jobs:
           cp docs/support-matrix.json dist/
       - name: Checksums
         working-directory: dist
-        run: sha256sum * > SHA256SUMS
+        run: shasum -a 256 * > SHA256SUMS
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: 'dist/*'

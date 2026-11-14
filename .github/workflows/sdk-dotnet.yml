@@ -22,25 +22,21 @@ permissions:
 jobs:
   native:
     name: native (${{ matrix.rid }})
-    runs-on: ${{ matrix.os }}
+    # Public repository, private runner: never run a fork's pull request here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # The only runner is a self-hosted Apple-silicon Mac, so only the macOS
+    # natives are built. linux-x64 (ubuntu-22.04, cmake_args "") and win-x64
+    # (windows-2022, cmake_args "-A x64") come back as matrix rows when a
+    # Linux and a Windows self-hosted runner exist; pack then requires all four.
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
         include:
-          - rid: linux-x64
-            os: ubuntu-22.04          # oldest supported glibc we build against
-            cmake_args: ""
-            run_probe: true
-          - rid: win-x64
-            os: windows-2022
-            cmake_args: "-A x64"
-            run_probe: true
           - rid: osx-arm64
-            os: macos-15
             cmake_args: "-DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
             run_probe: true
-          - rid: osx-x64
-            os: macos-15              # cross-compiled on Apple silicon
+          - rid: osx-x64              # cross-compiled on Apple silicon
             cmake_args: "-DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"
             run_probe: false
     defaults:
@@ -77,17 +73,14 @@ jobs:
   test:
     name: test (${{ matrix.rid }})
     needs: native
-    runs-on: ${{ matrix.os }}
+    # Public repository, private runner: never run a fork's pull request here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
         include:
-          - rid: linux-x64
-            os: ubuntu-24.04
-          - rid: win-x64
-            os: windows-2022
           - rid: osx-arm64
-            os: macos-15
     defaults:
       run:
         shell: bash
@@ -110,7 +103,9 @@ jobs:
 
   pack:
     needs: [native, test]
-    runs-on: ubuntu-24.04
+    # Public repository, private runner: never run a fork's pull request here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -119,7 +114,7 @@ jobs:
           path: sdk/dotnet/artifacts/download
       - name: Arrange native assets
         run: |
-          for rid in win-x64 linux-x64 osx-arm64 osx-x64; do
+          for rid in osx-arm64 osx-x64; do
             mkdir -p sdk/dotnet/artifacts/native/$rid
             cp sdk/dotnet/artifacts/download/native-$rid/* sdk/dotnet/artifacts/native/$rid/
           done
@@ -129,15 +124,14 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Pack
         run: |
-          dotnet pack sdk/dotnet/src/CKey/CKey.csproj -c Release -p:CKeyRequireAllNatives=true -o sdk/dotnet/artifacts/packages
+          dotnet pack sdk/dotnet/src/CKey/CKey.csproj -c Release -o sdk/dotnet/artifacts/packages
           dotnet pack sdk/dotnet/src/CKey.Wpf/CKey.Wpf.csproj -c Release -o sdk/dotnet/artifacts/packages
       - name: Verify package layout
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           pkg=sdk/dotnet/artifacts/packages/CKey.$version.nupkg
           unzip -l "$pkg" | tee contents.txt
-          for f in runtimes/win-x64/native/ckeynative.dll runtimes/linux-x64/native/libckeynative.so \
-                   runtimes/osx-arm64/native/libckeynative.dylib runtimes/osx-x64/native/libckeynative.dylib \
+          for f in runtimes/osx-arm64/native/libckeynative.dylib runtimes/osx-x64/native/libckeynative.dylib \
                    lib/net8.0/CKey.dll lib/netstandard2.0/CKey.dll README.md buildTransitive/CKey.targets; do
             grep -q " $f\$" contents.txt || { echo "missing $f"; exit 1; }
           done

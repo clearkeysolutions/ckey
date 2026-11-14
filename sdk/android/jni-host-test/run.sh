@@ -29,7 +29,17 @@ echo "== 1. JNI signatures (Kotlin -> javac -h -> g++)"
 python3 "$HERE/gen_mirror.py" "$KT_SRC/org/openckey/ckey/CKeyNative.kt" "$OUT/mirror-src"
 "$JAVA_HOME/bin/javac" -d "$OUT/mirror" -h "$OUT/jni-h" \
   "$OUT/mirror-src/org/openckey/ckey/CKeyNative.java" "$OUT/mirror-src/org/openckey/ckey/CKeyException.java"
-JNI_INC=(-I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" -I"$REPO/include" -I"$REPO/src")
+# Linux (GNU ld) or macOS (ld64): the CI runner is a self-hosted Mac.
+if [ "$(uname -s)" = Darwin ]; then
+  JNI_OS=darwin
+  LINK_EXPORTS=(-Wl,-exported_symbol,_Java_* -Wl,-exported_symbol,_JNI_OnLoad -Wl,-dead_strip)
+  exports_of() { nm -gU "$1" | awk '{print $3}' | sed 's/^_//'; }
+else
+  JNI_OS=linux
+  LINK_EXPORTS=(-Wl,--version-script="$ANDROID_DIR/ckey/src/main/cpp/ckey_jni.map" -Wl,--gc-sections)
+  exports_of() { nm -D --defined-only "$1" | awk '{print $3}'; }
+fi
+JNI_INC=(-I"$JAVA_HOME/include" -I"$JAVA_HOME/include/$JNI_OS" -I"$REPO/include" -I"$REPO/src")
 CERTIFY=0
 SOURCES=("$REPO/src/ckey_codec.cpp" "$REPO/src/ckey_scan.cpp" "$REPO/src/ckey_render.cpp" "$REPO/src/telemetry.cpp")
 if [ -f "$REPO/src/ckey_certify.cpp" ]; then CERTIFY=1; SOURCES+=("$REPO/src/ckey_certify.cpp"); fi
@@ -52,13 +62,13 @@ done
 "$CXX" -std=c++20 -O2 -fPIC -fvisibility=hidden -Wall -Wextra "${JNI_INC[@]}" "${DEFS[@]}" -c "$JNI_SRC" -o "$OUT/obj/ckey_jni.o" &
 wait
 "$CXX" -shared -o "$OUT/libckey_jni.so" "$OUT/obj/ckey_jni.o" "${OBJS[@]}" \
-  -Wl,--version-script="$ANDROID_DIR/ckey/src/main/cpp/ckey_jni.map" -Wl,--gc-sections -pthread
+  "${LINK_EXPORTS[@]}" -pthread
 declared=$(grep -o 'native [^ ]* [A-Za-z]*(' "$OUT/mirror-src/org/openckey/ckey/CKeyNative.java" | awk '{print $3}' | tr -d '(' | sort)
-exported=$(nm -D --defined-only "$OUT/libckey_jni.so" | awk '{print $3}' | grep '^Java_' | sed 's/^Java_org_openckey_ckey_CKeyNative_//' | sort)
+exported=$(exports_of "$OUT/libckey_jni.so" | grep '^Java_' | sed 's/^Java_org_openckey_ckey_CKeyNative_//' | sort)
 if [ "$declared" != "$exported" ]; then
   echo "declared vs exported native methods differ:"; diff <(echo "$declared") <(echo "$exported") || true; exit 1
 fi
-others=$(nm -D --defined-only "$OUT/libckey_jni.so" | awk '{print $3}' | grep -v -e '^Java_' -e '^JNI_OnLoad$' || true)
+others=$(exports_of "$OUT/libckey_jni.so" | grep -v -e '^Java_' -e '^JNI_OnLoad$' || true)
 [ -z "$others" ] || { echo "unexpected exports: $others"; exit 1; }
 echo "exports: JNI_OnLoad + $(echo "$exported" | wc -l) native methods, nothing else (certify=$CERTIFY)"
 

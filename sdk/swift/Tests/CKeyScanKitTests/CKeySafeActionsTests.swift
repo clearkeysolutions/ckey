@@ -14,11 +14,11 @@ final class CKeySafeActionsTests: XCTestCase {
         let fields: Fields?
     }
 
-    private func vectors() throws -> [Vector] {
+    private func vectors(_ file: String = "safe-actions-v1.json") throws -> [Vector] {
         // Tests/CKeyScanKitTests -> repository root.
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent("tests/vectors/safe-actions-v1.json"))
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/vectors/" + file))
         struct File: Decodable { let vectors: [Vector] }
         return try JSONDecoder().decode(File.self, from: data).vectors
     }
@@ -31,6 +31,27 @@ final class CKeySafeActionsTests: XCTestCase {
             let actions = CKeySafeActions(appID: v.fields?.app ?? "com.viadere", maxLifetime: v.max_lifetime,
                                           now: { Date(timeIntervalSince1970: v.now) })
                 .trust(issuer: issuer, keyID: v.fields?.key_id ?? "2026-11", publicKeyHex: v.public_key)
+                .register(v.fields?.action ?? "open.library", issuers: [issuer]) { _ in ran.fulfill() }
+            let outcome = await actions.handle(v.payload)
+            switch outcome {
+            case .performed: XCTAssertEqual(v.expect, "ok", v.name)
+            case .rejected: XCTAssertNotEqual(v.expect, "ok", v.name)
+            default: XCTFail("\(v.name): unexpected \(outcome)")
+            }
+            await fulfillment(of: [ran], timeout: 0.5)
+        }
+    }
+
+    /// ES256 keys (tests/vectors/safe-actions-es256-v1.json): pinned by their
+    /// length (66 or 130 hex digits); a high-S or wrong-key signature is refused.
+    func testES256VectorsRunAndBadOnesAreRefused() async throws {
+        for v in try vectors("safe-actions-es256-v1.json") where v.expect != "invalid" && (v.fields?.scope ?? 0) == 0 {
+            let ran = expectation(description: v.name)
+            ran.isInverted = v.expect != "ok"
+            let issuer = v.fields?.issuer ?? "citeory.com"
+            let actions = CKeySafeActions(appID: v.fields?.app ?? "com.viadere", maxLifetime: v.max_lifetime,
+                                          now: { Date(timeIntervalSince1970: v.now) })
+                .trust(issuer: issuer, keyID: v.fields?.key_id ?? "vault-p256-1", publicKeyHex: v.public_key)
                 .register(v.fields?.action ?? "open.library", issuers: [issuer]) { _ in ran.fulfill() }
             let outcome = await actions.handle(v.payload)
             switch outcome {

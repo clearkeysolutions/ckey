@@ -16,13 +16,21 @@ const KEY_FILE_TTL_MS = 3600 * 1000;
 const utf8 = new TextEncoder();
 const utf8d = new TextDecoder('utf-8', { fatal: true });
 
+// Issuer key algorithms (the key file's "alg"): Ed25519 keys are 32 bytes;
+// ES256 (ECDSA P-256) keys are SEC 1 points, 33 bytes compressed or 65 uncompressed.
+export const KEY_ALGS = Object.freeze(['Ed25519', 'ES256']);
+const KEY_LENGTHS = { Ed25519: [32], ES256: [33, 65] };
 const hexToBytes = (hex) => {
-  if (typeof hex !== 'string' || !/^[0-9a-fA-F]{64}$/.test(hex)) throw new TypeError('a public key is 64 hexadecimal digits (32 bytes)');
+  if (typeof hex !== 'string' || !/^(?:[0-9a-fA-F]{2})+$/.test(hex)) throw new TypeError('a public key is hexadecimal digits');
   return Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16));
 };
-const keyBytes = (key) => {
-  if (key instanceof Uint8Array) { if (key.length !== 32) throw new TypeError('a public key is 32 bytes'); return key; }
-  return hexToBytes(key);
+/** { key, alg }: alg as given, or from the length (32 Ed25519, 33 or 65 ES256). */
+const keyOf = (key, alg) => {
+  const bytes = key instanceof Uint8Array ? key : hexToBytes(key);
+  const a = alg ?? (bytes.length === 32 ? 'Ed25519' : bytes.length === 33 || bytes.length === 65 ? 'ES256' : null);
+  if (!a || !KEY_LENGTHS[a]) throw new TypeError('alg is Ed25519 or ES256');
+  if (!KEY_LENGTHS[a].includes(bytes.length)) throw new TypeError(a === 'Ed25519' ? 'an Ed25519 public key is 32 bytes (64 hex digits)' : 'an ES256 public key is 33 or 65 bytes (SEC 1)');
+  return { key: bytes, alg: a };
 };
 const shortText = (v, max = 120) => (typeof v === 'string' && v.length && v.length <= max ? v : null);
 
@@ -110,7 +118,8 @@ export class SafeActions {
   #useKeyFiles;
 
   /**
-   * @param core   { verify(payloadBytes, publicKey, nowSeconds, maxLifetime) -> fields, parse(payloadBytes) -> fields }
+   * @param core   { verify(payloadBytes, publicKey, nowSeconds, maxLifetime, alg) -> fields, parse(payloadBytes) -> fields }
+   *                alg is 'Ed25519' or 'ES256'.
    * @param appId  this app's ID, e.g. 'com.viadere'
    */
   constructor(core, appId, { maxLifetime = 600, keyFiles = false, fetch = globalThis.fetch?.bind(globalThis), now = () => Date.now() } = {}) {
@@ -125,11 +134,15 @@ export class SafeActions {
     this.#now = now;
   }
 
-  /** Pins an issuer's public key (64 hex digits or 32 bytes). requestInfo is the issuer's request_info URL template. */
-  trust(issuer, keyId, publicKey, { requestInfo } = {}) {
+  /**
+   * Pins an issuer's public key: Ed25519 (32 bytes, 64 hex digits) or ES256
+   * (a P-256 point, 33 or 65 bytes). alg is inferred from the length unless
+   * given. requestInfo is the issuer's request_info URL template.
+   */
+  trust(issuer, keyId, publicKey, { requestInfo, alg } = {}) {
     if (typeof issuer !== 'string' || !/^[a-z0-9.-]+\.[a-z0-9-]+$/.test(issuer)) throw new TypeError('issuer is a lower-case domain name');
     if (typeof keyId !== 'string' || !/^[A-Za-z0-9._-]{1,32}$/.test(keyId)) throw new TypeError('keyId is 1 to 32 letters, digits, . _ or -');
-    this.#keys.set(issuer + ' ' + keyId, { key: keyBytes(publicKey), requestInfo: requestInfo ?? null });
+    this.#keys.set(issuer + ' ' + keyId, { ...keyOf(publicKey, alg), requestInfo: requestInfo ?? null });
     return this;
   }
 
@@ -153,10 +166,11 @@ export class SafeActions {
     if (pinned) return pinned;
     if (!this.#useKeyFiles || !this.#fetch) return null;
     const file = await this.#keyFile(issuer);
-    const entry = file?.keys?.find?.((k) => k && k.id === keyId && k.alg === 'Ed25519');
+    // Keys with any other alg are ignored (spec: issuer keys).
+    const entry = file?.keys?.find?.((k) => k && k.id === keyId && KEY_ALGS.includes(k.alg));
     if (!entry) return null;
     if (entry.not_after && Date.parse(entry.not_after) < this.#now()) return null;
-    try { return { key: hexToBytes(entry.public_key), requestInfo: file.request_info ?? null }; } catch { return null; }
+    try { return { ...keyOf(entry.public_key, entry.alg), requestInfo: file.request_info ?? null }; } catch { return null; }
   }
 
   async #keyFile(issuer) {
@@ -208,7 +222,7 @@ export class SafeActions {
     const trusted = await this.#keyFor(claimed.issuer, claimed.key_id);
     if (!trusted) return reject('no trusted key ' + claimed.key_id + ' for ' + claimed.issuer);
     let verified;
-    try { verified = this.#core.verify(bytes, trusted.key, Math.floor(this.#now() / 1000), this.#maxLifetime); }
+    try { verified = this.#core.verify(bytes, trusted.key, Math.floor(this.#now() / 1000), this.#maxLifetime, trusted.alg); }
     catch (error) { return reject(error.message); }
     const nowMs = this.#now();
     for (const [id, until] of this.#seen) if (until < nowMs) this.#seen.delete(id);

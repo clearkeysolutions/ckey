@@ -23,7 +23,9 @@ permissions:
 jobs:
   swift:
     name: swift build and test (macOS)
-    runs-on: macos-15
+    # Public repository, private runner: never run a fork's pull request here.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
     timeout-minutes: 45
     steps:
       # Maintainers: pin actions to full commit SHAs (as ci.yml does).

@@ -560,20 +560,23 @@ jstring CKEY_JNI_FN(nativeSafeAction)(JNIEnv *env, jclass, jbyteArray payload, j
     return guarded<jstring>(env, nullptr, [&]() -> jstring {
         if (!payload || !out_status) { throw_class(env, "java/lang/NullPointerException", "payload"); return nullptr; }
         if (env->GetArrayLength(out_status) < 1) { throw_iae(env, "out_status needs one element"); return nullptr; }
-        if (public_key && env->GetArrayLength(public_key) != 32) { throw_iae(env, "a public key is 32 bytes"); return nullptr; }
+        // The key's length says its algorithm: 32 bytes Ed25519, 33 or 65 bytes ES256 (SEC 1).
+        const jsize key_len = public_key ? env->GetArrayLength(public_key) : 0;
+        if (public_key && key_len != 32 && key_len != 33 && key_len != 65) { throw_iae(env, "a public key is 32 (Ed25519), 33 or 65 (ES256) bytes"); return nullptr; }
         if (now_seconds < 0 || max_lifetime < 1) { throw_iae(env, "invalid time or lifetime"); return nullptr; }
         const jsize n = env->GetArrayLength(payload);
         std::vector<uint8_t> bytes(static_cast<size_t>(n));
         if (n) env->GetByteArrayRegion(payload, 0, n, reinterpret_cast<jbyte *>(bytes.data()));
-        uint8_t key[32];
-        if (public_key) env->GetByteArrayRegion(public_key, 0, 32, reinterpret_cast<jbyte *>(key));
+        uint8_t key[65];
+        if (public_key) env->GetByteArrayRegion(public_key, 0, key_len, reinterpret_cast<jbyte *>(key));
         auto sa = std::make_unique<ckey_safe_action>();
         std::memset(sa.get(), 0, sizeof(ckey_safe_action));
         ckey_diagnostics diag{};
         diag.abi_version = CKEY_ABI_VERSION;
         const ckey_status st = public_key
-            ? ckey_safe_action_verify(bytes.data(), bytes.size(), key, static_cast<uint64_t>(now_seconds),
-                                      static_cast<uint32_t>(max_lifetime), sa.get(), &diag)
+            ? ckey_safe_action_verify_key(bytes.data(), bytes.size(), key_len == 32 ? CKEY_SAFE_ACTION_ED25519 : CKEY_SAFE_ACTION_ES256,
+                                          key, static_cast<size_t>(key_len), static_cast<uint64_t>(now_seconds),
+                                          static_cast<uint32_t>(max_lifetime), sa.get(), &diag)
             : ckey_safe_action_parse(bytes.data(), bytes.size(), sa.get(), &diag);
         const jint status = static_cast<jint>(st);
         env->SetIntArrayRegion(out_status, 0, 1, &status);

@@ -92,10 +92,20 @@ public enum CKeySafeActionOutcome: Sendable {
 /// actions.register("signin.request", issuers: ["citeory.com"], scope: .crossDevice) { action in … }
 /// switch await actions.handle(result.text ?? "") { … }
 /// ```
+/// An issuer key's algorithm (the key file's "alg").
+public enum CKeySafeActionKeyAlgorithm: String, Sendable {
+    /// Ed25519: a 32-byte key (64 hex digits).
+    case ed25519 = "Ed25519"
+    /// ES256, ECDSA P-256 with SHA-256 (raw r || s, low-S): a SEC 1 point,
+    /// 33 bytes compressed (66 hex digits) or 65 uncompressed (130). For
+    /// issuers signing in a key service that holds P-256 keys. Core build 118+.
+    case es256 = "ES256"
+}
+
 public final class CKeySafeActions: @unchecked Sendable {
     public static let prefix = "ckey-action:1:"
 
-    private struct Key { let bytes: [UInt8]; let requestInfo: String? }
+    private struct Key { let bytes: [UInt8]; let algorithm: CKeySafeActionKeyAlgorithm; let requestInfo: String? }
     private struct Registration { let issuers: Set<String>; let scope: CKeySafeActionScope; let title: String?; let handler: @Sendable (CKeyVerifiedSafeAction) async -> Void }
 
     public let appID: String
@@ -123,16 +133,22 @@ public final class CKeySafeActions: @unchecked Sendable {
 
     public static func isSafeAction(_ text: String) -> Bool { text.hasPrefix(prefix) && text.count > prefix.count }
 
-    /// Pins an issuer's Ed25519 public key (64 hex digits). `requestInfo` is the
-    /// issuer's request_info URL template, required for cross-device actions.
+    /// Pins an issuer's public key: Ed25519 (64 hex digits) or ES256 (66 or 130
+    /// hex digits, a SEC 1 P-256 point). `algorithm` is taken from the length
+    /// unless given. `requestInfo` is the issuer's request_info URL template,
+    /// required for cross-device actions.
     @discardableResult
-    public func trust(issuer: String, keyID: String, publicKeyHex: String, requestInfo: String? = nil) -> Self {
-        precondition(publicKeyHex.range(of: "^[0-9A-Fa-f]{64}$", options: .regularExpression) != nil, "a public key is 64 hexadecimal digits")
+    public func trust(issuer: String, keyID: String, publicKeyHex: String, algorithm: CKeySafeActionKeyAlgorithm? = nil,
+                      requestInfo: String? = nil) -> Self {
+        precondition(publicKeyHex.range(of: "^([0-9A-Fa-f]{2})+$", options: .regularExpression) != nil, "a public key is hexadecimal digits")
         let digits = Array(publicKeyHex.utf8)
-        let bytes = stride(from: 0, to: 64, by: 2).map { i -> UInt8 in
+        let bytes = stride(from: 0, to: digits.count, by: 2).map { i -> UInt8 in
             UInt8(String(decoding: digits[i..<(i + 2)], as: UTF8.self), radix: 16)!
         }
-        locked { keys[issuer + " " + keyID] = Key(bytes: bytes, requestInfo: requestInfo) }
+        let alg = algorithm ?? (bytes.count == 32 ? .ed25519 : .es256)
+        precondition(alg == .ed25519 ? bytes.count == 32 : (bytes.count == 33 || bytes.count == 65),
+                     alg == .ed25519 ? "an Ed25519 public key is 64 hexadecimal digits" : "an ES256 public key is 66 or 130 hexadecimal digits (SEC 1)")
+        locked { keys[issuer + " " + keyID] = Key(bytes: bytes, algorithm: alg, requestInfo: requestInfo) }
         return self
     }
 
@@ -162,7 +178,8 @@ public final class CKeySafeActions: @unchecked Sendable {
         guard let key = state.1 else { return .rejected(reason: "no trusted key \(claimed.keyID) for \(claimed.issuer)") }
         var verified = ckey_safe_action()
         let status = key.bytes.withUnsafeBufferPointer { k in
-            ckey_safe_action_verify(bytes, bytes.count, k.baseAddress, UInt64(now().timeIntervalSince1970), maxLifetime, &verified, &diag)
+            ckey_safe_action_verify_key(bytes, bytes.count, key.algorithm == .ed25519 ? CKEY_SAFE_ACTION_ED25519 : CKEY_SAFE_ACTION_ES256,
+                                        k.baseAddress, k.count, UInt64(now().timeIntervalSince1970), maxLifetime, &verified, &diag)
         }
         guard status == CKEY_OK else { return .rejected(reason: message(diag)) }
         let action = Self.fields(verified)

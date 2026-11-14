@@ -10,6 +10,26 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.119 — 2026-11-14
+
+* **ES256 Safe Action keys in every SDK.** Each SDK takes the algorithm from the pinned key's length: 32 bytes (64 hex) is Ed25519; 33 or 65 bytes (66 or 130 hex, SEC 1) is ES256. The issuer key-file lookup accepts `"alg": "Ed25519"` and `"alg": "ES256"`, and skips a key whose length disagrees with its `alg`.
+  * **Web:** `trust(issuer, keyId, key, { alg })`, with alg inferred from the length when omitted. Verification goes through the new wasm export `ckw_safe_action_key`, which calls `ckey_safe_action_verify_key`. A wasm built before this build verifies Ed25519 only and says so.
+  * **Swift:** `CKeySafeActionKeyAlgorithm` (`.ed25519`, `.es256`) and `trust(issuer:keyID:publicKeyHex:algorithm:requestInfo:)`.
+  * **Android:** `nativeSafeAction` accepts 32-, 33- or 65-byte keys, and `CKeySafeActions.trust` accepts 64, 66 or 130 hex digits.
+  * **.NET:** a P/Invoke for `ckey_safe_action_verify_key`, and `Trust` accepts 64, 66 or 130 hex digits.
+  * **Tests:**
+    * Web: an ES256 policy test.
+    * Swift: the ES256 vectors.
+    * Android: the host harness, 74 checks, plus 28 JUnit tests.
+    * .NET: `Es256VectorVerdicts`, 80 tests.
+  * **READMEs:** each SDK README notes the two key forms.
+* **Android host test:** the harness used layout 4 as "out of range". Layout 4 has been PIXEL since build 103, so it now uses 7. `run.sh` also runs on macOS (ld64 export list, `nm -gU`, `include/darwin`).
+* **CI on the self-hosted runner.** Every workflow except Community checks now has `runs-on: self-hosted`: CI, SDK Web, Swift, Android, .NET, Release and Deprecate release. That runner is an Apple-silicon Mac, and GitHub-hosted runners no longer start for this repository.
+  * **Fork pull requests:** SDK jobs, like CI, never run a fork's pull request on the private runner. Community checks run fork code, so they stay on GitHub-hosted runners.
+  * **Android:** the emulator is arm64-v8a without KVM, and `android-actions/setup-android` is pinned for the Android SDK.
+  * **.NET:** builds the osx-arm64 and osx-x64 natives. linux-x64 and win-x64 return when runners for them exist, so the NuGet package carries macOS natives until then.
+  * **Release:** builds the macos-arm64 archive and uses `shasum -a 256`. The `publish` job needs `gh` on the runner.
+
 ## 0.1.0-build.118 — 2026-11-14
 
 * **ES256 issuer keys for Safe Actions** (`CKEY_HAS_ES256`). This is a second issuer key algorithm, ECDSA P-256 with SHA-256, for issuers whose key service holds P-256 keys and never releases them (requested for Viadere's vault, which cannot hold Ed25519). Ed25519 is unchanged.
@@ -27,7 +47,7 @@ Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`
     * An end-to-end CLI run with OpenSSL as the key service (signing input → DER signature → assemble → verify, and OpenSSL agrees).
     * SHA-256 against `sha256sum`. All 17 core suites pass, and the 22 Ed25519 vectors are unchanged.
   * **Spec:** `spec/CKey-Safe-Actions.md` documents the algorithm, the key file and the key-service workflow.
-  * **SDKs:** the Web, Swift, Android and .NET key-file lookups still accept Ed25519 keys only; ES256 there follows.
+  * **SDKs:** ES256 in the Web, Swift, Android and .NET SDKs is build 119.
 
 ## 0.1.0-build.117 — 2026-11-14
 

@@ -34,6 +34,13 @@ namespace OpenCKey.Interop
 #endif
 #if NET7_0_OR_GREATER
         [LibraryImport(NativeLibraryName.Name)]
+        internal static partial int ckey_safe_action_verify_key(byte* payload, nuint length, int alg, byte* publicKey, nuint keyLength, ulong now, uint maxLifetime, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#else
+        [DllImport(NativeLibraryName.Name, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ckey_safe_action_verify_key(byte* payload, nuint length, int alg, byte* publicKey, nuint keyLength, ulong now, uint maxLifetime, NativeSafeAction* output, NativeDiagnostics* diagnostics);
+#endif
+#if NET7_0_OR_GREATER
+        [LibraryImport(NativeLibraryName.Name)]
         internal static partial uint ckey_get_abi_version();
 #else
         [DllImport(NativeLibraryName.Name, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

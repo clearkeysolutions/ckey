@@ -18,7 +18,7 @@ permissions:
   contents: write
 jobs:
   deprecate:
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted   # needs gh (brew install gh) on the runner
     steps:
       - name: Retitle and annotate
         env:

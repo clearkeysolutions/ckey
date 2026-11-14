@@ -102,6 +102,8 @@ CKW_EXPORT uint32_t ckw_abi_version(void) { return ckey_get_abi_version(); }
 // object of its fields, or null with the reason in ckw_last_error(). The status
 // is in "status": 0 OK, 6 bad signature, 7 expired. Every text field is limited by
 // the core to a JSON-safe character set; params are hexadecimal.
+static char *safe_action_json(const ckey_safe_action *sa);
+
 CKW_EXPORT char *ckw_safe_action(const uint8_t *payload, uint32_t len, const uint8_t *key, double now, uint32_t max_lifetime) {
     auto sa = std::make_unique<ckey_safe_action>();
     ckey_diagnostics diag{};
@@ -109,6 +111,21 @@ CKW_EXPORT char *ckw_safe_action(const uint8_t *payload, uint32_t len, const uin
         ? ckey_safe_action_verify(payload, len, key, static_cast<uint64_t>(now), max_lifetime, sa.get(), &diag)
         : ckey_safe_action_parse(payload, len, sa.get(), &diag);
     if (st != CKEY_OK) { set_error_diag(diag, "not a valid Safe Action"); return nullptr; }
+    return safe_action_json(sa.get());
+}
+
+// Either issuer key algorithm: alg 1 Ed25519 (32-byte key), 2 ES256 (33 or 65 bytes, SEC 1).
+CKW_EXPORT char *ckw_safe_action_key(const uint8_t *payload, uint32_t len, uint32_t alg, const uint8_t *key, uint32_t key_len,
+                                     double now, uint32_t max_lifetime) {
+    auto sa = std::make_unique<ckey_safe_action>();
+    ckey_diagnostics diag{};
+    const ckey_status st = ckey_safe_action_verify_key(payload, len, static_cast<ckey_safe_action_alg>(alg), key, key_len,
+                                                       static_cast<uint64_t>(now), max_lifetime, sa.get(), &diag);
+    if (st != CKEY_OK) { set_error_diag(diag, "not a valid Safe Action"); return nullptr; }
+    return safe_action_json(sa.get());
+}
+
+static char *safe_action_json(const ckey_safe_action *sa) {
     static const char hexd[] = "0123456789abcdef";
     std::string params;
     for (size_t i = 0; i < sa->params_len; ++i) { params.push_back(hexd[sa->params[i] >> 4]); params.push_back(hexd[sa->params[i] & 15]); }
