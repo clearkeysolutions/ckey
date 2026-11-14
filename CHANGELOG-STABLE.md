@@ -2,7 +2,7 @@
 
 This log lists the releases tagged on the `Stable-Release` branch, newest first. Each release is one immutable tag. The per-build history is in [CHANGELOG.md](CHANGELOG.md), and the [release and versioning map](docs/RELEASE-AND-VERSIONING-MAP.md) explains how to cut and deprecate a release.
 
-**Releases so far: 3** (`v0.1.0-build.120`, `v0.1.0-build.85`, `v0.1.0-build.83`; `v0.1.0-build.76`, `v0.1.0-build.81` and `v0.1.0-build.82` were tagged but superseded before they were published).
+**Releases so far: 3** (`v0.1.0-build.121`, `v0.1.0-build.85`, `v0.1.0-build.83`; `v0.1.0-build.76`, `v0.1.0-build.81` and `v0.1.0-build.82` were tagged but superseded before they were published).
 
 ## Entry template
 
@@ -28,11 +28,11 @@ When a release is deprecated:
 
 ## Releases
 
-### CKey 0.1.0-build.120 — 2026-11-14
+### CKey 0.1.0-build.121 — 2026-11-14
 
-* **Tag:** `v0.1.0-build.120`
+* **Tag:** `v0.1.0-build.121`
 * **Status:** supported
-* **Builds included:** dev.1 to build.120. New since 0.1.0-build.85: build.86 to build.120 (see CHANGELOG.md).
+* **Builds included:** dev.1 to build.121. New since 0.1.0-build.85: build.86 to build.121 (see CHANGELOG.md).
 * **Formats emitted:**
   * **Default:** P0 0.27.0 for versions 1–7 and P0 0.33.0 (Arc, byte-grouped) for versions 8–31. This is the SDK and CLI default (Auto layout).
   * **Opt-in:** P0.1 0.28.0, 0.29.0, 0.30.0 and 0.32.0, plus 0.31.0 (Pixel, experimental, no specification yet).
@@ -54,7 +54,7 @@ When a release is deprecated:
 ### CKey 0.1.0-build.85 — 2026-11-07
 
 * **Tag:** `v0.1.0-build.85` (commit `ede38f5`)
-* **Status:** superseded by CKey 0.1.0-build.120
+* **Status:** superseded by CKey 0.1.0-build.121
 * **Builds included:** dev.1 to build.85 (see CHANGELOG.md)
 * **Formats emitted:** P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0
 * **Formats read:** the emitted formats, plus the legacy formats listed in the map
