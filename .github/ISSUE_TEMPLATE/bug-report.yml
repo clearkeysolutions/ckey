@@ -1,0 +1,67 @@
+name: Bug report
+description: Report a reproducible problem outside scanning or decoding.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve CKey. For a code that fails to scan or decode, use the **Scanner or decoding failure** form. For a repeatable field-test result, use **Field-test report**. Report suspected vulnerabilities privately through [GitHub Security](https://github.com/clearkeysolutions/ckey/security/advisories/new), not in a public issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal example, input, or command when possible.
+      placeholder: "1. ...\n2. ...\n3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: CKey version
+      description: Release tag, package version, or output of ckey_software_version().
+      placeholder: 0.1.0-build.123
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - C/C++ core or CMake
+        - Swift SDK
+        - Web or Node SDK
+        - Android SDK
+        - .NET SDK
+        - Command-line tool
+        - Packaging or release
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and version, device or architecture, and relevant toolchain or browser.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or supporting material
+      description: Paste relevant logs or attach files. Remove tokens, personal information, and private payloads.
+      render: text
+    validations:
+      required: false

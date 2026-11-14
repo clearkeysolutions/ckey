@@ -1,0 +1,72 @@
+name: Scanner or decoding failure
+description: Report a CKey that does not scan, decodes incorrectly, or scans too slowly.
+title: "[Scan] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a specific scanner or decoder problem. To publish measurements from a defined field test, use **Field-test report** instead. Avoid posting private payloads, faces, or location data. Report suspected vulnerabilities privately through [GitHub Security](https://github.com/clearkeysolutions/ckey/security/advisories/new).
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What went wrong?
+      options:
+        - Code was not detected
+        - Code was detected but not decoded
+        - Wrong or incomplete payload
+        - Intermittent scanning
+        - Scanning is unexpectedly slow
+        - Scanner crash or hang
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: Include the code source or generation command, scanning steps, and what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Describe the correct payload or expected scan behavior without exposing private data.
+    validations:
+      required: true
+  - type: input
+    id: reader
+    attributes:
+      label: Reader and version
+      description: App, SDK, CLI, or C core version; include a release tag or build number.
+      placeholder: Open CKey Scanner on iOS, 0.1.0-build.123
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and operating system
+      description: Phone or camera model and OS version, or browser and desktop OS.
+    validations:
+      required: true
+  - type: textarea
+    id: symbol
+    attributes:
+      label: Code details
+      description: If known, include format/profile, version, layout, error-correction level, style, size, and whether it was printed or displayed on a screen.
+    validations:
+      required: false
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Capture conditions and frequency
+      description: Note distance, angle, lighting, focus, motion, print or screen conditions, and successes versus attempts. Include timing measurements only if measured.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sample image, frame, or logs
+      description: Attach a minimal reproducible image or sanitized logs if you can. Say whether the same code decodes with another reader. Remove private payloads and personal information.
+    validations:
+      required: false
