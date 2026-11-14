@@ -56,6 +56,7 @@ jobs:
           tar -czf "$dir.tar.gz" "$dir"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: ckey-${{ matrix.name }}
           path: ckey-*.tar.gz
 

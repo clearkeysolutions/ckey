@@ -68,12 +68,16 @@ jobs:
       - name: Package
         run: npm pack
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: startsWith(github.ref, 'refs/tags/')
         with:
+          retention-days: 7
           name: ckey-npm
           path: sdk/web/openckey-*.tgz
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: startsWith(github.ref, 'refs/tags/')
         with:
+          retention-days: 7
           name: ckey-web-dist
           path: sdk/web/dist
           if-no-files-found: error

@@ -10,6 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.122 — 2026-11-14
+
+* **CI without artifact storage.** The account's Actions artifact storage is at its quota, so every upload failed and failed its job, although the builds and tests passed. On the ARM64 runner the wasm tests reported `fail 0`, and the .NET natives built.
+  * Pushes now upload nothing. Only a release tag (`refs/tags/…`) uploads, which the Release workflow needs, and those uploads keep 7 days.
+  * **.NET:** the test job builds its own osx-arm64 native library instead of downloading the native job's, and `pack` runs for tags only.
+  * **Benchmarks:** the results go in the run's summary instead of an artifact.
+* **Runners:** the Mac runners are now the ARM64 build. The x64 build ran under Rosetta and built x86_64 binaries, which could not link Homebrew's arm64 zxing-cpp.
+* The release moves to 0.1.0-build.122.
+
 ## 0.1.0-build.121 — 2026-11-14
 
 * **Self-hosted CI fixes**, from the first runs on the Mac runner. The release moves to 0.1.0-build.121: build.120 was prepared but never tagged.
