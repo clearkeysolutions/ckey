@@ -65,13 +65,14 @@ jobs:
           ! ldd "$lib" | grep -E 'libstdc\+\+|libgcc_s'
       - name: List output
         run: ls -la sdk/dotnet/artifacts/native/${{ matrix.rid }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage native-${{ matrix.rid }} for the release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          retention-days: 7
-          name: native-${{ matrix.rid }}
-          path: sdk/dotnet/artifacts/native/${{ matrix.rid }}/
-          if-no-files-found: error
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/native-${{ matrix.rid }}" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/native-${{ matrix.rid }}"
+          cp -R sdk/dotnet/artifacts/native/${{ matrix.rid }}/. "$HOME/ckey-release/${{ github.run_id }}/native-${{ matrix.rid }}/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/native-${{ matrix.rid }}"
 
   test:
     name: test (${{ matrix.rid }})
@@ -112,10 +113,10 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: native-*
-          path: sdk/dotnet/artifacts/download
+      - name: Collect the staged natives
+        run: |
+          mkdir -p sdk/dotnet/artifacts/download
+          cp -R "$HOME/ckey-release/${{ github.run_id }}"/native-* sdk/dotnet/artifacts/download/
       - name: Arrange native assets
         run: |
           for rid in osx-arm64 osx-x64; do
@@ -139,9 +140,11 @@ jobs:
                    lib/net8.0/CKey.dll lib/netstandard2.0/CKey.dll README.md buildTransitive/CKey.targets; do
             grep -q " $f\$" contents.txt || { echo "missing $f"; exit 1; }
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage nuget-packages for the release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          retention-days: 7
-          name: nuget-packages
-          path: sdk/dotnet/artifacts/packages/
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/nuget-packages" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/nuget-packages"
+          cp -R sdk/dotnet/artifacts/packages/. "$HOME/ckey-release/${{ github.run_id }}/nuget-packages/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/nuget-packages"

@@ -54,11 +54,13 @@ jobs:
           dir="ckey-${{ needs.verify.outputs.version }}-${{ matrix.name }}"
           cp LICENSE README.md CHANGELOG.md "$dir/"
           tar -czf "$dir.tar.gz" "$dir"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          retention-days: 7
-          name: ckey-${{ matrix.name }}
-          path: ckey-*.tar.gz
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage ckey-${{ matrix.name }} for the release
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-${{ matrix.name }}" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-${{ matrix.name }}"
+          cp ckey-*.tar.gz "$HOME/ckey-release/${{ github.run_id }}/ckey-${{ matrix.name }}/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-${{ matrix.name }}"
 
   # The SDK workflows, reused, build and test each release package.
   sdk-web:
@@ -83,23 +85,16 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: ckey-macos-*
-          path: dist
-          merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ckey-npm
-          path: dist
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: nuget-packages
-          path: dist
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: ckey-android-maven
-          path: maven
+      # The build and SDK jobs staged their outputs on this Mac (no Actions artifacts).
+      - name: Collect the staged files
+        run: |
+          stage="$HOME/ckey-release/${{ github.run_id }}"
+          ls -la "$stage"
+          mkdir -p dist maven
+          cp "$stage"/ckey-macos-*/* dist/
+          cp "$stage"/ckey-npm/* dist/
+          cp "$stage"/nuget-packages/* dist/
+          cp -R "$stage"/ckey-android-maven/. maven/
       - name: Package downloads (Maven repository zip, Swift source zip)
         run: |
           version="${{ needs.verify.outputs.version }}"
@@ -125,3 +120,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/* --draft --verify-tag \
             --title "CKey ${{ needs.verify.outputs.version }}" \
             --notes "See CHANGELOG-STABLE.md. Verify downloads with SHA256SUMS and 'gh attestation verify <file> --repo ${GITHUB_REPOSITORY}'."
+      - name: Remove the staged files
+        if: success()
+        run: rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}"

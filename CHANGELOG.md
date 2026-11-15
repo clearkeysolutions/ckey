@@ -10,6 +10,18 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.126 — 2026-11-15
+
+* **Releases no longer use Actions artifacts.** The release build of `v0.1.0-build.125` passed every build and test, including the Android emulator test. Five jobs then failed at upload ("Artifact storage quota has been hit"), so the draft release was never created and nothing was published.
+  * The release jobs now stage their outputs on the self-hosted Mac, in `~/ckey-release/<run id>/`. All the runners are on that one Mac.
+  * The archive, the npm package and wasm dist, the Maven repository, the .NET natives and the NuGet packages are staged there. `pack` and `publish` collect them from it.
+  * The folder is removed once the draft exists. A failed run keeps it, so **Re-run failed jobs** still finds the outputs of the jobs that passed: re-runs keep the run id.
+  * Every `rm -rf` of the folder uses `${HOME:?}`, so it refuses to run with an empty `HOME`.
+  * The files still reach the GitHub Release: release assets are not Actions artifacts. No workflow uploads or downloads an Actions artifact any more.
+  * Checked here with a dry run of the copy steps: every file lands where `pack` and `publish` read it.
+* `docs/PUBLISHING.md` describes the macOS-only runner and the staging folder.
+* `v0.1.0-build.125` is recorded as tagged, not released, like build.124. The release moves to 0.1.0-build.126.
+
 ## 0.1.0-build.125 — 2026-11-15
 
 * **Release build of `v0.1.0-build.124` failed; nothing was published.** The release moves to 0.1.0-build.125. Tags are never moved or reused.

@@ -82,13 +82,14 @@ jobs:
         run: |
           gradle -p sdk/android --no-daemon :ckey:assembleRelease -Pckey.native.render=false -Pckey.native.telemetry=false
           gradle -p sdk/android --no-daemon :ckey:assembleRelease -Pckey.native.scan=false
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage ckey-android-maven for the release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          retention-days: 7
-          name: ckey-android-maven
-          path: sdk/android/build/maven
-          if-no-files-found: error
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-android-maven" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-android-maven"
+          cp -R sdk/android/build/maven/. "$HOME/ckey-release/${{ github.run_id }}/ckey-android-maven/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-android-maven"
 
   # Instrumented round trips on an emulator (arm64-v8a: the self-hosted
   # runner is an Apple-silicon Mac, where the emulator uses Hypervisor.framework).

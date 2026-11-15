@@ -15,7 +15,7 @@ Format numbers are shared across all profiles, so one profile's formats are not 
 
 ## What the current build supports
 
-Build **0.1.0-build.125** on `scratch` and `Stable-Release`, C ABI **4**. The latest release is 0.1.0-build.125 (tag `v0.1.0-build.125`); the release before it, 0.1.0-build.85, has neither the reader repair pass nor Pixel, Arc, Auto or ES256.
+Build **0.1.0-build.126** on `scratch` and `Stable-Release`, C ABI **4**. The latest release is 0.1.0-build.126 (tag `v0.1.0-build.126`); the release before it, 0.1.0-build.85, has neither the reader repair pass nor Pixel, Arc, Auto or ES256.
 
 | Profile | Current format | Byte | Capacity | Legacy formats still decoded from codewords |
 |---|---|---|---|---|
@@ -95,7 +95,7 @@ The repository history starts at dev.11. Builds without a row (dev.27, 29, 30, 3
 
 | Build | Commit | Date | Summary |
 |---|---|---|---|
-| build.125 | `Stable-Release` | 2026-11-15 | Release CKey 0.1.0-build.125: `Stable-Release` brought from build.85 (build.120 prepared but not tagged; build.124 tagged, release build failed; builds 121–125 fix the self-hosted CI and the Android layout check) |
+| build.126 | `Stable-Release` | 2026-11-15 | Release CKey 0.1.0-build.126: `Stable-Release` brought from build.85 (build.120 prepared but not tagged; builds 124 and 125 tagged, release builds failed on the artifact quota; builds 121–126 fix the self-hosted CI, the Android layout check and release staging) |
 | build.118 | `e19cc67` | 2026-11-14 | ES256 Safe Action issuer keys (ECDSA P-256, raw r‖s, low-S); signing in a key service; additive, ABI 4 (SDKs: build.119) |
 | build.114 | `c324a1e` | 2026-11-14 | Automatic layout (`CKEY_LAYOUT_AUTO` 255): Standard for v1–7, Arc grouped (Format 0.33) from v8; the new default in Swift, web, Android and the CLI; opt-in in the C API; additive, ABI 4 |
 | build.110 | `ab30644` | 2026-11-14 | Formats 0.32/0.33, Arc: Standard with equal-arc rings, scattered and byte-grouped (`CKEY_LAYOUT_STANDARD_ARC` 5, `CKEY_LAYOUT_STANDARD_ARC_GROUPED` 6), and the reader for them; opt-in at first; additive, ABI 4 |
@@ -212,7 +212,8 @@ A format being superseded does not deprecate a release. Readers keep decoding le
 
 | Release | Tag | Builds | Formats emitted | ABI | Status |
 |---|---|---|---|---|---|
-| CKey 0.1.0-build.125 | `v0.1.0-build.125` | dev.1 to build.125 | P0 0.27.0 (v1–7) and 0.33.0 (v8–31) by default; opt-in 0.28.0, 0.29.0, 0.30.0, 0.31.0 (experimental), 0.32.0; P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.126 | `v0.1.0-build.126` | dev.1 to build.126 | P0 0.27.0 (v1–7) and 0.33.0 (v8–31) by default; opt-in 0.28.0, 0.29.0, 0.30.0, 0.31.0 (experimental), 0.32.0; P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | supported |
+| CKey 0.1.0-build.125 | `v0.1.0-build.125` | dev.1 to build.125 | as build.126 | 4 | not released: its release build failed (artifact storage quota); nothing was published |
 | CKey 0.1.0-build.124 | `v0.1.0-build.124` | dev.1 to build.124 | as build.125 | 4 | not released: its release build failed (artifact storage quota; an Android test expectation); nothing was published |
 | CKey 0.1.0-build.85 | `v0.1.0-build.85` | dev.1 to build.85 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded |
 | CKey 0.1.0-build.83 | `v0.1.0-build.83` | dev.1 to build.83 | P0 0.27.0, P0.1 0.28.0, P1 0.14.0, P2 0.25.0, P3 0.26.0 | 4 | superseded |
