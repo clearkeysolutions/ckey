@@ -57,28 +57,30 @@
 namespace {
 
 // Feature bits returned by nativeFeatures(); mirrored in CKeyNative.kt.
-constexpr jint kFeatureScan = 1;
-constexpr jint kFeatureRender = 2;
-constexpr jint kFeatureTelemetry = 4;
-constexpr jint kFeatureCertify = 8;
+// [[maybe_unused]]: a module-off build (CKEY_JNI_SCAN=0, …) leaves some unused,
+// which clang reports (-Wunused-const-variable) and -Werror refuses.
+[[maybe_unused]] constexpr jint kFeatureScan = 1;
+[[maybe_unused]] constexpr jint kFeatureRender = 2;
+[[maybe_unused]] constexpr jint kFeatureTelemetry = 4;
+[[maybe_unused]] constexpr jint kFeatureCertify = 8;
 
 // Style marshalling: ints and doubles, in this order (mirrored in CKeyStyle.kt).
 //   ints:    0 background, 1 background_edge, 2 ink, 3 ink_shade (0xRRGGBB),
 //            4..7 accents[0..3], 8 accent_count, 9 accent_percent,
 //            10 modules, 11 rings, 12 rays, 13 logo_plate, 14 policy
 //   doubles: 0 bevel, 1 shadow, 2 texture, 3 logo_radius
-constexpr jsize kStyleInts = 15;
-constexpr jsize kStyleDoubles = 4;
+[[maybe_unused]] constexpr jsize kStyleInts = 15;
+[[maybe_unused]] constexpr jsize kStyleDoubles = 4;
 
 // Decode info (mirrored in CKeyDecoder.kt):
 //   0 profile code (ckey_telemetry_profile numbering: 0 P0, 1 P0.1, 2 P1, 3 P2, 4 P3)
 //   1 version (Profile 0 only, else 0), 2 layout (Profile 0 only, else 0),
 //   3 border candidates found, 4 last core status
-constexpr jsize kDecodeInfo = 5;
-constexpr size_t kMaxCandidates = 16;
+[[maybe_unused]] constexpr jsize kDecodeInfo = 5;
+[[maybe_unused]] constexpr size_t kMaxCandidates = 16;
 // Profile 0 payloads reach 4,619 bytes (v31 at level M); like the iOS reader,
 // give the decoder a 64 KB buffer so no valid symbol is refused for space.
-constexpr size_t kScalableOutput = 65535;
+[[maybe_unused]] constexpr size_t kScalableOutput = 65535;
 
 jclass g_ckey_exception = nullptr;   // org.openckey.ckey.CKeyException
 jmethodID g_ckey_exception_ctor = nullptr;  // (ILjava/lang/String;)V
@@ -182,7 +184,7 @@ bool read_symbol(JNIEnv *env, jbyteArray blob, ckey_scalable_symbol &symbol) {
     }
     env->GetByteArrayRegion(blob, 0, static_cast<jsize>(sizeof symbol), reinterpret_cast<jbyte *>(&symbol));
     if (symbol.abi_version != CKEY_ABI_VERSION || symbol.version < 1 || symbol.version > CKEY_SCALABLE_VERSION_COUNT ||
-        symbol.ecc_level >= CKEY_ECC_LEVEL_COUNT || symbol.layout > CKEY_LAYOUT_PRINT_GROUPED || symbol.codeword_length > CKEY_SCALABLE_MAX_CODEWORD_BYTES) {
+        symbol.ecc_level >= CKEY_ECC_LEVEL_COUNT || symbol.layout > CKEY_LAYOUT_STANDARD_ARC_GROUPED || symbol.codeword_length > CKEY_SCALABLE_MAX_CODEWORD_BYTES) {
         throw_iae(env, "not a CKey symbol (header mismatch)");
         return false;
     }

@@ -21,7 +21,10 @@ jobs:
             cxx_flags: ""
           - name: debug-sanitizers
             build_type: Debug
-            cxx_flags: "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all"
+            # -fno-sanitize=enum: the tests pass out-of-range enum values (an unknown
+            # Safe Action alg, style preset, …) to check the C API refuses them. That is a
+            # valid call from C, the API's language; clang's C++ enum check calls it UB.
+            cxx_flags: "-fsanitize=address,undefined -fno-sanitize=enum -fno-omit-frame-pointer -fno-sanitize-recover=all"
     name: core (${{ matrix.name }})
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

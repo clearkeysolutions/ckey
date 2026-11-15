@@ -10,6 +10,16 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.124 — 2026-11-15
+
+* **Android: Pixel and Arc symbols work again.** The JNI bridge checked a symbol's layout against `CKEY_LAYOUT_PRINT_GROUPED` (3), so it refused every Pixel (4), Arc (5) and Arc grouped (6) symbol with "not a CKey symbol (header mismatch)". That made rendering and decoding them fail on Android, including the v8+ default since build 114. The bound is now `CKEY_LAYOUT_STANDARD_ARC_GROUPED`.
+  * The instrumented test `grayRoundTripEveryLayoutAndLevel` found it, on the first emulator run in a long time.
+  * The host harness now encodes, reads back and renders every layout 0–6 (81 checks). With the old bound it fails at layout 4.
+* **Android host test under clang:** the module-off variants (`CKEY_JNI_SCAN=0`, …) compile with `-Werror`. Clang reports namespace-scope constants they leave unused, which GCC does not, so those constants are `[[maybe_unused]]`. Checked with `CXX=clang++ jni-host-test/run.sh`: 81 harness checks, 26 Kotlin API checks and 28 JUnit tests.
+* **CI sanitizers:** `core (debug-sanitizers)` adds `-fno-sanitize=enum`. The tests pass out-of-range values (Safe Action alg 9, style preset 7) to check that the C API refuses them. That is a valid call from C, but clang's C++ enum check calls it UB. Those were the two failures, `ckey_safe_actions` and `ckey_scalable_profile0`.
+* **Issue forms** (Stable-Release pull request #3) are brought onto `scratch`.
+* The release moves to 0.1.0-build.124.
+
 ## 0.1.0-build.123 — 2026-11-14
 
 * **Fixes from the first runs on the ARM64 runners.** Core (release), the benchmarks, the Emscripten build and tests, and the .NET natives now pass.
