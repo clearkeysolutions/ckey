@@ -1,6 +1,7 @@
 name: SDK Android
 on:
   push:
+    branches: ['**']   # not tags: a release tag runs these inside the Release workflow
     paths:
       - "sdk/android/**"
       - "src/**"

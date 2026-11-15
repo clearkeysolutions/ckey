@@ -1,6 +1,7 @@
 name: SDK Swift
 on:
   push:
+    branches: ['**']   # not tags: a release tag runs these inside the Release workflow
     paths:
       - "Package.swift"
       - "sdk/swift/**"

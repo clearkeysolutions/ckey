@@ -1,6 +1,7 @@
 name: CKey CI
 on:
   push:
+    branches: ['**']   # not tags: a release tag runs these inside the Release workflow
   pull_request:
   workflow_dispatch:
 permissions:
