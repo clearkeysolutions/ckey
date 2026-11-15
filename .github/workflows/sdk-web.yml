@@ -70,11 +70,12 @@ jobs:
         run: npm pack
       # Staged on this Mac for the Release workflow's publish job, instead of an Actions
       # artifact (the account's artifact storage quota blocked releases; see build 126).
+      # Paths are relative to sdk/web (this workflow's working-directory).
       - name: Stage ckey-npm for the release
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-npm" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-npm"
-          cp sdk/web/openckey-*.tgz "$HOME/ckey-release/${{ github.run_id }}/ckey-npm/"
+          cp openckey-*.tgz "$HOME/ckey-release/${{ github.run_id }}/ckey-npm/"
           ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-npm"
       # Staged on this Mac for the Release workflow's publish job, instead of an Actions
       # artifact (the account's artifact storage quota blocked releases; see build 126).
@@ -82,5 +83,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-web-dist" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist"
-          cp -R sdk/web/dist/. "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist/"
+          cp -R dist/. "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist/"
           ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist"
