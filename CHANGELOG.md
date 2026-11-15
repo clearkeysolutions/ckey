@@ -10,6 +10,15 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.125 — 2026-11-15
+
+* **Release build of `v0.1.0-build.124` failed; nothing was published.** The release moves to 0.1.0-build.125. Tags are never moved or reused.
+  * **Artifact quota:** `build`, the two `sdk-dotnet / native` jobs, `sdk-web / Emscripten` and `sdk-android / gradle` built and tested, then could not upload ("Artifact storage quota has been hit"). The old artifacts were deleted on 2026-11-14, but GitHub recalculates usage only every 6–12 hours. No code change; the next tag goes out once the quota has cleared.
+  * **Android instrumented test:** `grayRoundTripEveryLayoutAndLevel` now passes for all seven real layouts on the arm64 emulator, which confirms the build.124 bridge fix. It still expected `AUTO` back from the decoder. A symbol encoded with `AUTO` reports the layout it resolved to (Standard for v1–7), so the test now compares against `symbol.layout` and checks that it is not `AUTO`.
+  * **Passed in that run:** verify (tag, version, full core suite), Swift, the Web JS and native bridge, and the Android JNI host.
+* **Tags no longer run the branch workflows too.** CI and the SDK workflows' `push` triggers are limited to branches (`branches: ['**']`). A release tag runs them once, inside the Release workflow; before this, every SDK was built and tested twice.
+* **Sanitizer job passes** on the ARM64 runner with build.124's `-fno-sanitize=enum`.
+
 ## 0.1.0-build.124 — 2026-11-15
 
 * **Android: Pixel and Arc symbols work again.** The JNI bridge checked a symbol's layout against `CKEY_LAYOUT_PRINT_GROUPED` (3), so it refused every Pixel (4), Arc (5) and Arc grouped (6) symbol with "not a CKey symbol (header mismatch)". That made rendering and decoding them fail on Android, including the v8+ default since build 114. The bound is now `CKEY_LAYOUT_STANDARD_ARC_GROUPED`.

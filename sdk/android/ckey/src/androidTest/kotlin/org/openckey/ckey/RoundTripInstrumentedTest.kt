@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -62,7 +63,11 @@ class RoundTripInstrumentedTest {
             val result = CKeyDecoder.decode(gray, side, side)
             assertNotNull("$layout $level", result)
             assertArrayEquals(payload, result!!.bytes)
-            assertEquals(layout, result.layout)
+            // AUTO resolves at encode time (Standard v1-7, Arc grouped v8+): the symbol and
+            // the decoder report the layout actually used.
+            if (layout == Layout.AUTO) assertNotEquals(Layout.AUTO, symbol.layout)
+            assertEquals(symbol.layout, result.layout)
+            if (layout != Layout.AUTO) assertEquals(layout, result.layout)
         }
     }
 
