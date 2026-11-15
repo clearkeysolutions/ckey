@@ -85,6 +85,13 @@ public final class HostHarness {
 
         // UTF-8 beyond the BMP, PRINT layout, level H, GRAY8 output, inverted polarity.
         byte[] utf8 = "Grüße aus Köln 👋 — address:1 Main St".getBytes(StandardCharsets.UTF_8);
+        // Every layout's symbol blob is accepted back (the bridge's header check knew
+        // only layouts 0-3 before build 124: Pixel and Arc symbols were refused).
+        for (int layout = 0; layout <= 6; layout++) {
+            byte[] s = CKeyNative.nativeEncode(utf8, 0, 1, layout);
+            int[] si = CKeyNative.nativeSymbolInfo(s);
+            check(si != null && CKeyNative.nativeRenderRaster(s, null, null, null, 400, 1, true, false, false, 4, 1.0, true, null, 0, 0) != null, "layout " + layout + " symbol accepted and rendered");
+        }
         byte[] printSymbol = CKeyNative.nativeEncode(utf8, 0, 3, 1);
         byte[] gray = CKeyNative.nativeRenderRaster(printSymbol, null, null, null, 400, 1, true, false, false, 4, 1.0, true, null, 0, 0);
         check(gray.length == 400 * 400, "GRAY8 buffer size");
