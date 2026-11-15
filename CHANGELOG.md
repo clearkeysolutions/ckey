@@ -10,6 +10,11 @@ Related logs:
 
 Builds dev.1 to dev.10 predate the repository history, which starts at dev.11 (`fe01f26`). Their entries are kept as written. Some later builds (for example dev.33 to dev.36 and dev.44) were recorded here but committed together with a neighbouring build.
 
+## 0.1.0-build.127 — 2026-11-15
+
+* **Release staging, web paths.** In the release build of `v0.1.0-build.126`, staging through the Mac worked for every other job: the macOS archive, both .NET natives, the .NET test and `pack`, and Android Maven. `sdk-web / Emscripten` built and passed its tests, then its staging step failed with `cp: sdk/web/openckey-*.tgz: No such file or directory`. The SDK Web workflow runs every step from `sdk/web` (`defaults.run.working-directory`), so the paths are now `openckey-*.tgz` and `dist`. No other workflow sets a working directory.
+* `v0.1.0-build.126` is recorded as tagged, not released. The release moves to 0.1.0-build.127.
+
 ## 0.1.0-build.126 — 2026-11-15
 
 * **Releases no longer use Actions artifacts.** The release build of `v0.1.0-build.125` passed every build and test, including the Android emulator test. Five jobs then failed at upload ("Artifact storage quota has been hit"), so the draft release was never created and nothing was published.
