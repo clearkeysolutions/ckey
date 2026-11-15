@@ -68,17 +68,19 @@ jobs:
         run: npm test
       - name: Package
         run: npm pack
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage ckey-npm for the release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          retention-days: 7
-          name: ckey-npm
-          path: sdk/web/openckey-*.tgz
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-npm" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-npm"
+          cp sdk/web/openckey-*.tgz "$HOME/ckey-release/${{ github.run_id }}/ckey-npm/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-npm"
+      # Staged on this Mac for the Release workflow's publish job, instead of an Actions
+      # artifact (the account's artifact storage quota blocked releases; see build 126).
+      - name: Stage ckey-web-dist for the release
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          retention-days: 7
-          name: ckey-web-dist
-          path: sdk/web/dist
-          if-no-files-found: error
+        run: |
+          rm -rf "${HOME:?}/ckey-release/${{ github.run_id }}/ckey-web-dist" && mkdir -p "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist"
+          cp -R sdk/web/dist/. "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist/"
+          ls -la "$HOME/ckey-release/${{ github.run_id }}/ckey-web-dist"

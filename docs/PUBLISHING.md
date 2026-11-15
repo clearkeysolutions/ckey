@@ -2,7 +2,9 @@
 
 A release is published in two steps:
 
-1. **Build (automatic).** Pushing a tag `v0.1.0-build.N` on `Stable-Release` runs the Release workflow. It checks the tag against `VERSION`, runs the full test suite, builds every package on Linux, macOS and Windows, signs build provenance with Sigstore, and attaches everything to a **draft** GitHub Release with `SHA256SUMS`. Nothing is published yet.
+1. **Build (automatic).** Pushing a tag `v0.1.0-build.N` on `Stable-Release` runs the Release workflow. It checks the tag against `VERSION`, runs the full test suite, builds every package, signs build provenance with Sigstore, and attaches everything to a **draft** GitHub Release with `SHA256SUMS`. Nothing is published yet.
+   * **Runners:** the workflow runs on the self-hosted Apple-silicon Mac, so it builds macOS only (macos-arm64 archive; osx-arm64 and osx-x64 .NET natives).
+   * **Files between jobs:** the jobs pass their outputs through a folder on that Mac, `~/ckey-release/<run id>/`, not as Actions artifacts. The account's artifact storage quota had blocked builds 124 and 125. All release jobs must therefore run on runners on the same Mac, as the same user. The folder is removed when the draft is created, and a failed run leaves it for **Re-run failed jobs**.
 2. **Publish (on the maintainer's machine).** `tools/release/publish.sh <tag>` downloads that draft, verifies every checksum and provenance attestation, and publishes the same bytes to each registry. It rebuilds nothing.
 
 ```sh
